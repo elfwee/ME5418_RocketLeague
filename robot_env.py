@@ -16,25 +16,27 @@ def update(space, dt, surface, speed=200, turn_speed=3.0):
     global tank_body
     global tank_control_body
 
+    tank_control_body.position = tank_body.position
+    tank_control_body.angle = tank_body.angle
     angle = tank_body.angle
 
     keys = pygame.key.get_pressed()
     
     # Rotation (left/right arrows turn the tank)
     if keys[pygame.K_LEFT]:
-        tank_body.angular_velocity = -turn_speed
+        tank_control_body.angular_velocity = -turn_speed
     elif keys[pygame.K_RIGHT]:
-        tank_body.angular_velocity = turn_speed
+        tank_control_body.angular_velocity = turn_speed
     else:
-        tank_body.angular_velocity = 0
+        tank_control_body.angular_velocity = 0
 
     # Forward/backward thrust along current facing direction
     if keys[pygame.K_UP]:
-        tank_body.velocity = (speed * math.cos(angle), speed * math.sin(angle))
+        tank_control_body.velocity = (speed * math.cos(angle), speed * math.sin(angle))
     elif keys[pygame.K_DOWN]:
-        tank_body.velocity = (-speed * math.cos(angle), -speed * math.sin(angle))
+        tank_control_body.velocity = (-speed * math.cos(angle), -speed * math.sin(angle))
     else:
-        tank_body.velocity = (0, 0)
+        tank_control_body.velocity = (0, 0)
 
     space.step(dt)
 
@@ -119,12 +121,32 @@ def add_c_claw(tank_body, space, claw_offset=(20, 0), arm_length=20, arm_thickne
     return [back, top_arm, bottom_arm]
 
 
+def add_boundary_box(space, width=640, height=480, thickness=10.0):
+    """
+    Creates a solid static box enclosure around the arena boundaries.
+    """
+    static_body = space.static_body
+    walls = [
+        pymunk.Segment(static_body, (0, 0), (width, 0), thickness),
+        pymunk.Segment(static_body, (0, height), (width, height), thickness),
+        pymunk.Segment(static_body, (0, 0), (0, height), thickness),
+        pymunk.Segment(static_body, (width, 0), (width, height), thickness),
+    ]
+    for wall in walls:
+        wall.elasticity = 1.0
+        wall.friction = 1.0
+    space.add(*walls)
+    return walls
+
+
 def init(rolling_ball=ROLLING_BALL):
     space = pymunk.Space()
     space.iterations = 10
     space.sleep_time_threshold = 0.5
-
     static_body = space.static_body
+
+    # Create solid boundary box around the environment
+    add_boundary_box(space, 640, 480, thickness=10.0)
 
     # Set physics values based on the flag
     if rolling_ball:
@@ -135,27 +157,6 @@ def init(rolling_ball=ROLLING_BALL):
         linear_friction = 1000   # High friction for heavy sliding crates
         angular_friction = 5000  # Stops spin immediately
         ball_elasticity = 0.0    # Inelastic collision
-
-    # Create segments around the edge of the screen.
-    shape = pymunk.Segment(static_body, (1, 1), (1, 480), 1.0)
-    space.add(shape)
-    shape.elasticity = 1
-    shape.friction = 1
-
-    shape = pymunk.Segment(static_body, (640, 1), (640, 480), 1.0)
-    space.add(shape)
-    shape.elasticity = 1
-    shape.friction = 1
-
-    shape = pymunk.Segment(static_body, (1, 1), (640, 1), 1.0)
-    space.add(shape)
-    shape.elasticity = 1
-    shape.friction = 1
-
-    shape = pymunk.Segment(static_body, (1, 480), (640, 480), 1.0)
-    space.add(shape)
-    shape.elasticity = 1
-    shape.friction = 1
 
     for _ in range(50):
         body = add_box(space, 5, 1, elasticity=ball_elasticity)
@@ -196,31 +197,31 @@ def init(rolling_ball=ROLLING_BALL):
     return space
 
 
-space = init(rolling_ball=ROLLING_BALL)
-pygame.init()
-screen = pygame.display.set_mode((640, 480))
-clock = pygame.time.Clock()
-draw_options = pymunk.pygame_util.DrawOptions(screen)
+if __name__ == "__main__":
+    space = init(rolling_ball=ROLLING_BALL)
+    pygame.init()
+    screen = pygame.display.set_mode((640, 480))
+    clock = pygame.time.Clock()
+    draw_options = pymunk.pygame_util.DrawOptions(screen)
 
+    font = pygame.font.Font(None, 24)
+    text = "Use arrow keys to move the tank"
+    text = font.render(text, True, pygame.Color("white"))
 
-font = pygame.font.Font(None, 24)
-text = "Use arrow keys to move the tank"
-text = font.render(text, True, pygame.Color("white"))
+    while True:
+        for event in pygame.event.get():
+            if (
+                event.type == pygame.QUIT
+                or event.type == pygame.KEYDOWN
+                and (event.key in [pygame.K_ESCAPE, pygame.K_q])
+            ):
+                exit()
 
-while True:
-    for event in pygame.event.get():
-        if (
-            event.type == pygame.QUIT
-            or event.type == pygame.KEYDOWN
-            and (event.key in [pygame.K_ESCAPE, pygame.K_q])
-        ):
-            exit()
+        screen.fill(pygame.Color("black"))
+        space.debug_draw(draw_options)
+        screen.blit(text, (15, 15))
+        fps = 60
+        update(space, 1 / fps, screen)
+        pygame.display.flip()
 
-    screen.fill(pygame.Color("black"))
-    space.debug_draw(draw_options)
-    screen.blit(text, (15, 15))
-    fps = 60
-    update(space, 1 / fps, screen)
-    pygame.display.flip()
-
-    clock.tick(fps)
+        clock.tick(fps)
