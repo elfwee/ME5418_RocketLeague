@@ -8,8 +8,10 @@ from pymunk.vec2d import Vec2d
 
 import math
 
-# Configuration flag
+# Configuration flags
 ROLLING_BALL = True  # Set to True for bouncy rolling balls, False for heavy sliding crates
+CLAW_WIDTH = 30     # Width (gap / opening) between the claw claws
+CLAW_DEPTH = 20     # Depth (length / reach) of the claw claws
 
 
 def update(space, dt, surface, speed=200, turn_speed=3.0):
@@ -80,10 +82,12 @@ def add_tank(space, size, mass, elasticity=0.6):
     space.add(shape)
     return body
 
-def add_c_claw(tank_body, space, claw_offset=(20, 0), arm_length=20, arm_thickness=5, gap=25):
+def add_c_claw(tank_body, space, claw_offset=(20, 0), arm_length=CLAW_DEPTH, arm_thickness=5, gap=CLAW_WIDTH):
     """
     Attaches a C-shaped claw (made of 3 convex segments) to tank_body,
     positioned in front of the tank, local to tank_body's frame.
+    :param arm_length: Depth / length of the claws.
+    :param gap: Width / opening between the claws.
     """
     ox, oy = claw_offset
     half_gap = gap / 2
@@ -139,7 +143,7 @@ def add_boundary_box(space, width=640, height=480, thickness=10.0):
     return walls
 
 
-def init(rolling_ball=ROLLING_BALL):
+def init(rolling_ball=ROLLING_BALL, claw_width=CLAW_WIDTH, claw_depth=CLAW_DEPTH):
     space = pymunk.Space()
     space.iterations = 10
     space.sleep_time_threshold = 0.5
@@ -178,7 +182,7 @@ def init(rolling_ball=ROLLING_BALL):
     space.add(tank_control_body)
     global tank_body
     tank_body = add_tank(space, 30, 10, elasticity=0.6)
-    claw_shapes = add_c_claw(tank_body, space)
+    claw_shapes = add_c_claw(tank_body, space, arm_length=claw_depth, gap=claw_width)
     tank_body.position = 320, 240
     for s in tank_body.shapes:
         s.color = (0, 255, 100, 255)
@@ -198,7 +202,7 @@ def init(rolling_ball=ROLLING_BALL):
 
 
 if __name__ == "__main__":
-    space = init(rolling_ball=ROLLING_BALL)
+    space = init(rolling_ball=ROLLING_BALL, claw_width=CLAW_WIDTH, claw_depth=CLAW_DEPTH)
     pygame.init()
     screen = pygame.display.set_mode((640, 480))
     clock = pygame.time.Clock()
