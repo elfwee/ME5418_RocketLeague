@@ -8,6 +8,10 @@ from pymunk.vec2d import Vec2d
 
 import math
 
+# Configuration flag
+ROLLING_BALL = True  # Set to True for bouncy rolling balls, False for heavy sliding crates
+
+
 def update(space, dt, surface, speed=200, turn_speed=3.0):
     global tank_body
     global tank_control_body
@@ -35,7 +39,7 @@ def update(space, dt, surface, speed=200, turn_speed=3.0):
     space.step(dt)
 
 
-def add_box(space, size, mass):
+def add_box(space, size, mass, elasticity=0.8):
     radius = Vec2d(size, size).length
 
     body = pymunk.Body()
@@ -50,11 +54,12 @@ def add_box(space, size, mass):
     shape = pymunk.Circle(body, radius, offset=(0,0))
     shape.mass = mass
     shape.friction = 0.7
+    shape.elasticity = elasticity
     space.add(shape)
 
     return body
 
-def add_tank(space, size, mass):
+def add_tank(space, size, mass, elasticity=0.6):
     radius = Vec2d(size, size).length
 
     body = pymunk.Body()
@@ -68,6 +73,7 @@ def add_tank(space, size, mass):
     shape = pymunk.Poly.create_box(body, (size, size), 0.0)
     shape.mass = mass
     shape.friction = 0.7
+    shape.elasticity = elasticity
 
     space.add(shape)
     return body
@@ -112,13 +118,23 @@ def add_c_claw(tank_body, space, claw_offset=(20, 0), arm_length=20, arm_thickne
     space.add(back, top_arm, bottom_arm)
     return [back, top_arm, bottom_arm]
 
-def init():
 
+def init(rolling_ball=ROLLING_BALL):
     space = pymunk.Space()
     space.iterations = 10
     space.sleep_time_threshold = 0.5
 
     static_body = space.static_body
+
+    # Set physics values based on the flag
+    if rolling_ball:
+        linear_friction = 20     # Low linear ground friction allows ball to roll
+        angular_friction = 20    # Low angular friction allows ball to spin
+        ball_elasticity = 0.8    # Bouncy ball
+    else:
+        linear_friction = 1000   # High friction for heavy sliding crates
+        angular_friction = 5000  # Stops spin immediately
+        ball_elasticity = 0.0    # Inelastic collision
 
     # Create segments around the edge of the screen.
     shape = pymunk.Segment(static_body, (1, 1), (1, 480), 1.0)
@@ -142,17 +158,17 @@ def init():
     shape.friction = 1
 
     for _ in range(50):
-        body = add_box(space, 5, 1)
+        body = add_box(space, 5, 1, elasticity=ball_elasticity)
 
         pivot = pymunk.PivotJoint(static_body, body, (0, 0), (0, 0))
         space.add(pivot)
         pivot.max_bias = 0  # disable joint correction
-        pivot.max_force = 1000  # emulate linear friction
+        pivot.max_force = linear_friction  # emulate linear friction
 
         gear = pymunk.GearJoint(static_body, body, 0.0, 1.0)
         space.add(gear)
         gear.max_bias = 0  # disable joint correction
-        gear.max_force = 5000  # emulate angular friction
+        gear.max_force = angular_friction  # emulate angular friction
 
     # We joint the tank to the control body and control the tank indirectly by modifying the control body.
     global tank_control_body
@@ -160,7 +176,7 @@ def init():
     tank_control_body.position = 320, 240
     space.add(tank_control_body)
     global tank_body
-    tank_body = add_tank(space, 30, 10)
+    tank_body = add_tank(space, 30, 10, elasticity=0.6)
     claw_shapes = add_c_claw(tank_body, space)
     tank_body.position = 320, 240
     for s in tank_body.shapes:
@@ -180,7 +196,7 @@ def init():
     return space
 
 
-space = init()
+space = init(rolling_ball=ROLLING_BALL)
 pygame.init()
 screen = pygame.display.set_mode((640, 480))
 clock = pygame.time.Clock()
