@@ -59,6 +59,7 @@ SUSPENSION_DAMPER = 2.0 * SUSPENSION_DAMPING_RATIO * _SUSPENSION_OMEGA     # 1/s
 SUSPENSION_STATIC_SAG = GRAVITY_MAG / SUSPENSION_STIFFNESS                 # Sag under own weight
 SUSPENSION_REST_LEN = WHEEL_RADIUS + SUSPENSION_STATIC_SAG                 # Axle-to-ground at full droop
 SUSPENSION_RAY_LEN = SUSPENSION_REST_LEN + SUSPENSION_TRAVEL               # Ground probe length
+SUSPENSION_RAY_OFFSET = 0.20                                               # Inward probe offset above axle to prevent bottom-out misses
 SUSPENSION_MAX_ACCEL = SUSPENSION_MAX_G * GRAVITY_MAG
 # --- Traction ---
 TIRE_GRIP = 2.2            # Coulomb friction coefficient of the tyre contact patch
@@ -66,6 +67,8 @@ CAR_STICKY_ACCEL = 16.0    # Downforce along the surface normal while grounded (
 CAR_DRIVE_ACCEL = 24.0     # Ground drive acceleration request (m/s^2), grip-limited
 CAR_COAST_DECEL = 9.0      # Engine-braking deceleration when throttle is released (m/s^2)
 CAR_MAX_GROUND_SPEED = 14.5# Top ground speed (m/s)
+CAR_WHEELIE_SPEED_FACTOR = 0.10 # Speed multiplier when in wheelie/stoppie (10% of normal ground speed)
+CAR_WHEELIE_PITCH_THRESHOLD = 0.25 # Sine of pitch angle (~14.5 deg) required to trigger wheelie speed cap
 WHEEL_MIN_NORMAL_DOT = 0.15# Reject ray hits whose normal is not roughly under the car
 SURFACE_ALIGN_MIN_DOT = 0.20  # Only auto-align to surfaces no steeper than ~78 degrees
 

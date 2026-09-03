@@ -17,9 +17,10 @@ from src.config import (
     CHASSIS_FRICTION, CHASSIS_ELASTICITY,
     WHEEL_AXLE_Y, WHEEL_REAR_X, WHEEL_FRONT_X,
     SUSPENSION_STIFFNESS, SUSPENSION_DAMPER, SUSPENSION_REST_LEN,
-    SUSPENSION_RAY_LEN, SUSPENSION_MAX_ACCEL,
+    SUSPENSION_RAY_LEN, SUSPENSION_RAY_OFFSET, SUSPENSION_MAX_ACCEL,
     TIRE_GRIP, CAR_STICKY_ACCEL, CAR_DRIVE_ACCEL, CAR_COAST_DECEL,
-    CAR_MAX_GROUND_SPEED, WHEEL_MIN_NORMAL_DOT, SURFACE_ALIGN_MIN_DOT,
+    CAR_MAX_GROUND_SPEED, CAR_WHEELIE_SPEED_FACTOR, CAR_WHEELIE_PITCH_THRESHOLD,
+    WHEEL_MIN_NORMAL_DOT, SURFACE_ALIGN_MIN_DOT,
     CAR_STEER_RATE_GAIN,
     CAR_GROUND_ANGULAR_SPEED, CAR_GROUND_ANGULAR_ACCEL,
     CAR_AIR_ANGULAR_SPEED, CAR_AIR_ANGULAR_ACCEL, CAR_AIR_SPIN_DECAY_TAU,
@@ -224,9 +225,11 @@ class Car:
 
         for wheel, local in ((self.wheels[0], self.rear_wheel_local),
                              (self.wheels[1], self.front_wheel_local)):
-            start = self.body.local_to_world(local)
-            end = (start.x - up_x * SUSPENSION_RAY_LEN, start.y - up_y * SUSPENSION_RAY_LEN)
-            wheel.anchor = (start.x, start.y)
+            axle = self.body.local_to_world(local)
+            # Offset start position upward into chassis so bottomed-out suspension never misses floor
+            start = (axle.x + up_x * SUSPENSION_RAY_OFFSET, axle.y + up_y * SUSPENSION_RAY_OFFSET)
+            end = (axle.x - up_x * SUSPENSION_RAY_LEN, axle.y - up_y * SUSPENSION_RAY_LEN)
+            wheel.anchor = (axle.x, axle.y)
 
             info = self.space.segment_query_first(start, end, 0.0, self._query_filter)
 
@@ -239,11 +242,14 @@ class Car:
                 wheel.other_body = None
                 continue
 
+            total_dist = info.alpha * (SUSPENSION_RAY_LEN + SUSPENSION_RAY_OFFSET)
+            dist_from_axle = total_dist - SUSPENSION_RAY_OFFSET
+
             wheel.hit = True
             wheel.point = (info.point.x, info.point.y)
             wheel.normal = (info.normal.x, info.normal.y)
-            wheel.distance = info.alpha * SUSPENSION_RAY_LEN
-            wheel.compression = max(0.0, SUSPENSION_REST_LEN - wheel.distance)
+            wheel.distance = dist_from_axle
+            wheel.compression = max(0.0, SUSPENSION_REST_LEN - dist_from_axle)
             wheel.other_body = info.shape.body
             nx_sum += info.normal.x
             ny_sum += info.normal.y
@@ -367,24 +373,26 @@ class Car:
     # ------------------------------------------------------------------ #
 
     def _apply_traction(self, action: CarAction, dt: float):
-        """Rear-wheel drive / engine braking along the surface tangent, limited by tyre grip."""
+        """All-wheel drive / engine braking along the surface tangent, limited by tyre grip."""
         if not self._grounded:
             return
 
         rear, front = self.wheels
         loaded = [w for w in self.wheels if w.normal_force > 0.0]
-        if not loaded:
-            # Tyres are unloaded (mid-jump, cresting a bump). Nothing can be transmitted
+        chassis_grounded = len(loaded) == 0 and self._grounded
+
+        if not loaded and not chassis_grounded:
+            # Tyres and chassis are unloaded (airborne). Nothing can be transmitted
             # through the contact patch, so no downforce and no drive force.
             return
 
         nx, ny = self._ground_normal
 
         # Downforce keeps the tyres loaded so the car can hold slopes and corner fillets.
-        # It is only real while a contact patch exists to react against, otherwise it would
-        # act as a phantom rope dragging the car back down out of every jump.
-        stick = self.mass * CAR_STICKY_ACCEL * (len(loaded) / len(self.wheels))
-        self.body.apply_force_at_world_point((-stick * nx, -stick * ny), self.body.position)
+        # It is only real while a contact patch exists to react against.
+        if loaded:
+            stick = self.mass * CAR_STICKY_ACCEL * (len(loaded) / len(self.wheels))
+            self.body.apply_force_at_world_point((-stick * nx, -stick * ny), self.body.position)
 
         # Surface tangent oriented along the nose
         fwd_x, fwd_y = self.forward_vector
@@ -396,16 +404,28 @@ class Car:
         v_t = vel.x * t_x + vel.y * t_y
         throttle = abs(action.dir_x)
 
+        # All-Wheel Drive (AWD): both front and rear axles contribute to ground grip.
+        # If the car is resting on its chassis (bumper/nose dragging), use baseline contact load
+        # so the car can drive off its chassis instead of getting stuck.
+        total_normal_load = rear.normal_force + front.normal_force
+        if total_normal_load <= 0.0 and chassis_grounded:
+            total_normal_load = self.mass * GRAVITY_MAG * 0.7
+
+        # Wheelie / tilted stance: speed is capped to 10% of normal ground speed only when
+        # an axle is lifted AND the car is pitched significantly relative to the surface (or dragging chassis)
+        pitch_sin = abs(fwd_x * nx + fwd_y * ny)
+        is_wheelie = (not self.both_wheels_grounded) and (pitch_sin > CAR_WHEELIE_PITCH_THRESHOLD or chassis_grounded)
+        speed_factor = CAR_WHEELIE_SPEED_FACTOR if is_wheelie else 1.0
+        max_speed = CAR_MAX_GROUND_SPEED * speed_factor
+
         if throttle > THROTTLE_DEADZONE:
-            target_speed = CAR_MAX_GROUND_SPEED * throttle
+            target_speed = max_speed * throttle
             accel = _clamp((target_speed - v_t) / dt, -CAR_DRIVE_ACCEL, CAR_DRIVE_ACCEL)
-            # Rear-wheel drive: only the driven axle's normal load provides grip, which is
-            # what naturally kills traction during a wheelie or on a near-vertical surface.
-            grip = TIRE_GRIP * rear.normal_force
-            point = rear.point if rear.hit else self.body.position
+            grip = TIRE_GRIP * total_normal_load
+            point = self.body.position
         else:
             accel = _clamp(-v_t / dt, -CAR_COAST_DECEL, CAR_COAST_DECEL)
-            grip = TIRE_GRIP * (rear.normal_force + front.normal_force)
+            grip = TIRE_GRIP * total_normal_load
             point = self.body.position
 
         force = _clamp(self.mass * accel, -grip, grip)

@@ -291,7 +291,7 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertGreater(self.sim.car.velocity[0], 10.0, "Car should drive forward on wheels when boost held at 0%")
         self.assertFalse(self.sim.car.is_boosting, "Boosting effects should be inactive at 0% boost")
 
-        # 2. Tilted pitch stances (+135 deg wheelie, -135 deg stoppie) do NOT move when boost is at 0%
+        # 2. Tilted pitch stances (+135 deg wheelie, -135 deg stoppie) drive along ground via AWD without boosting into air
         for deg in [135, -135]:
             with self.subTest(angle=deg):
                 self.sim.reset()
@@ -301,7 +301,11 @@ class TestPhysicsHeadless(unittest.TestCase):
                 action_tilt = CarAction(dir_x=math.cos(rad), dir_y=math.sin(rad), boost=True)
                 for _ in range(40):
                     self.sim.step(action_tilt, dt=1.0 / 60.0)
-                self.assertLess(abs(self.sim.car.velocity[0]), 2.0, f"Car should not move forward at {deg} deg with 0% boost")
+                # Car drives along ground at 10% wheelie speed without getting stuck
+                self.assertLess(self.sim.car.velocity[0], -0.5, f"Car should drive along ground at {deg} deg with 0% boost")
+                self.assertGreater(self.sim.car.velocity[0], -2.5, f"Wheelie speed should be ~10% (~1 m/s) at {deg} deg")
+                # No phantom aerial rocket climb: vertical velocity stays near 0
+                self.assertLess(abs(self.sim.car.velocity[1]), 2.0, f"Car should not climb into air at {deg} deg with 0% boost")
                 self.assertFalse(self.sim.car.is_boosting)
 
     def test_diagonal_boost_climb_at_135_and_45_degrees(self):
