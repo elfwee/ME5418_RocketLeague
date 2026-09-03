@@ -30,7 +30,8 @@ from src.config import (
     TURTLE_UP_THRESHOLD, TURTLE_PROBE_LEN, TURTLE_TRIGGER_DELAY,
     TURTLE_HOP_SPEED, TURTLE_FLIP_DURATION,
     CAR_FLIP_ANGULAR_SPEED, CAR_FLIP_ANGULAR_ACCEL,
-    COLLISION_CAR_BODY,
+    COLLISION_CAR_BODY, COLLISION_ARENA,
+    GRAVITY_MAG,
 )
 from src.core.actions import CarAction
 
@@ -116,6 +117,7 @@ class Car:
         self.wheels: List[WheelContact] = [WheelContact(), WheelContact()]
         self._ground_normal: Tuple[float, float] = (0.0, 1.0)
         self._grounded: bool = False
+        self._wheels_grounded: bool = False
 
         # 2D direction input vector for purple arrow visualization
         self.last_input_vector: Tuple[float, float] = (0.0, 0.0)
@@ -232,10 +234,26 @@ class Car:
             ny_sum += info.normal.y
             hits += 1
 
-        self._grounded = hits > 0
+        self._wheels_grounded = hits > 0
+
+        # Direct chassis contact with arena surface (touching floor, walls, corners at any angle)
+        chassis_hits = [
+            c for c in self.space.shape_query(self.chassis_shape)
+            if c.shape.collision_type == COLLISION_ARENA
+        ]
+
+        self._grounded = self._wheels_grounded or (len(chassis_hits) > 0)
         if hits > 0:
             norm = math.hypot(nx_sum, ny_sum)
             self._ground_normal = (nx_sum / norm, ny_sum / norm) if norm > 1e-9 else (up_x, up_y)
+        elif len(chassis_hits) > 0:
+            cn_x = 0.0
+            cn_y = 0.0
+            for c in chassis_hits:
+                cn_x -= c.contact_point_set.normal.x
+                cn_y -= c.contact_point_set.normal.y
+            norm = math.hypot(cn_x, cn_y)
+            self._ground_normal = (cn_x / norm, cn_y / norm) if norm > 1e-9 else (0.0, 1.0)
         else:
             self._ground_normal = (0.0, 1.0)
 
@@ -288,11 +306,11 @@ class Car:
         if action.magnitude > INPUT_DEADZONE:
             # A meaningful vertical component means the player is aiming a heading
             # (wheelie, aerial launch), so the world-space input vector wins.
-            if not self._grounded or abs(action.dir_y) >= CAR_PITCH_INPUT_THRESHOLD:
+            if not self._wheels_grounded or abs(action.dir_y) >= CAR_PITCH_INPUT_THRESHOLD:
                 return math.atan2(action.dir_y, action.dir_x)
             return self._surface_align_angle()
 
-        return self._surface_align_angle() if self._grounded else None
+        return self._surface_align_angle() if self._wheels_grounded else None
 
     def _apply_attitude(self, action: CarAction, dt: float):
         """Steer the chassis toward the commanded heading, or damp spin when idle."""
@@ -321,9 +339,6 @@ class Car:
         """Rear-wheel drive / engine braking along the surface tangent, limited by tyre grip."""
         if not self._grounded:
             return
-
-        if self.boost_amount < CAR_MAX_BOOST:
-            self.boost_amount = min(CAR_MAX_BOOST, self.boost_amount + CAR_BOOST_REFILL * dt)
 
         rear, front = self.wheels
         loaded = [w for w in self.wheels if w.normal_force > 0.0]
@@ -390,12 +405,21 @@ class Car:
             wheel.compression = 0.0
 
     def _apply_boost(self, action: CarAction, dt: float):
-        """Rocket thrust along the heading, faded out near top speed."""
-        if not (action.boost and self.boost_amount > 0.0):
+        """Propulsion along the heading: full rocket thrust when boosted, or normal drive when depleted."""
+        if not action.boost:
             return
 
-        self.is_boosting = True
-        self.boost_amount = max(0.0, self.boost_amount - CAR_BOOST_DRAIN * dt)
+        if self.boost_amount > 0.0:
+            self.is_boosting = True
+            self.boost_amount = max(0.0, self.boost_amount - CAR_BOOST_DRAIN * dt)
+            accel = CAR_BOOST_ACCEL
+            top_speed = CAR_MAX_AIR_SPEED
+        else:
+            # Boost is depleted, but boost is still being pressed:
+            # Car continues moving along the heading at normal drive speed without boost effects
+            self.is_boosting = False
+            accel = CAR_DRIVE_ACCEL
+            top_speed = CAR_MAX_GROUND_SPEED
 
         fwd_x, fwd_y = self.forward_vector
         vel = self.body.velocity
@@ -403,16 +427,28 @@ class Car:
 
         # Fading the thrust instead of clamping the velocity keeps the resultant vector
         # continuous, so gravity and thrust always sum cleanly.
-        fade = _clamp((CAR_MAX_AIR_SPEED - fwd_speed) / CAR_BOOST_SPEED_FADE, 0.0, 1.0)
-        if fade <= 0.0:
-            return
+        fade = _clamp((top_speed - fwd_speed) / CAR_BOOST_SPEED_FADE, 0.0, 1.0)
+        thrust = self.mass * accel * fade
+        tx = thrust * fwd_x
+        ty = thrust * fwd_y
 
-        thrust = self.mass * CAR_BOOST_ACCEL * fade
-        self.body.apply_force_at_world_point((thrust * fwd_x, thrust * fwd_y), self.body.position)
+        # Aerial lift compensation: when boosting with an upward heading component, counter
+        # the heavy downward gravity so diagonal flight (45°, 135°) climbs smoothly
+        if fwd_y > 0.0 and self.boost_amount > 0.0:
+            comp = self.mass * GRAVITY_MAG * fwd_y * (1.0 if fade > 0.1 else fade / 0.1)
+            ty += comp
+
+        self.body.apply_force_at_world_point((tx, ty), self.body.position)
+
+    def _apply_boost_recovery(self, action: CarAction, dt: float):
+        """Recover boost when touching the ground, unless boost is currently being used."""
+        if self._grounded and not action.boost:
+            if self.boost_amount < CAR_MAX_BOOST:
+                self.boost_amount = min(CAR_MAX_BOOST, self.boost_amount + CAR_BOOST_REFILL * dt)
 
     def _is_turtled(self) -> bool:
         """True when resting inverted with a surface close beneath the centre of mass."""
-        if self._grounded or self.up_vector[1] > TURTLE_UP_THRESHOLD:
+        if self._wheels_grounded or self.up_vector[1] > TURTLE_UP_THRESHOLD:
             return False
 
         origin = self.body.position
@@ -421,6 +457,11 @@ class Car:
 
     def _update_recovery(self, action: CarAction, dt: float):
         """Detect a turtled car and recover with a physical hop-and-flip."""
+        # When boost is used while grounded, recovery should not happen
+        if action.boost and self.boost_amount > 0.0:
+            self.turtled_time = 0.0
+            return
+
         if self._recovery_time > 0.0:
             self._recovery_time = max(0.0, self._recovery_time - dt)
             return
@@ -472,6 +513,7 @@ class Car:
         self._apply_suspension()
         self._apply_traction(action, dt)
         self._apply_boost(action, dt)
+        self._apply_boost_recovery(action, dt)
 
     def reset(self, x: float, y: float, angle: float = 0.0, facing_x: Optional[int] = None):
         """Reset car state to starting position and orientation."""
@@ -492,6 +534,7 @@ class Car:
         self.turtled_time = 0.0
         self._recovery_time = 0.0
         self._grounded = False
+        self._wheels_grounded = False
         self._ground_normal = (0.0, 1.0)
         for wheel in self.wheels:
             wheel.hit = False

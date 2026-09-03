@@ -247,6 +247,82 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertGreater(fwd_ul[1], 0.55, "Forward Y should point toward +Y (Up)")
         self.assertGreater(self.sim.car.position[1], 2.4, "Car should take off into the air diagonally")
 
+    def test_grounded_regardless_of_angle(self):
+        """Verify that when touching the ground, the car is considered grounded regardless of angle."""
+        for name, deg in [('flat', 0), ('wheelie_85', 85), ('stoppie_m85', -85),
+                          ('vertical_90', 90), ('vertical_m90', -90), ('upside_down_180', 180)]:
+            with self.subTest(angle=name):
+                self.sim.reset()
+                self.sim.car._update_recovery = lambda action, dt: None
+                self.sim.car.reset(16.0, 2.5, angle=math.radians(deg), facing_x=1)
+                for _ in range(40):
+                    self.sim.step(CarAction(), dt=1.0 / 60.0)
+                self.assertTrue(self.sim.car.is_grounded, f"Car should be grounded at {name} ({deg} deg)")
+
+    def test_boost_recovery_and_boost_usage_on_ground(self):
+        """Verify boost recovers when grounded, but recovery stops when boost is used on ground."""
+        self.sim.reset()
+        for _ in range(25):
+            self.sim.step(CarAction(), dt=1.0 / 60.0)
+
+        # 1. Boost recovery occurs while grounded and not boosting
+        self.sim.car.boost_amount = 50.0
+        self.sim.step(CarAction(boost=False), dt=1.0 / 60.0)
+        self.assertGreater(self.sim.car.boost_amount, 50.0, "Boost should recover while grounded and idle")
+
+        # 2. When boost is used while grounded, recovery must NOT happen (boost must drain)
+        self.sim.car.boost_amount = 50.0
+        self.sim.step(CarAction(dir_x=1.0, boost=True), dt=1.0 / 60.0)
+        self.assertLess(self.sim.car.boost_amount, 50.0, "Boost must drain when used while grounded (no recovery)")
+
+    def test_movement_when_boost_depleted_and_still_pressed(self):
+        """Verify that when boost is at 0% and boost is still pressed, car moves at normal speed without boost effects."""
+        # 1. Ground movement with diagonal aim and boost held at 0% boost
+        self.sim.reset()
+        self.sim.car.reset(10.0, self.sim.spawn_y, angle=0.0)
+        self.sim.car.boost_amount = 0.0
+        action = CarAction(dir_x=1.0, dir_y=1.0, boost=True)
+        for _ in range(40):
+            self.sim.step(action, dt=1.0 / 60.0)
+
+        self.assertGreater(self.sim.car.velocity[0], 5.0, "Car should move forward on ground when boost held at 0%")
+        self.assertFalse(self.sim.car.is_boosting, "Boosting effects should be inactive at 0% boost")
+
+        # 2. Air movement when boost held at 0% boost
+        self.sim.reset()
+        self.sim.car.reset(10.0, 10.0, angle=0.0)
+        self.sim.car.boost_amount = 0.0
+        action_air = CarAction(dir_x=1.0, dir_y=0.0, boost=True)
+        for _ in range(40):
+            self.sim.step(action_air, dt=1.0 / 60.0)
+
+        self.assertGreater(self.sim.car.velocity[0], 5.0, "Car should move forward in air when boost held at 0%")
+        self.assertFalse(self.sim.car.is_boosting, "Boosting effects should be inactive at 0% boost")
+
+    def test_diagonal_boost_climb_at_135_and_45_degrees(self):
+        """Verify that boosting diagonally at +135 deg and +45 deg climbs high into the air."""
+        # 1. Test +135 degrees (Up-Left)
+        self.sim.reset()
+        self.sim.car.reset(20.0, 5.0, angle=math.radians(135.0), facing_x=-1)
+        action_135 = CarAction(dir_x=math.cos(math.radians(135.0)), dir_y=math.sin(math.radians(135.0)), boost=True)
+        for _ in range(40):
+            self.sim.step(action_135, dt=1.0 / 60.0)
+
+        self.assertGreater(self.sim.car.position[1], 8.0, "Car should climb high at 135 deg")
+        self.assertGreater(self.sim.car.velocity[1], 8.0, "Vertical velocity should be strongly positive at 135 deg")
+        self.assertLess(self.sim.car.velocity[0], -8.0, "Horizontal velocity should be strongly negative (Left)")
+
+        # 2. Test +45 degrees (Up-Right)
+        self.sim.reset()
+        self.sim.car.reset(10.0, 5.0, angle=math.radians(45.0), facing_x=1)
+        action_45 = CarAction(dir_x=math.cos(math.radians(45.0)), dir_y=math.sin(math.radians(45.0)), boost=True)
+        for _ in range(40):
+            self.sim.step(action_45, dt=1.0 / 60.0)
+
+        self.assertGreater(self.sim.car.position[1], 8.0, "Car should climb high at 45 deg")
+        self.assertGreater(self.sim.car.velocity[1], 8.0, "Vertical velocity should be strongly positive at 45 deg")
+        self.assertGreater(self.sim.car.velocity[0], 8.0, "Horizontal velocity should be strongly positive (Right)")
+
 
 if __name__ == '__main__':
     unittest.main()
