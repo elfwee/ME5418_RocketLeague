@@ -8,18 +8,33 @@ from pymunk.vec2d import Vec2d
 
 import math
 
-# Configuration flags
-ROLLING_BALL = True   # Set to True for bouncy rolling balls, False for heavy sliding crates
-CLAW_WIDTH = 25       # Width (gap / opening) between the claw arms
-CLAW_DEPTH = 20       # Depth (length / reach) of the claw arms
-NUM_BALLS = 50        # Number of balls in the environment
-NUM_HOLES = 4         # Number of corner holes (1-4, clockwise starting from top-right)
-HOLE_RADIUS = 35      # Radius of each corner hole
+# Configuration flags and default parameters
+ROLLING_BALL = True       # Set to True for bouncy rolling balls, False for heavy sliding crates
+CLAW_WIDTH = 25           # Width (gap / opening) between the claw arms
+CLAW_DEPTH = 20           # Depth (length / reach) of the claw arms
+NUM_BALLS = 4             # Number of balls in the environment
+NUM_HOLES = 4             # Number of corner holes (1-4, clockwise starting from top-right)
+HOLE_RADIUS = 35          # Radius of each corner hole
+BODY_RADIUS = 20          # Radius of the ball-like agent body
+KICK_RADIUS = 50          # Kick radius around the agent body
+KICK_INTENSITY = 500      # Fixed impulse intensity for kicking balls
+KICK_ALL = True           # If True, kicks all balls within radius; if False, kicks only the nearest ball
 
 # Global state
 score = 0
 active_holes = []
 active_balls = []
+current_body_radius = BODY_RADIUS
+current_kick_radius = KICK_RADIUS
+current_kick_intensity = KICK_INTENSITY
+current_kick_all = KICK_ALL
+agent_body = None
+tank_body = None
+agent_control_body = None
+tank_control_body = None
+kick_key_prev = False
+kick_cooldown_timer = 0.0
+kick_visual_timer = 0.0
 
 
 def get_hole_positions(num_holes=NUM_HOLES, width=640, height=480):
@@ -37,42 +52,153 @@ def get_hole_positions(num_holes=NUM_HOLES, width=640, height=480):
     return all_corners[:num]
 
 
-def update(space, dt, surface, speed=200, turn_speed=3.0, hole_radius=HOLE_RADIUS):
-    global tank_body
-    global tank_control_body
+def kick(
+    agent_body,
+    active_balls,
+    kick_radius=KICK_RADIUS,
+    kick_intensity=KICK_INTENSITY,
+    body_radius=BODY_RADIUS,
+    kick_all=KICK_ALL,
+    target_closest_only=None,
+):
+    """
+    Applies a kick impulse to ball(s) within kick_radius of the agent body.
+    The kick direction for each kicked ball is the vector pointing from the agent body to that ball.
+    Retains the agent body's orientation (orientation is not changed upon kicking).
+
+    :param agent_body: pymunk.Body of the agent.
+    :param active_balls: List of (body, pivot, gear) tuples or body objects.
+    :param kick_radius: Effective kick radius around the agent body.
+    :param kick_intensity: Magnitude of impulse applied to the kicked ball(s).
+    :param body_radius: Radius of the agent body.
+    :param kick_all: If True, kicks all balls within kick_radius. If False, kicks only the nearest ball.
+    :param target_closest_only: Optional legacy parameter; if set, overrides kick_all (True -> kick_all=False).
+    :return: List of bodies that were kicked.
+    """
+    if agent_body is None:
+        return []
+
+    # Handle legacy target_closest_only parameter if explicitly provided
+    if target_closest_only is not None:
+        kick_all = not target_closest_only
+
+    # Effective kick distance from the agent's center
+    effective_radius = kick_radius if kick_radius > body_radius else (body_radius + kick_radius)
+
+    balls_in_range = []
+    for item in active_balls:
+        ball_body = item[0] if isinstance(item, (tuple, list)) else item
+        diff = ball_body.position - agent_body.position
+        dist = diff.length
+        if dist <= effective_radius:
+            balls_in_range.append((ball_body, dist, diff))
+
+    if not balls_in_range:
+        return []
+
+    # Choose targets based on kick_all:
+    # If kick_all is True: kick all balls within the radius.
+    # If kick_all is False: kick only the nearest ball within the radius.
+    if kick_all:
+        targets = [b[0] for b in balls_in_range]
+    else:
+        balls_in_range.sort(key=lambda x: x[1])
+        targets = [balls_in_range[0][0]]
+
+    # Facing vector of the agent as fallback if ball is exactly centered on agent
+    facing = Vec2d(math.cos(agent_body.angle), math.sin(agent_body.angle))
+
+    # Apply impulse along direction from body to ball; retain previous orientation
+    kicked = []
+    for target in targets:
+        diff_t = target.position - agent_body.position
+        dist_t = diff_t.length
+        dir_t = diff_t.normalized() if dist_t > 1e-5 else facing
+        impulse = dir_t * kick_intensity
+        target.apply_impulse_at_world_point(impulse, target.position)
+        kicked.append(target)
+
+    return kicked
+
+
+
+def update(
+    space,
+    dt,
+    surface=None,
+    speed=200,
+    turn_speed=3.0,
+    hole_radius=HOLE_RADIUS,
+    body_radius=None,
+    kick_radius=None,
+    kick_intensity=None,
+    kick_all=None,
+):
+    global agent_body, tank_body
+    global agent_control_body, tank_control_body
     global score
     global active_balls
     global active_holes
+    global current_body_radius, current_kick_radius, current_kick_intensity, current_kick_all
+    global kick_key_prev, kick_cooldown_timer, kick_visual_timer
 
-    tank_control_body.position = tank_body.position
-    angle = tank_body.angle
+    b_rad = body_radius if body_radius is not None else current_body_radius
+    k_rad = kick_radius if kick_radius is not None else current_kick_radius
+    k_int = kick_intensity if kick_intensity is not None else current_kick_intensity
+    k_all = kick_all if kick_all is not None else current_kick_all
 
-    try:
-        keys = pygame.key.get_pressed()
-    except (pygame.error, Exception):
-        keys = {}
+    # Sync control body with agent body
+    if agent_control_body is not None and agent_body is not None:
+        agent_control_body.position = agent_body.position
+        angle = agent_body.angle
 
-    def is_pressed(k):
         try:
-            return bool(keys[k])
-        except (KeyError, IndexError, TypeError):
-            return False
+            keys = pygame.key.get_pressed()
+        except (pygame.error, Exception):
+            keys = {}
 
-    # Rotation: direct angular velocity allows smooth rotation even when pressing against walls
-    if is_pressed(pygame.K_LEFT):
-        tank_body.angular_velocity = -turn_speed
-    elif is_pressed(pygame.K_RIGHT):
-        tank_body.angular_velocity = turn_speed
-    else:
-        tank_body.angular_velocity = 0
+        def is_pressed(k):
+            try:
+                return bool(keys[k])
+            except (KeyError, IndexError, TypeError):
+                return False
 
-    # Forward/backward thrust along current facing direction
-    if is_pressed(pygame.K_UP):
-        tank_control_body.velocity = (speed * math.cos(angle), speed * math.sin(angle))
-    elif is_pressed(pygame.K_DOWN):
-        tank_control_body.velocity = (-speed * math.cos(angle), -speed * math.sin(angle))
-    else:
-        tank_control_body.velocity = (0, 0)
+        # Rotation: direct angular velocity allows smooth rotation even when pressing against walls
+        if is_pressed(pygame.K_LEFT) or is_pressed(pygame.K_a):
+            agent_body.angular_velocity = -turn_speed
+        elif is_pressed(pygame.K_RIGHT) or is_pressed(pygame.K_d):
+            agent_body.angular_velocity = turn_speed
+        else:
+            agent_body.angular_velocity = 0
+
+        # Forward/backward thrust along current facing direction
+        if is_pressed(pygame.K_UP) or is_pressed(pygame.K_w):
+            agent_control_body.velocity = (speed * math.cos(angle), speed * math.sin(angle))
+        elif is_pressed(pygame.K_DOWN) or is_pressed(pygame.K_s):
+            agent_control_body.velocity = (-speed * math.cos(angle), -speed * math.sin(angle))
+        else:
+            agent_control_body.velocity = (0, 0)
+
+        # Kick mechanic
+        kick_cooldown_timer = max(0.0, kick_cooldown_timer - dt)
+        kick_visual_timer = max(0.0, kick_visual_timer - dt)
+        kick_pressed = is_pressed(pygame.K_SPACE) or is_pressed(pygame.K_k)
+
+        if kick_pressed:
+            if not kick_key_prev or kick_cooldown_timer <= 0:
+                kick(
+                    agent_body,
+                    active_balls,
+                    kick_radius=k_rad,
+                    kick_intensity=k_int,
+                    body_radius=b_rad,
+                    kick_all=k_all,
+                )
+                kick_cooldown_timer = 0.25
+                kick_visual_timer = 0.2
+            kick_key_prev = True
+        else:
+            kick_key_prev = False
 
     # Check if any ball dropped into an active corner hole
     balls_to_remove = []
@@ -94,13 +220,14 @@ def update(space, dt, surface, speed=200, turn_speed=3.0, hole_radius=HOLE_RADIU
     space.step(dt)
 
 
-def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADIUS):
+
+def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADIUS, agent_radius=BODY_RADIUS):
     radius = Vec2d(size, size).length
 
     body = pymunk.Body()
     space.add(body)
 
-    # Keep ball inside boundaries and away from holes & tank spawn
+    # Keep ball inside boundaries and away from holes & agent spawn
     min_x = radius + 15
     max_x = 640 - radius - 15
     min_y = radius + 15
@@ -117,8 +244,9 @@ def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADI
                 if (pos - hole).length < (hole_radius + radius + 20):
                     too_close = True
                     break
-        # Avoid spawning directly on top of the tank (320, 240)
-        if (pos - Vec2d(320, 240)).length < 50:
+        # Avoid spawning directly on top of the agent (320, 240)
+        min_agent_dist = max(50, agent_radius + radius + 20)
+        if (pos - Vec2d(320, 240)).length < min_agent_dist:
             too_close = True
 
         if not too_close:
@@ -133,24 +261,45 @@ def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADI
 
     return body
 
-def add_tank(space, size, mass, elasticity=0.6):
-    radius = Vec2d(size, size).length
+
+def add_agent(space, radius=BODY_RADIUS, mass=10, elasticity=0.6):
+    """
+    Creates and adds a ball-like agent body to the physics space.
+    :param space: The pymunk.Space.
+    :param radius: Radius of the ball-like agent body.
+    :param mass: Mass of the agent body.
+    :param elasticity: Elasticity coefficient of the agent body.
+    :return: The pymunk.Body of the agent.
+    """
+    radius = Vec2d(radius, radius).length if isinstance(radius, (tuple, list)) else radius
 
     body = pymunk.Body()
     space.add(body)
 
+    min_x = radius + 15
+    max_x = 640 - radius - 15
+    min_y = radius + 15
+    max_y = 480 - radius - 15
+
     body.position = Vec2d(
-        random.random() * (640 - 2 * radius) + radius,
-        random.random() * (480 - 2 * radius) + radius,
+        random.uniform(min_x, max_x),
+        random.uniform(min_y, max_y),
     )
 
-    shape = pymunk.Poly.create_box(body, (size, size), 0.0)
+    shape = pymunk.Circle(body, radius, offset=(0, 0))
     shape.mass = mass
     shape.friction = 0.5
     shape.elasticity = elasticity
+    shape.color = (50, 150, 255, 255)
 
     space.add(shape)
     return body
+
+
+def add_tank(space, size=BODY_RADIUS, mass=10, elasticity=0.6):
+    """Backward-compatible alias for add_agent."""
+    return add_agent(space, radius=size, mass=mass, elasticity=elasticity)
+
 
 def add_c_claw(tank_body, space, claw_offset=(20, 0), arm_length=CLAW_DEPTH, arm_thickness=5, gap=CLAW_WIDTH):
     """
@@ -220,14 +369,31 @@ def init(
     num_balls=NUM_BALLS,
     num_holes=NUM_HOLES,
     hole_radius=HOLE_RADIUS,
+    body_radius=BODY_RADIUS,
+    kick_radius=KICK_RADIUS,
+    kick_intensity=KICK_INTENSITY,
+    kick_all=KICK_ALL,
+    has_claw=False,
 ):
     global score
     global active_holes
     global active_balls
+    global agent_body, tank_body
+    global agent_control_body, tank_control_body
+    global current_body_radius, current_kick_radius, current_kick_intensity, current_kick_all
+    global kick_key_prev, kick_cooldown_timer, kick_visual_timer
 
     score = 0
     active_holes = get_hole_positions(num_holes, 640, 480)
     active_balls = []
+    kick_key_prev = False
+    kick_cooldown_timer = 0.0
+    kick_visual_timer = 0.0
+
+    current_body_radius = body_radius
+    current_kick_radius = kick_radius
+    current_kick_intensity = kick_intensity
+    current_kick_all = kick_all
 
     space = pymunk.Space()
     space.iterations = 10
@@ -255,6 +421,7 @@ def init(
             elasticity=ball_elasticity,
             holes=active_holes,
             hole_radius=hole_radius,
+            agent_radius=body_radius,
         )
 
         pivot = pymunk.PivotJoint(static_body, body, (0, 0), (0, 0))
@@ -269,19 +436,23 @@ def init(
 
         active_balls.append((body, pivot, gear))
 
-    # We joint the tank to the control body for linear traction control
-    global tank_control_body
-    tank_control_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-    tank_control_body.position = 320, 240
-    space.add(tank_control_body)
-    global tank_body
-    tank_body = add_tank(space, 30, 10, elasticity=0.6)
-    claw_shapes = add_c_claw(tank_body, space, arm_length=claw_depth, gap=claw_width)
-    tank_body.position = 320, 240
-    for s in tank_body.shapes:
-        s.color = (0, 255, 100, 255)
+    # We joint the agent to the control body for linear traction control
+    agent_control_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+    agent_control_body.position = 320, 240
+    space.add(agent_control_body)
+    tank_control_body = agent_control_body
 
-    pivot = pymunk.PivotJoint(tank_control_body, tank_body, (0, 0), (0, 0))
+    agent_body = add_agent(space, radius=body_radius, mass=10, elasticity=0.6)
+    agent_body.position = 320, 240
+    tank_body = agent_body
+
+    for s in agent_body.shapes:
+        s.color = (50, 180, 255, 255)
+
+    if has_claw:
+        add_c_claw(agent_body, space, arm_length=claw_depth, gap=claw_width)
+
+    pivot = pymunk.PivotJoint(agent_control_body, agent_body, (0, 0), (0, 0))
     space.add(pivot)
     pivot.max_bias = 0  # disable joint correction
     pivot.max_force = 10000  # emulate linear friction
@@ -292,11 +463,13 @@ def init(
 if __name__ == "__main__":
     space = init(
         rolling_ball=ROLLING_BALL,
-        claw_width=CLAW_WIDTH,
-        claw_depth=CLAW_DEPTH,
         num_balls=NUM_BALLS,
         num_holes=NUM_HOLES,
         hole_radius=HOLE_RADIUS,
+        body_radius=BODY_RADIUS,
+        kick_radius=KICK_RADIUS,
+        kick_intensity=KICK_INTENSITY,
+        kick_all=KICK_ALL,
     )
     pygame.init()
     screen = pygame.display.set_mode((640, 480))
@@ -304,7 +477,9 @@ if __name__ == "__main__":
     draw_options = pymunk.pygame_util.DrawOptions(screen)
 
     font = pygame.font.Font(None, 24)
-    instructions_text = font.render("Use arrow keys to move the tank", True, pygame.Color("white"))
+    instructions_text = font.render(
+        "Arrow keys/WASD: Move/Turn | Space: Kick | T: Toggle Mode", True, pygame.Color("white")
+    )
 
     while True:
         for event in pygame.event.get():
@@ -314,6 +489,8 @@ if __name__ == "__main__":
                 and (event.key in [pygame.K_ESCAPE, pygame.K_q])
             ):
                 exit()
+            elif event.type == pygame.KEYDOWN and event.key in [pygame.K_t, pygame.K_m]:
+                current_kick_all = not current_kick_all
 
         screen.fill(pygame.Color("black"))
 
@@ -327,17 +504,67 @@ if __name__ == "__main__":
             # Bright neon green outer rim
             pygame.draw.circle(screen, (100, 255, 140), pos, HOLE_RADIUS, 3)
 
+        # Draw kick radius around agent body
+        if agent_body is not None:
+            eff_kick_radius = int(
+                current_kick_radius
+                if current_kick_radius > current_body_radius
+                else (current_body_radius + current_kick_radius)
+            )
+            agent_x, agent_y = int(agent_body.position.x), int(agent_body.position.y)
+            surface_sz = eff_kick_radius * 2 + 6
+            kick_surf = pygame.Surface((surface_sz, surface_sz), pygame.SRCALPHA)
+            c_pos = (eff_kick_radius + 3, eff_kick_radius + 3)
+
+            if kick_visual_timer > 0:
+                # Active kick flash animation
+                pygame.draw.circle(kick_surf, (100, 220, 255, 60), c_pos, eff_kick_radius)
+                pygame.draw.circle(kick_surf, (180, 240, 255, 220), c_pos, eff_kick_radius, 3)
+            else:
+                # Kick radius zone indicator
+                pygame.draw.circle(kick_surf, (0, 180, 255, 20), c_pos, eff_kick_radius)
+                pygame.draw.circle(kick_surf, (0, 200, 255, 90), c_pos, eff_kick_radius, 1)
+
+            screen.blit(kick_surf, (agent_x - c_pos[0], agent_y - c_pos[1]))
+
         space.debug_draw(draw_options)
 
+        # Draw facing direction pointer and agent outline
+        if agent_body is not None:
+            agent_x, agent_y = int(agent_body.position.x), int(agent_body.position.y)
+            angle = agent_body.angle
+            dir_x = agent_x + int(math.cos(angle) * current_body_radius)
+            dir_y = agent_y + int(math.sin(angle) * current_body_radius)
+            pygame.draw.line(screen, (255, 255, 255), (agent_x, agent_y), (dir_x, dir_y), 3)
+            pygame.draw.circle(screen, (255, 220, 0), (dir_x, dir_y), 4)
+
         # Instructions on top left
-        screen.blit(instructions_text, (15, 15))
+        screen.blit(instructions_text, (15, 12))
+        mode_str = "All Balls" if current_kick_all else "Nearest Ball"
+        sub_text = font.render(
+            f"Body R: {current_body_radius} | Kick R: {current_kick_radius} | Intensity: {current_kick_intensity} | Target: {mode_str}",
+            True,
+            (160, 200, 240),
+        )
+        screen.blit(sub_text, (15, 34))
 
         # Score on top right
         score_surface = font.render("Score: {}".format(score), True, pygame.Color("yellow"))
         screen.blit(score_surface, (640 - score_surface.get_width() - 15, 15))
 
         fps = 60
-        update(space, 1 / fps, screen, hole_radius=HOLE_RADIUS)
+        update(
+            space,
+            1 / fps,
+            screen,
+            hole_radius=HOLE_RADIUS,
+            body_radius=current_body_radius,
+            kick_radius=current_kick_radius,
+            kick_intensity=current_kick_intensity,
+            kick_all=current_kick_all,
+        )
         pygame.display.flip()
 
         clock.tick(fps)
+
+
