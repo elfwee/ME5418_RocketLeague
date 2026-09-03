@@ -165,6 +165,42 @@ class TestAttitudeController(unittest.TestCase):
                 self.assertLess(abs(errors[-1]), 0.5,
                                 f"Heading should settle on the commanded {target} deg vector")
 
+    def test_heading_sweep_left_hemisphere(self):
+        """Verify continuous sweep across +135 deg -> 180 deg -> -135 deg and back."""
+        sim = Simulation()
+        sim.car.reset(16.0, 12.5, angle=math.radians(135.0))
+        sim.ball.reset(4.0, 12.5)
+
+        # Forward sweep: +135 -> 180 -> -135
+        for target_deg in (135.0, 180.0, -135.0):
+            t = math.radians(target_deg)
+            action = CarAction(dir_x=math.cos(t), dir_y=math.sin(t))
+            sim.car.body.position = (16.0, 12.5)
+            sim.car.body.velocity = (0.0, 0.0)
+            for _ in range(140):
+                sim.car.update(action, 1.0 / 240.0)
+                sim.space.step(1.0 / 240.0)
+            fx, fy = sim.car.forward_vector
+            actual = (math.degrees(math.atan2(fy, fx)) + 180.0) % 360.0 - 180.0
+            err = abs((actual - target_deg + 180.0) % 360.0 - 180.0)
+            self.assertLess(err, 0.5, f"Sweep to {target_deg}° settled at {actual:.1f}°, err={err:.2f}°")
+            self.assertEqual(sim.car.facing_x, -1, f"Should display Left animation at {target_deg}°")
+
+        # Reverse sweep: -135 -> 180 -> +135
+        for target_deg in (-135.0, 180.0, 135.0):
+            t = math.radians(target_deg)
+            action = CarAction(dir_x=math.cos(t), dir_y=math.sin(t))
+            sim.car.body.position = (16.0, 12.5)
+            sim.car.body.velocity = (0.0, 0.0)
+            for _ in range(140):
+                sim.car.update(action, 1.0 / 240.0)
+                sim.space.step(1.0 / 240.0)
+            fx, fy = sim.car.forward_vector
+            actual = (math.degrees(math.atan2(fy, fx)) + 180.0) % 360.0 - 180.0
+            err = abs((actual - target_deg + 180.0) % 360.0 - 180.0)
+            self.assertLess(err, 0.5, f"Reverse sweep to {target_deg}° settled at {actual:.1f}°, err={err:.2f}°")
+            self.assertEqual(sim.car.facing_x, -1, f"Should display Left animation at {target_deg}°")
+
     def test_no_overshoot_or_ringing(self):
         _, errors = self._converge(60.0)
         # Approaching 60 deg from 0 means the error starts negative and must never

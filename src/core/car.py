@@ -85,7 +85,7 @@ class Car:
 
         # Flipped vertices for facing Left (reversing list maintains CCW winding)
         self.flipped_chassis_vertices: List[Tuple[float, float]] = [
-            (-vx, vy) for vx, vy in reversed(self.base_chassis_vertices)
+            (vx, -vy) for vx, vy in reversed(self.base_chassis_vertices)
         ]
 
         moment = pymunk.moment_for_poly(self.mass, self.base_chassis_vertices)
@@ -146,31 +146,35 @@ class Car:
     @property
     def rear_wheel_local(self) -> Tuple[float, float]:
         """Local coordinate of the rear wheel axle based on facing direction."""
-        return (WHEEL_REAR_X * self.facing_x, WHEEL_AXLE_Y)
+        return (WHEEL_REAR_X, WHEEL_AXLE_Y * self.facing_x)
 
     @property
     def front_wheel_local(self) -> Tuple[float, float]:
         """Local coordinate of the front wheel axle based on facing direction."""
-        return (WHEEL_FRONT_X * self.facing_x, WHEEL_AXLE_Y)
+        return (WHEEL_FRONT_X, WHEEL_AXLE_Y * self.facing_x)
 
     @property
     def forward_vector(self) -> Tuple[float, float]:
         """Unit vector pointing along the car's nose in world space."""
         theta = self.body.angle
-        if self.facing_x == 1:
-            return (math.cos(theta), math.sin(theta))
-        return (-math.cos(theta), -math.sin(theta))
+        return (math.cos(theta), math.sin(theta))
 
     @property
     def up_vector(self) -> Tuple[float, float]:
         """Unit vector pointing toward car's roof in world space."""
         theta = self.body.angle
-        return (-math.sin(theta), math.cos(theta))
+        return (-self.facing_x * math.sin(theta), self.facing_x * math.cos(theta))
 
     @property
     def nose_position(self) -> Tuple[float, float]:
         """World position of the tapered front nose tip."""
-        p = self.body.local_to_world((1.05 * self.facing_x, -0.15))
+        p = self.body.local_to_world((1.05, -0.15 * self.facing_x))
+        return (p.x, p.y)
+
+    @property
+    def tail_position(self) -> Tuple[float, float]:
+        """World position of the rear spoiler/tail."""
+        p = self.body.local_to_world((-1.00, 0.22 * self.facing_x))
         return (p.x, p.y)
 
     @property
@@ -178,13 +182,17 @@ class Car:
         """Current polygon vertices in local space based on facing direction."""
         return self.base_chassis_vertices if self.facing_x == 1 else self.flipped_chassis_vertices
 
-    def _set_facing(self, new_facing: int):
+    def _set_facing(self, new_facing: int, snap: bool = False):
         """Switch car facing direction between Right (+1) and Left (-1)."""
         if new_facing == self.facing_x:
             return
         self.facing_x = new_facing
         self.chassis_shape.unsafe_set_vertices(self.active_chassis_vertices)
         self.space.reindex_shapes_for_body(self.body)
+        if snap:
+            sign = math.copysign(math.pi, self.body.angle if self.body.angle != 0.0 else 1.0)
+            self.body.angle = _wrap_angle(sign - self.body.angle)
+            self.body.angular_velocity = -self.body.angular_velocity
 
     # ------------------------------------------------------------------ #
     # Ground sensing
@@ -273,7 +281,7 @@ class Car:
         nx, ny = self._ground_normal
         if ny < SURFACE_ALIGN_MIN_DOT:
             return None
-        return math.atan2(-nx, ny)
+        return math.atan2(-self.facing_x * nx, self.facing_x * ny)
 
     def _target_angle(self, action: CarAction) -> Optional[float]:
         """Resolve the commanded body angle from the 2D input vector and ground contour."""
@@ -281,9 +289,7 @@ class Car:
             # A meaningful vertical component means the player is aiming a heading
             # (wheelie, aerial launch), so the world-space input vector wins.
             if not self._grounded or abs(action.dir_y) >= CAR_PITCH_INPUT_THRESHOLD:
-                if self.facing_x == 1:
-                    return math.atan2(action.dir_y, action.dir_x)
-                return math.atan2(-action.dir_y, -action.dir_x)
+                return math.atan2(action.dir_y, action.dir_x)
             return self._surface_align_angle()
 
         return self._surface_align_angle() if self._grounded else None
@@ -291,7 +297,8 @@ class Car:
     def _apply_attitude(self, action: CarAction, dt: float):
         """Steer the chassis toward the commanded heading, or damp spin when idle."""
         if self._recovery_time > 0.0:
-            self._drive_angle_to(0.0, dt, CAR_FLIP_ANGULAR_SPEED, CAR_FLIP_ANGULAR_ACCEL)
+            upright_target = 0.0 if self.facing_x == 1 else math.pi
+            self._drive_angle_to(upright_target, dt, CAR_FLIP_ANGULAR_SPEED, CAR_FLIP_ANGULAR_ACCEL)
             return
 
         target = self._target_angle(action)
@@ -444,10 +451,19 @@ class Car:
         self.is_boosting = False
         self.last_input_vector = (action.dir_x, action.dir_y)
 
-        if action.dir_x > FACING_FLIP_THRESHOLD:
-            self._set_facing(1)
-        elif action.dir_x < -FACING_FLIP_THRESHOLD:
-            self._set_facing(-1)
+        # Update facing based on heading / input (unless turtled on the ground or recovering)
+        if not (self._is_turtled() or self._recovery_time > 0.0):
+            if self._grounded and abs(action.dir_x) > FACING_FLIP_THRESHOLD:
+                new_facing = 1 if action.dir_x > 0 else -1
+                if new_facing != self.facing_x:
+                    self._set_facing(new_facing, snap=True)
+            else:
+                # When airborne, animation flips according to blue heading vector side
+                fwd_x = math.cos(self.body.angle)
+                if fwd_x > 0.05 and self.facing_x != 1:
+                    self._set_facing(1, snap=False)
+                elif fwd_x < -0.05 and self.facing_x != -1:
+                    self._set_facing(-1, snap=False)
 
         self._sense_ground()
         self._update_recovery(action, dt)
@@ -457,9 +473,13 @@ class Car:
         self._apply_traction(action, dt)
         self._apply_boost(action, dt)
 
-    def reset(self, x: float, y: float, angle: float = 0.0, facing_x: int = 1):
+    def reset(self, x: float, y: float, angle: float = 0.0, facing_x: Optional[int] = None):
         """Reset car state to starting position and orientation."""
         self.body.position = (x, y)
+        if facing_x is None:
+            facing_x = -1 if math.cos(angle) < 0.0 else 1
+        elif facing_x == -1 and angle == 0.0:
+            angle = math.pi
         self.body.angle = angle
         self.body.velocity = (0.0, 0.0)
         self.body.angular_velocity = 0.0
@@ -477,7 +497,7 @@ class Car:
             wheel.hit = False
             wheel.compression = 0.0
             wheel.normal_force = 0.0
-        self._set_facing(facing_x)
+        self._set_facing(facing_x, snap=False)
         self.space.reindex_shapes_for_body(self.body)
 
     @property

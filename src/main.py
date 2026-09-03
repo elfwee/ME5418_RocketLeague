@@ -1,6 +1,10 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
 import sys
 import os
+
+# Ensure repository root is on sys.path when invoked directly
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import math
 import pygame
 from src.config import (

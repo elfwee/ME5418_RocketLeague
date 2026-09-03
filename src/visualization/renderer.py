@@ -139,10 +139,10 @@ class Renderer:
             pygame.draw.circle(self.screen, (241, 245, 249), sw, max(2, int(rim_r * 0.4)))
 
         # 2. Rear Spoiler / Wing (elevated on dual struts at rear of car)
-        strut1_base = body.local_to_world((-0.90 * facing, 0.20))
-        strut1_top = body.local_to_world((-0.90 * facing, 0.48))
-        strut2_base = body.local_to_world((-0.65 * facing, 0.20))
-        strut2_top = body.local_to_world((-0.65 * facing, 0.48))
+        strut1_base = body.local_to_world((-0.90, 0.20 * facing))
+        strut1_top = body.local_to_world((-0.90, 0.48 * facing))
+        strut2_base = body.local_to_world((-0.65, 0.20 * facing))
+        strut2_top = body.local_to_world((-0.65, 0.48 * facing))
 
         s_s1_b = self.world_to_screen(strut1_base.x, strut1_base.y)
         s_s1_t = self.world_to_screen(strut1_top.x, strut1_top.y)
@@ -153,8 +153,8 @@ class Renderer:
         pygame.draw.line(self.screen, (71, 85, 105), s_s2_b, s_s2_t, 3)
 
         # Wing blade
-        wing_p1 = body.local_to_world((-1.05 * facing, 0.50))
-        wing_p2 = body.local_to_world((-0.55 * facing, 0.48))
+        wing_p1 = body.local_to_world((-1.05, 0.50 * facing))
+        wing_p2 = body.local_to_world((-0.55, 0.48 * facing))
         s_w1 = self.world_to_screen(wing_p1.x, wing_p1.y)
         s_w2 = self.world_to_screen(wing_p2.x, wing_p2.y)
         pygame.draw.line(self.screen, COLOR_SPOILER, s_w1, s_w2, 5)
@@ -169,38 +169,38 @@ class Renderer:
         pygame.draw.polygon(self.screen, COLOR_CAR_ACCENT, screen_verts, width=2)
 
         # Lower body dark rocker panel
-        dark_p1 = body.local_to_world((-0.95 * facing, -0.30))
-        dark_p2 = body.local_to_world((0.90 * facing, -0.30))
-        dark_p3 = body.local_to_world((0.85 * facing, -0.15))
-        dark_p4 = body.local_to_world((-0.95 * facing, -0.15))
+        dark_p1 = body.local_to_world((-0.95, -0.30 * facing))
+        dark_p2 = body.local_to_world((0.90, -0.30 * facing))
+        dark_p3 = body.local_to_world((0.85, -0.15 * facing))
+        dark_p4 = body.local_to_world((-0.95, -0.15 * facing))
         s_dp = [self.world_to_screen(p.x, p.y) for p in [dark_p1, dark_p2, dark_p3, dark_p4]]
         pygame.draw.polygon(self.screen, COLOR_CAR_DARK, s_dp)
 
         # 4. Cockpit Cabin Window (Glass windshield with cyan tint)
-        c1 = body.local_to_world((-0.30 * facing, 0.36))
-        c2 = body.local_to_world((0.30 * facing, 0.34))
-        c3 = body.local_to_world((0.40 * facing, 0.12))
-        c4 = body.local_to_world((-0.25 * facing, 0.12))
+        c1 = body.local_to_world((-0.30, 0.36 * facing))
+        c2 = body.local_to_world((0.30, 0.34 * facing))
+        c3 = body.local_to_world((0.40, 0.12 * facing))
+        c4 = body.local_to_world((-0.25, 0.12 * facing))
         s_cabin = [self.world_to_screen(p.x, p.y) for p in [c1, c2, c3, c4]]
         pygame.draw.polygon(self.screen, (125, 211, 252), s_cabin)
         pygame.draw.polygon(self.screen, (224, 242, 254), s_cabin, width=2)
 
         # 5. Headlight & Forward Light Cone
-        headlight_pos = body.local_to_world((1.02 * facing, -0.14))
+        headlight_pos = body.local_to_world((1.02, -0.14 * facing))
         s_hl = self.world_to_screen(headlight_pos.x, headlight_pos.y)
         pygame.draw.circle(self.screen, COLOR_HEADLIGHT, s_hl, 4)
 
         # Taillight
-        tail_pos = body.local_to_world((-1.00 * facing, 0.05))
+        tail_pos = body.local_to_world((-1.00, 0.05 * facing))
         s_tl = self.world_to_screen(tail_pos.x, tail_pos.y)
         pygame.draw.circle(self.screen, COLOR_TAILLIGHT, s_tl, 3)
 
         # 6. Rocket Boost Exhaust Flame
         if car.is_boosting:
-            tail_w = body.local_to_world((-1.02 * facing, 0.0))
-            flame_tip_w = body.local_to_world(((-1.02 - 1.25) * facing, 0.0))
-            flame_top_w = body.local_to_world((-1.02 * facing, 0.22))
-            flame_bot_w = body.local_to_world((-1.02 * facing, -0.22))
+            tail_w = body.local_to_world((-1.02, 0.0))
+            flame_tip_w = body.local_to_world((-1.02 - 1.25, 0.0))
+            flame_top_w = body.local_to_world((-1.02, 0.22 * facing))
+            flame_bot_w = body.local_to_world((-1.02, -0.22 * facing))
 
             s_tail = self.world_to_screen(tail_w.x, tail_w.y)
             s_tip = self.world_to_screen(flame_tip_w.x, flame_tip_w.y)
@@ -209,7 +209,7 @@ class Renderer:
 
             pygame.draw.polygon(self.screen, COLOR_BOOST_FLAME, [s_top, s_tip, s_bot])
             # Inner white flame core
-            core_tip_w = body.local_to_world(((-1.02 - 0.65) * facing, 0.0))
+            core_tip_w = body.local_to_world((-1.02 - 0.65, 0.0))
             s_core_tip = self.world_to_screen(core_tip_w.x, core_tip_w.y)
             pygame.draw.polygon(self.screen, (255, 255, 255), [s_top, s_core_tip, s_bot])
 

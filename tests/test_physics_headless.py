@@ -116,7 +116,7 @@ class TestPhysicsHeadless(unittest.TestCase):
 
         nose_y = self.sim.car.nose_position[1]
         car_y = self.sim.car.position[1]
-        tail_y = self.sim.car.body.local_to_world((1.00, 0.0)).y
+        tail_y = self.sim.car.tail_position[1]
         fwd_y = self.sim.car.forward_vector[1]
 
         self.assertGreater(nose_y, car_y, "Nose must point UP above car center")
@@ -171,12 +171,12 @@ class TestPhysicsHeadless(unittest.TestCase):
 
         # Test 2: Facing Left turtled
         self.sim.reset()
-        self.sim.car.reset(16.0, 2.3, angle=math.pi, facing_x=-1)
+        self.sim.car.reset(16.0, 2.3, angle=0.0, facing_x=-1)
         for _ in range(20):
             self.sim.step(CarAction(), dt=1.0 / 60.0)
 
         self.assertEqual(self.sim.car.facing_x, -1, "Should maintain facing Left")
-        self.assertGreater(math.cos(self.sim.car.body.angle), 0.8, "Car should invert upright facing Left")
+        self.assertLess(math.cos(self.sim.car.body.angle), -0.8, "Car should invert upright facing Left")
 
     def test_resultant_vector_with_gravity_and_thrust(self):
         """Verify airborne resultant motion reflects vector summation of forward boost and downward gravity."""
