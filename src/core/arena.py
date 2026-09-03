@@ -4,7 +4,7 @@ from typing import List, Tuple
 import pymunk
 from src.config import (
     FIELD_WIDTH, FIELD_HEIGHT, CORNER_RADIUS,
-    GOAL_DEPTH, GOAL_BOTTOM_Y, GOAL_TOP_Y,
+    GOAL_DEPTH, GOAL_CORNER_RADIUS, GOAL_BOTTOM_Y, GOAL_TOP_Y,
     MARGIN_X, MARGIN_Y, ARENA_SEGMENT_RADIUS,
     COLLISION_ARENA, COLLISION_GOAL_SENSOR
 )
@@ -59,6 +59,7 @@ class Arena:
         yc = self.y_ceil
         R = CORNER_RADIUS
         gd = GOAL_DEPTH
+        rg = GOAL_CORNER_RADIUS
         g_bot = self.goal_y_bot
         g_top = self.goal_y_top
 
@@ -82,26 +83,34 @@ class Arena:
         # Lower wall beneath goal: (xl, yf + R) up to (xl, g_bot)
         # Balls rolling on the floor strike this vertical wall and bounce vertically in front of the goal
         self._add_segment((xl, yf + R), (xl, g_bot), elasticity=0.82, friction=0.4)
-        # Left Goal Pocket:
-        # Bottom crossbar/lip: (xl, g_bot) -> (xl - gd, g_bot)
-        self._add_segment((xl, g_bot), (xl - gd, g_bot), elasticity=0.6, friction=0.5)
-        # Back net: (xl - gd, g_bot) -> (xl - gd, g_top)
-        self._add_segment((xl - gd, g_bot), (xl - gd, g_top), elasticity=0.4, friction=0.5)
-        # Top crossbar: (xl - gd, g_top) -> (xl, g_top)
-        self._add_segment((xl - gd, g_top), (xl, g_top), elasticity=0.6, friction=0.5)
+        # Left Goal Pocket with Smooth Inside Edges:
+        # Bottom crossbar/floor of goal pocket: (xl, g_bot) -> (xl - gd + rg, g_bot)
+        self._add_segment((xl, g_bot), (xl - gd + rg, g_bot), elasticity=0.6, friction=0.5)
+        # Bottom-back smooth curved corner:
+        self._add_arc((xl - gd + rg, g_bot + rg), rg, math.pi * 1.5, math.pi, steps=6, elasticity=0.45, friction=0.5)
+        # Back net: (xl - gd, g_bot + rg) -> (xl - gd, g_top - rg)
+        self._add_segment((xl - gd, g_bot + rg), (xl - gd, g_top - rg), elasticity=0.4, friction=0.5)
+        # Top-back smooth curved corner:
+        self._add_arc((xl - gd + rg, g_top - rg), rg, math.pi, math.pi * 0.5, steps=6, elasticity=0.45, friction=0.5)
+        # Top crossbar/ceiling of goal pocket: (xl - gd + rg, g_top) -> (xl, g_top)
+        self._add_segment((xl - gd + rg, g_top), (xl, g_top), elasticity=0.6, friction=0.5)
         # Upper wall (backboard): (xl, g_top) -> (xl, yc - R)
         self._add_segment((xl, g_top), (xl, yc - R), elasticity=0.85, friction=0.4)
 
         # 5. Right Wall & Elevated Goal Structure
         # Lower wall beneath goal: (xr, yf + R) up to (xr, g_bot)
         self._add_segment((xr, yf + R), (xr, g_bot), elasticity=0.82, friction=0.4)
-        # Right Goal Pocket:
-        # Bottom crossbar/lip: (xr, g_bot) -> (xr + gd, g_bot)
-        self._add_segment((xr, g_bot), (xr + gd, g_bot), elasticity=0.6, friction=0.5)
-        # Back net: (xr + gd, g_bot) -> (xr + gd, g_top)
-        self._add_segment((xr + gd, g_bot), (xr + gd, g_top), elasticity=0.4, friction=0.5)
-        # Top crossbar: (xr + gd, g_top) -> (xr, g_top)
-        self._add_segment((xr + gd, g_top), (xr, g_top), elasticity=0.6, friction=0.5)
+        # Right Goal Pocket with Smooth Inside Edges:
+        # Bottom crossbar/floor of goal pocket: (xr, g_bot) -> (xr + gd - rg, g_bot)
+        self._add_segment((xr, g_bot), (xr + gd - rg, g_bot), elasticity=0.6, friction=0.5)
+        # Bottom-back smooth curved corner:
+        self._add_arc((xr + gd - rg, g_bot + rg), rg, -math.pi * 0.5, 0.0, steps=6, elasticity=0.45, friction=0.5)
+        # Back net: (xr + gd, g_bot + rg) -> (xr + gd, g_top - rg)
+        self._add_segment((xr + gd, g_bot + rg), (xr + gd, g_top - rg), elasticity=0.4, friction=0.5)
+        # Top-back smooth curved corner:
+        self._add_arc((xr + gd - rg, g_top - rg), rg, 0.0, math.pi * 0.5, steps=6, elasticity=0.45, friction=0.5)
+        # Top crossbar/ceiling of goal pocket: (xr + gd - rg, g_top) -> (xr, g_top)
+        self._add_segment((xr + gd - rg, g_top), (xr, g_top), elasticity=0.6, friction=0.5)
         # Upper wall (backboard): (xr, g_top) -> (xr, yc - R)
         self._add_segment((xr, g_top), (xr, yc - R), elasticity=0.85, friction=0.4)
 

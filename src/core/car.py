@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 import pymunk
 
 from src.config import (
-    CAR_WIDTH, CAR_HEIGHT, CAR_MASS,
+    CAR_SCALE, CAR_WIDTH, CAR_HEIGHT, CAR_MASS,
     CHASSIS_FRICTION, CHASSIS_ELASTICITY,
     WHEEL_AXLE_Y, WHEEL_REAR_X, WHEEL_FRONT_X,
     SUSPENSION_STIFFNESS, SUSPENSION_DAMPER, SUSPENSION_REST_LEN,
@@ -75,13 +75,14 @@ class Car:
         self.facing_x: int = 1
 
         # Base tapered convex polygon vertices (facing Right, counter-clockwise)
+        # Scaled by CAR_SCALE (25% smaller)
         self.base_chassis_vertices: List[Tuple[float, float]] = [
-            (-1.00, -0.32),   # Rear bottom
-            (0.95, -0.32),    # Front bottom
-            (1.05, -0.15),    # Low tapered nose tip (wedge)
-            (0.35, 0.36),     # Hood slope to cabin
-            (-0.35, 0.38),    # Cabin roof
-            (-1.00, 0.22)     # Rear spoiler deck
+            (-1.00 * CAR_SCALE, -0.32 * CAR_SCALE),   # Rear bottom
+            (0.95 * CAR_SCALE, -0.32 * CAR_SCALE),    # Front bottom
+            (1.05 * CAR_SCALE, -0.15 * CAR_SCALE),    # Low tapered nose tip (wedge)
+            (0.35 * CAR_SCALE, 0.36 * CAR_SCALE),     # Hood slope to cabin
+            (-0.35 * CAR_SCALE, 0.38 * CAR_SCALE),    # Cabin roof
+            (-1.00 * CAR_SCALE, 0.22 * CAR_SCALE)     # Rear spoiler deck
         ]
 
         # Flipped vertices for facing Left (reversing list maintains CCW winding)
@@ -99,7 +100,7 @@ class Car:
         self._filter_group = Car._next_filter_group
         self._query_filter = pymunk.ShapeFilter(group=self._filter_group)
 
-        self.chassis_shape = pymunk.Poly(self.body, self.base_chassis_vertices, radius=0.04)
+        self.chassis_shape = pymunk.Poly(self.body, self.base_chassis_vertices, radius=0.03)
         self.chassis_shape.elasticity = CHASSIS_ELASTICITY
         self.chassis_shape.friction = CHASSIS_FRICTION
         self.chassis_shape.collision_type = COLLISION_CAR_BODY
@@ -170,13 +171,13 @@ class Car:
     @property
     def nose_position(self) -> Tuple[float, float]:
         """World position of the tapered front nose tip."""
-        p = self.body.local_to_world((1.05, -0.15 * self.facing_x))
+        p = self.body.local_to_world((1.05 * CAR_SCALE, -0.15 * CAR_SCALE * self.facing_x))
         return (p.x, p.y)
 
     @property
     def tail_position(self) -> Tuple[float, float]:
         """World position of the rear spoiler/tail."""
-        p = self.body.local_to_world((-1.00, 0.22 * self.facing_x))
+        p = self.body.local_to_world((-1.00 * CAR_SCALE, 0.22 * CAR_SCALE * self.facing_x))
         return (p.x, p.y)
 
     @property

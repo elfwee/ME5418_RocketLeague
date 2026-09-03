@@ -4,7 +4,8 @@ from typing import Tuple, List
 import pygame
 from src.config import (
     TOTAL_WIDTH, TOTAL_HEIGHT, PPM,
-    SCREEN_WIDTH, SCREEN_HEIGHT, WHEEL_RADIUS,
+    SCREEN_WIDTH, SCREEN_HEIGHT, WHEEL_RADIUS, GOAL_CORNER_RADIUS,
+    CAR_SCALE,
     COLOR_BG, COLOR_ARENA_BG, COLOR_FLOOR, COLOR_WALL, COLOR_CEILING,
     COLOR_GOAL_ORANGE, COLOR_GOAL_BLUE,
     COLOR_CAR_BLUE, COLOR_CAR_DARK, COLOR_CAR_ACCENT,
@@ -67,7 +68,8 @@ class Renderer:
             thickness = max(3, int(seg.radius * 2 * PPM))
             pygame.draw.line(self.screen, COLOR_WALL, sp1, sp2, thickness)
 
-        # Highlight elevated recessed goal pockets with netting
+        # Highlight elevated recessed goal pockets with netting and smooth inside corners
+        r_px = int(GOAL_CORNER_RADIUS * PPM)
         for sensor in arena.goal_sensors:
             bb = sensor.bb
             sp_tl = self.world_to_screen(bb.left, bb.top)
@@ -76,15 +78,30 @@ class Renderer:
             is_left = getattr(sensor, "team", "") == "left"
             color = COLOR_GOAL_BLUE if is_left else COLOR_GOAL_ORANGE
 
-            # Soft translucent goal pocket fill
+            # Soft translucent goal pocket fill with smooth inside corners
             goal_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            goal_surf.fill((*color, 45))
-            self.screen.blit(goal_surf, (rect.x, rect.y))
-            pygame.draw.rect(self.screen, color, rect, width=2)
+            radii = {
+                "border_top_left_radius": r_px if is_left else 0,
+                "border_bottom_left_radius": r_px if is_left else 0,
+                "border_top_right_radius": 0 if is_left else r_px,
+                "border_bottom_right_radius": 0 if is_left else r_px,
+            }
+            pygame.draw.rect(goal_surf, (*color, 45), pygame.Rect(0, 0, rect.width, rect.height), **radii)
 
-            # Netting grid lines
-            for gy in range(rect.top, rect.bottom, 16):
-                pygame.draw.line(self.screen, (*color, 75), (rect.left, gy), (rect.right, gy), 1)
+            # Netting grid lines masked to the rounded goal pocket
+            net_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            for gy in range(0, rect.height, 16):
+                pygame.draw.line(net_surf, (*color, 75), (0, gy), (rect.width, gy), 1)
+            for gx in range(0, rect.width, 16):
+                pygame.draw.line(net_surf, (*color, 55), (gx, 0), (gx, rect.height), 1)
+
+            mask_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(mask_surf, (255, 255, 255, 255), pygame.Rect(0, 0, rect.width, rect.height), **radii)
+            net_surf.blit(mask_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            goal_surf.blit(net_surf, (0, 0))
+
+            self.screen.blit(goal_surf, (rect.x, rect.y))
+            pygame.draw.rect(self.screen, color, rect, width=2, **radii)
 
     def _draw_ball(self, sim: Simulation):
         """Draw ball, rotation seam indicator, and trailing trajectory path."""
@@ -139,25 +156,26 @@ class Renderer:
             pygame.draw.circle(self.screen, (241, 245, 249), sw, max(2, int(rim_r * 0.4)))
 
         # 2. Rear Spoiler / Wing (elevated on dual struts at rear of car)
-        strut1_base = body.local_to_world((-0.90, 0.20 * facing))
-        strut1_top = body.local_to_world((-0.90, 0.48 * facing))
-        strut2_base = body.local_to_world((-0.65, 0.20 * facing))
-        strut2_top = body.local_to_world((-0.65, 0.48 * facing))
+        cs = CAR_SCALE
+        strut1_base = body.local_to_world((-0.90 * cs, 0.20 * cs * facing))
+        strut1_top = body.local_to_world((-0.90 * cs, 0.48 * cs * facing))
+        strut2_base = body.local_to_world((-0.65 * cs, 0.20 * cs * facing))
+        strut2_top = body.local_to_world((-0.65 * cs, 0.48 * cs * facing))
 
         s_s1_b = self.world_to_screen(strut1_base.x, strut1_base.y)
         s_s1_t = self.world_to_screen(strut1_top.x, strut1_top.y)
         s_s2_b = self.world_to_screen(strut2_base.x, strut2_base.y)
         s_s2_t = self.world_to_screen(strut2_top.x, strut2_top.y)
 
-        pygame.draw.line(self.screen, (71, 85, 105), s_s1_b, s_s1_t, 3)
-        pygame.draw.line(self.screen, (71, 85, 105), s_s2_b, s_s2_t, 3)
+        pygame.draw.line(self.screen, (71, 85, 105), s_s1_b, s_s1_t, 2)
+        pygame.draw.line(self.screen, (71, 85, 105), s_s2_b, s_s2_t, 2)
 
         # Wing blade
-        wing_p1 = body.local_to_world((-1.05, 0.50 * facing))
-        wing_p2 = body.local_to_world((-0.55, 0.48 * facing))
+        wing_p1 = body.local_to_world((-1.05 * cs, 0.50 * cs * facing))
+        wing_p2 = body.local_to_world((-0.55 * cs, 0.48 * cs * facing))
         s_w1 = self.world_to_screen(wing_p1.x, wing_p1.y)
         s_w2 = self.world_to_screen(wing_p2.x, wing_p2.y)
-        pygame.draw.line(self.screen, COLOR_SPOILER, s_w1, s_w2, 5)
+        pygame.draw.line(self.screen, COLOR_SPOILER, s_w1, s_w2, 4)
 
         # 3. Main Tapered Chassis Polygon
         screen_verts = []
@@ -169,38 +187,38 @@ class Renderer:
         pygame.draw.polygon(self.screen, COLOR_CAR_ACCENT, screen_verts, width=2)
 
         # Lower body dark rocker panel
-        dark_p1 = body.local_to_world((-0.95, -0.30 * facing))
-        dark_p2 = body.local_to_world((0.90, -0.30 * facing))
-        dark_p3 = body.local_to_world((0.85, -0.15 * facing))
-        dark_p4 = body.local_to_world((-0.95, -0.15 * facing))
+        dark_p1 = body.local_to_world((-0.95 * cs, -0.30 * cs * facing))
+        dark_p2 = body.local_to_world((0.90 * cs, -0.30 * cs * facing))
+        dark_p3 = body.local_to_world((0.85 * cs, -0.15 * cs * facing))
+        dark_p4 = body.local_to_world((-0.95 * cs, -0.15 * cs * facing))
         s_dp = [self.world_to_screen(p.x, p.y) for p in [dark_p1, dark_p2, dark_p3, dark_p4]]
         pygame.draw.polygon(self.screen, COLOR_CAR_DARK, s_dp)
 
         # 4. Cockpit Cabin Window (Glass windshield with cyan tint)
-        c1 = body.local_to_world((-0.30, 0.36 * facing))
-        c2 = body.local_to_world((0.30, 0.34 * facing))
-        c3 = body.local_to_world((0.40, 0.12 * facing))
-        c4 = body.local_to_world((-0.25, 0.12 * facing))
+        c1 = body.local_to_world((-0.30 * cs, 0.36 * cs * facing))
+        c2 = body.local_to_world((0.30 * cs, 0.34 * cs * facing))
+        c3 = body.local_to_world((0.40 * cs, 0.12 * cs * facing))
+        c4 = body.local_to_world((-0.25 * cs, 0.12 * cs * facing))
         s_cabin = [self.world_to_screen(p.x, p.y) for p in [c1, c2, c3, c4]]
         pygame.draw.polygon(self.screen, (125, 211, 252), s_cabin)
         pygame.draw.polygon(self.screen, (224, 242, 254), s_cabin, width=2)
 
         # 5. Headlight & Forward Light Cone
-        headlight_pos = body.local_to_world((1.02, -0.14 * facing))
+        headlight_pos = body.local_to_world((1.02 * cs, -0.14 * cs * facing))
         s_hl = self.world_to_screen(headlight_pos.x, headlight_pos.y)
-        pygame.draw.circle(self.screen, COLOR_HEADLIGHT, s_hl, 4)
+        pygame.draw.circle(self.screen, COLOR_HEADLIGHT, s_hl, 3)
 
         # Taillight
-        tail_pos = body.local_to_world((-1.00, 0.05 * facing))
+        tail_pos = body.local_to_world((-1.00 * cs, 0.05 * cs * facing))
         s_tl = self.world_to_screen(tail_pos.x, tail_pos.y)
         pygame.draw.circle(self.screen, COLOR_TAILLIGHT, s_tl, 3)
 
         # 6. Rocket Boost Exhaust Flame
         if car.is_boosting:
-            tail_w = body.local_to_world((-1.02, 0.0))
-            flame_tip_w = body.local_to_world((-1.02 - 1.25, 0.0))
-            flame_top_w = body.local_to_world((-1.02, 0.22 * facing))
-            flame_bot_w = body.local_to_world((-1.02, -0.22 * facing))
+            tail_w = body.local_to_world((-1.02 * cs, 0.0))
+            flame_tip_w = body.local_to_world(((-1.02 - 1.25) * cs, 0.0))
+            flame_top_w = body.local_to_world((-1.02 * cs, 0.22 * cs * facing))
+            flame_bot_w = body.local_to_world((-1.02 * cs, -0.22 * cs * facing))
 
             s_tail = self.world_to_screen(tail_w.x, tail_w.y)
             s_tip = self.world_to_screen(flame_tip_w.x, flame_tip_w.y)
@@ -209,7 +227,7 @@ class Renderer:
 
             pygame.draw.polygon(self.screen, COLOR_BOOST_FLAME, [s_top, s_tip, s_bot])
             # Inner white flame core
-            core_tip_w = body.local_to_world((-1.02 - 0.65, 0.0))
+            core_tip_w = body.local_to_world(((-1.02 - 0.65) * cs, 0.0))
             s_core_tip = self.world_to_screen(core_tip_w.x, core_tip_w.y)
             pygame.draw.polygon(self.screen, (255, 255, 255), [s_top, s_core_tip, s_bot])
 

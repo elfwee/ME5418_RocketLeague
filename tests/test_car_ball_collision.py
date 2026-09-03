@@ -75,6 +75,35 @@ class TestCarBallCollision(unittest.TestCase):
             self.assertFalse(math.isnan(bvx) or math.isnan(bvy), "Ball velocity became NaN during pinch")
             self.assertFalse(math.isnan(cx) or math.isnan(cy), "Car position became NaN during pinch")
 
+    def test_goal_geometry_expansion_and_smooth_scoring(self):
+        """Verify 1.5x width, 1.2x height, smooth corners, and goal sensor detection."""
+        from src.config import GOAL_DEPTH, GOAL_BOTTOM_Y, GOAL_TOP_Y, SCREEN_WIDTH
+
+        # 1. Verify dimensions
+        self.assertAlmostEqual(GOAL_DEPTH, 3.75, places=2)
+        goal_height = GOAL_TOP_Y - GOAL_BOTTOM_Y
+        self.assertAlmostEqual(goal_height, 5.28, places=2)
+        self.assertEqual(SCREEN_WIDTH, 1400)
+
+        # 2. Test scoring into smooth left goal
+        g_center_y = (self.sim.arena.goal_y_bot + self.sim.arena.goal_y_top) / 2.0
+        self.sim.reset()
+        self.sim.ball.reset(self.sim.arena.x_left + 1.0, g_center_y, vx=-10.0, vy=0.0)
+        for _ in range(60):
+            self.sim.step(CarAction(), dt=1.0 / 60.0)
+            if self.sim.last_goal_team == 'left':
+                break
+        self.assertEqual(self.sim.last_goal_team, 'left', "Ball must trigger left goal sensor")
+
+        # 3. Test scoring into smooth right goal
+        self.sim.reset()
+        self.sim.ball.reset(self.sim.arena.x_right - 1.0, g_center_y, vx=10.0, vy=0.0)
+        for _ in range(60):
+            self.sim.step(CarAction(), dt=1.0 / 60.0)
+            if self.sim.last_goal_team == 'right':
+                break
+        self.assertEqual(self.sim.last_goal_team, 'right', "Ball must trigger right goal sensor")
+
 
 if __name__ == '__main__':
     unittest.main()
