@@ -283,7 +283,28 @@ class Renderer:
         pygame.draw.polygon(self.screen, color, [tip, p1, p2])
 
     def _draw_hud(self, sim: Simulation):
-        """Draw HUD: controls helper, vector legend, telemetry, and boost meter."""
+        """Draw HUD: controls helper, vector legend, scoreboard, telemetry, and boost meter."""
+        # --- Top-Center Match Scoreboard ---
+        cx = SCREEN_WIDTH // 2
+        score_box_w = 200
+        score_box_h = 36
+        score_box_x = cx - score_box_w // 2
+        score_box_y = 14
+        pygame.draw.rect(self.screen, (22, 27, 38), (score_box_x, score_box_y, score_box_w, score_box_h), border_radius=6)
+        pygame.draw.rect(self.screen, (55, 65, 81), (score_box_x, score_box_y, score_box_w, score_box_h), width=2, border_radius=6)
+
+        score_surf = self.large_font.render(f"{sim.score_blue}  -  {sim.score_orange}", True, COLOR_TEXT)
+        blue_lbl = self.font.render("BLUE", True, COLOR_GOAL_BLUE)
+        orange_lbl = self.font.render("ORANGE", True, COLOR_GOAL_ORANGE)
+
+        s_rect = score_surf.get_rect(center=(cx, score_box_y + score_box_h // 2))
+        b_rect = blue_lbl.get_rect(right=s_rect.left - 14, centery=s_rect.centery)
+        o_rect = orange_lbl.get_rect(left=s_rect.right + 14, centery=s_rect.centery)
+
+        self.screen.blit(blue_lbl, b_rect)
+        self.screen.blit(score_surf, s_rect)
+        self.screen.blit(orange_lbl, o_rect)
+
         # --- Top-Left Controls & Legend ---
         help_lines = [
             "Sideswipe 2D Physics Sandbox",

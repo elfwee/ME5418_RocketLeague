@@ -85,24 +85,94 @@ class TestCarBallCollision(unittest.TestCase):
         self.assertAlmostEqual(goal_height, 5.28, places=2)
         self.assertEqual(SCREEN_WIDTH, 1400)
 
-        # 2. Test scoring into smooth left goal
+        # 2. Test scoring into smooth left goal (Orange scores)
         g_center_y = (self.sim.arena.goal_y_bot + self.sim.arena.goal_y_top) / 2.0
         self.sim.reset()
         self.sim.ball.reset(self.sim.arena.x_left + 1.0, g_center_y, vx=-10.0, vy=0.0)
         for _ in range(60):
             self.sim.step(CarAction(), dt=1.0 / 60.0)
-            if self.sim.last_goal_team == 'left':
+            if self.sim.score_orange > 0:
                 break
-        self.assertEqual(self.sim.last_goal_team, 'left', "Ball must trigger left goal sensor")
+        self.assertEqual(self.sim.last_goal_team, 'orange', "Ball 100% in left goal awards score to Orange")
+        self.assertEqual(self.sim.score_orange, 1)
 
-        # 3. Test scoring into smooth right goal
+        # 3. Test scoring into smooth right goal (Blue scores)
         self.sim.reset()
         self.sim.ball.reset(self.sim.arena.x_right - 1.0, g_center_y, vx=10.0, vy=0.0)
         for _ in range(60):
             self.sim.step(CarAction(), dt=1.0 / 60.0)
-            if self.sim.last_goal_team == 'right':
+            if self.sim.score_blue > 0:
                 break
-        self.assertEqual(self.sim.last_goal_team, 'right', "Ball must trigger right goal sensor")
+        self.assertEqual(self.sim.last_goal_team, 'blue', "Ball 100% in right goal awards score to Blue")
+        self.assertEqual(self.sim.score_blue, 1)
+
+    def test_ball_spawns_on_ground_on_start_and_reset(self):
+        """Verify the ball spawns resting on the arena floor on start and on reset (not mid-air)."""
+        from src.core.simulation import Simulation
+
+        sim = Simulation()
+        # 1. On start: ball is on the floor
+        self.assertAlmostEqual(sim.ball.position[1], sim.ball_spawn_y, places=2)
+        self.assertAlmostEqual(sim.ball.position[0], sim.center_x, places=2)
+
+        for _ in range(30):
+            sim.step(CarAction(), dt=1.0 / 60.0)
+        self.assertAlmostEqual(sim.ball.position[1], sim.ball_spawn_y, places=2, msg="Ball should remain resting on floor")
+        self.assertAlmostEqual(sim.ball.velocity[1], 0.0, places=2)
+
+        # 2. On reset: ball returns to floor
+        sim.ball.reset(10.0, 10.0, vx=5.0, vy=-5.0)
+        sim.reset()
+        self.assertAlmostEqual(sim.ball.position[1], sim.ball_spawn_y, places=2)
+        self.assertAlmostEqual(sim.ball.position[0], sim.center_x, places=2)
+
+    def test_goal_requires_100_percent_entry_before_reset_and_score(self):
+        """Verify goal only counts when ball is 100% inside, then scores and resets kickoff."""
+        xl = self.sim.arena.x_left
+        r = self.sim.ball.radius
+        g_center_y = (self.sim.arena.goal_y_bot + self.sim.arena.goal_y_top) / 2.0
+
+        self.sim.reset(reset_scores=True)
+        self.assertEqual(self.sim.score_orange, 0)
+
+        # 1. Partial entry: front edge is inside the pocket, but rear edge is still outside on the field
+        self.sim.ball.reset(xl - 0.2, g_center_y, vx=0.0, vy=0.0)
+        self.sim.step(CarAction(), dt=1.0 / 60.0)
+        self.assertEqual(self.sim.score_orange, 0, "Partial goal line crossing must NOT score")
+        self.assertIsNone(self.sim.last_goal_team)
+
+        # 2. 100% inside: entire ball circle has fully crossed the goal line
+        self.sim.ball.reset(xl - r - 0.05, g_center_y, vx=0.0, vy=0.0)
+        self.sim.step(CarAction(), dt=1.0 / 60.0)
+        self.assertEqual(self.sim.score_orange, 1, "Ball 100% inside must count as a goal")
+        self.assertEqual(self.sim.last_goal_team, "orange")
+        # After goal, game must reset ball to ground at center
+        self.assertAlmostEqual(self.sim.ball.position[0], self.sim.center_x, places=2)
+        self.assertAlmostEqual(self.sim.ball.position[1], self.sim.ball_spawn_y, places=2)
+
+    def test_alternating_car_spawn_positions_on_car_side(self):
+        """Verify car spawns on its side and alternates between defensive (8.5m) and attack (13.5m) spots."""
+        from src.core.simulation import Simulation
+
+        sim = Simulation()
+        # Initial spawn is at defensive position (8.5m)
+        self.assertAlmostEqual(sim.car.position[0], 8.5, places=2)
+        self.assertEqual(sim.car.facing_x, 1)
+
+        # Reset 1: alternates to attack position (13.5m)
+        sim.reset()
+        self.assertAlmostEqual(sim.car.position[0], 13.5, places=2)
+        self.assertEqual(sim.car.facing_x, 1)
+
+        # Reset 2: alternates back to defensive position (8.5m)
+        sim.reset()
+        self.assertAlmostEqual(sim.car.position[0], 8.5, places=2)
+        self.assertEqual(sim.car.facing_x, 1)
+
+        # Reset 3: alternates back to attack position (13.5m)
+        sim.reset()
+        self.assertAlmostEqual(sim.car.position[0], 13.5, places=2)
+        self.assertEqual(sim.car.facing_x, 1)
 
 
 if __name__ == '__main__':

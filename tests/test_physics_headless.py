@@ -13,6 +13,7 @@ class TestPhysicsHeadless(unittest.TestCase):
 
     def test_ball_freefall_gravity(self):
         """Verify the ball accelerates downwards under heavy gravity (28 m/s^2)."""
+        self.sim.ball.reset(self.sim.center_x, 10.0, vx=0.0, vy=0.0)
         initial_y = self.sim.ball.position[1]
         action = CarAction()
 
@@ -220,7 +221,7 @@ class TestPhysicsHeadless(unittest.TestCase):
         """Verify that when boost is used with Up-Right or Up-Left, the Blue vector (heading) rotates to it."""
         # 1. Test Up-Right with Boost from ground
         self.sim.reset()
-        self.sim.ball.reset(2.0, 10.0)
+        self.sim.ball.reset(self.sim.center_x, 14.0)
         for _ in range(25):
             self.sim.step(CarAction(), dt=1.0 / 60.0)
 
@@ -235,7 +236,7 @@ class TestPhysicsHeadless(unittest.TestCase):
 
         # 2. Test Up-Left with Boost from ground
         self.sim.reset()
-        self.sim.ball.reset(30.0, 10.0)
+        self.sim.ball.reset(self.sim.center_x, 14.0)
         self.sim.car.reset(16.0, 2.1, angle=0.0, facing_x=-1)
         for _ in range(25):
             self.sim.step(CarAction(), dt=1.0 / 60.0)
@@ -307,7 +308,7 @@ class TestPhysicsHeadless(unittest.TestCase):
         """Verify that boosting diagonally at +135 deg and +45 deg climbs high into the air."""
         # 1. Test +135 degrees (Up-Left)
         self.sim.reset()
-        self.sim.ball.reset(2.0, 10.0)
+        self.sim.ball.reset(self.sim.center_x, 14.0)
         self.sim.car.reset(20.0, 5.0, angle=math.radians(135.0), facing_x=-1)
         action_135 = CarAction(dir_x=math.cos(math.radians(135.0)), dir_y=math.sin(math.radians(135.0)), boost=True)
         for _ in range(40):
@@ -319,7 +320,7 @@ class TestPhysicsHeadless(unittest.TestCase):
 
         # 2. Test +45 degrees (Up-Right)
         self.sim.reset()
-        self.sim.ball.reset(30.0, 10.0)
+        self.sim.ball.reset(self.sim.center_x, 14.0)
         self.sim.car.reset(10.0, 5.0, angle=math.radians(45.0), facing_x=1)
         action_45 = CarAction(dir_x=math.cos(math.radians(45.0)), dir_y=math.sin(math.radians(45.0)), boost=True)
         for _ in range(40):

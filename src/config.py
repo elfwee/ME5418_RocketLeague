@@ -74,6 +74,10 @@ SURFACE_ALIGN_MIN_DOT = 0.20  # Only auto-align to surfaces no steeper than ~78 
 SUSPENSION_LOADED_SAG = (GRAVITY_MAG + CAR_STICKY_ACCEL) / SUSPENSION_STIFFNESS
 CAR_RIDE_HEIGHT = SUSPENSION_REST_LEN - SUSPENSION_LOADED_SAG - WHEEL_AXLE_Y
 
+# --- Kickoff Spawn Positions (meters along X on Blue side) ---
+CAR_SPAWN_X_DEFENSIVE = 8.5   # Rear defensive kickoff position on Blue side
+CAR_SPAWN_X_ATTACK = 13.5     # Forward attacking kickoff position on Blue side
+
 # --- Attitude Control (rate + acceleration limited, so it cannot overshoot or ring) ---
 # omega_target = clamp(angle_error * RATE_GAIN, +-omega_max); alpha = clamp(d omega, +-alpha_max).
 # Overshoot-free as long as RATE_GAIN <= 2 * alpha_max / omega_max.
