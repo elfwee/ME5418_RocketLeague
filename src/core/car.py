@@ -405,21 +405,12 @@ class Car:
             wheel.compression = 0.0
 
     def _apply_boost(self, action: CarAction, dt: float):
-        """Propulsion along the heading: full rocket thrust when boosted, or normal drive when depleted."""
-        if not action.boost:
+        """Rocket thrust along the heading, faded out near top speed."""
+        if not (action.boost and self.boost_amount > 0.0):
             return
 
-        if self.boost_amount > 0.0:
-            self.is_boosting = True
-            self.boost_amount = max(0.0, self.boost_amount - CAR_BOOST_DRAIN * dt)
-            accel = CAR_BOOST_ACCEL
-            top_speed = CAR_MAX_AIR_SPEED
-        else:
-            # Boost is depleted, but boost is still being pressed:
-            # Car continues moving along the heading at normal drive speed without boost effects
-            self.is_boosting = False
-            accel = CAR_DRIVE_ACCEL
-            top_speed = CAR_MAX_GROUND_SPEED
+        self.is_boosting = True
+        self.boost_amount = max(0.0, self.boost_amount - CAR_BOOST_DRAIN * dt)
 
         fwd_x, fwd_y = self.forward_vector
         vel = self.body.velocity
@@ -427,14 +418,17 @@ class Car:
 
         # Fading the thrust instead of clamping the velocity keeps the resultant vector
         # continuous, so gravity and thrust always sum cleanly.
-        fade = _clamp((top_speed - fwd_speed) / CAR_BOOST_SPEED_FADE, 0.0, 1.0)
-        thrust = self.mass * accel * fade
+        fade = _clamp((CAR_MAX_AIR_SPEED - fwd_speed) / CAR_BOOST_SPEED_FADE, 0.0, 1.0)
+        if fade <= 0.0:
+            return
+
+        thrust = self.mass * CAR_BOOST_ACCEL * fade
         tx = thrust * fwd_x
         ty = thrust * fwd_y
 
         # Aerial lift compensation: when boosting with an upward heading component, counter
         # the heavy downward gravity so diagonal flight (45°, 135°) climbs smoothly
-        if fwd_y > 0.0 and self.boost_amount > 0.0:
+        if fwd_y > 0.0:
             comp = self.mass * GRAVITY_MAG * fwd_y * (1.0 if fade > 0.1 else fade / 0.1)
             ty += comp
 

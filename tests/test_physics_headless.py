@@ -276,28 +276,30 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertLess(self.sim.car.boost_amount, 50.0, "Boost must drain when used while grounded (no recovery)")
 
     def test_movement_when_boost_depleted_and_still_pressed(self):
-        """Verify that when boost is at 0% and boost is still pressed, car moves at normal speed without boost effects."""
-        # 1. Ground movement with diagonal aim and boost held at 0% boost
+        """Verify that when boost is at 0% and boost is still pressed, wheels drive on ground but no phantom thrust at 135 or -135 deg."""
+        # 1. Normal ground driving with D (dir_x=1.0) still drives on wheels when boost is held at 0%
         self.sim.reset()
         self.sim.car.reset(10.0, self.sim.spawn_y, angle=0.0)
         self.sim.car.boost_amount = 0.0
-        action = CarAction(dir_x=1.0, dir_y=1.0, boost=True)
+        action = CarAction(dir_x=1.0, dir_y=0.0, boost=True)
         for _ in range(40):
             self.sim.step(action, dt=1.0 / 60.0)
 
-        self.assertGreater(self.sim.car.velocity[0], 5.0, "Car should move forward on ground when boost held at 0%")
+        self.assertGreater(self.sim.car.velocity[0], 10.0, "Car should drive forward on wheels when boost held at 0%")
         self.assertFalse(self.sim.car.is_boosting, "Boosting effects should be inactive at 0% boost")
 
-        # 2. Air movement when boost held at 0% boost
-        self.sim.reset()
-        self.sim.car.reset(10.0, 10.0, angle=0.0)
-        self.sim.car.boost_amount = 0.0
-        action_air = CarAction(dir_x=1.0, dir_y=0.0, boost=True)
-        for _ in range(40):
-            self.sim.step(action_air, dt=1.0 / 60.0)
-
-        self.assertGreater(self.sim.car.velocity[0], 5.0, "Car should move forward in air when boost held at 0%")
-        self.assertFalse(self.sim.car.is_boosting, "Boosting effects should be inactive at 0% boost")
+        # 2. Tilted pitch stances (+135 deg wheelie, -135 deg stoppie) do NOT move when boost is at 0%
+        for deg in [135, -135]:
+            with self.subTest(angle=deg):
+                self.sim.reset()
+                self.sim.car.reset(16.0, self.sim.spawn_y, angle=0.0)
+                self.sim.car.boost_amount = 0.0
+                rad = math.radians(deg)
+                action_tilt = CarAction(dir_x=math.cos(rad), dir_y=math.sin(rad), boost=True)
+                for _ in range(40):
+                    self.sim.step(action_tilt, dt=1.0 / 60.0)
+                self.assertLess(abs(self.sim.car.velocity[0]), 2.0, f"Car should not move forward at {deg} deg with 0% boost")
+                self.assertFalse(self.sim.car.is_boosting)
 
     def test_diagonal_boost_climb_at_135_and_45_degrees(self):
         """Verify that boosting diagonally at +135 deg and +45 deg climbs high into the air."""
