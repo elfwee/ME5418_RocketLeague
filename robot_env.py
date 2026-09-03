@@ -23,6 +23,7 @@ BODY_RADIUS = 20          # Radius of the ball-like agent body
 KICK_RADIUS = 50          # Kick radius around the agent body
 KICK_INTENSITY = 500      # Fixed impulse intensity for kicking balls
 KICK_ALL = True           # If True, kicks all balls within radius; if False, kicks only the nearest ball
+RESPAWN_ON_GOAL = True    # If True, respawns balls at random valid field locations upon scoring
 
 class Goal(pygame.Rect):
     """
@@ -171,6 +172,7 @@ def update(
     kick_radius=None,
     kick_intensity=None,
     kick_all=None,
+    respawn_on_goal=RESPAWN_ON_GOAL,
 ):
     global agent_body, tank_body
     global agent_control_body, tank_control_body
@@ -242,78 +244,191 @@ def update(
 
     # Check if any ball entered an active goal
     balls_to_remove = []
-    for item in active_balls:
-        body, pivot, gear = item
+    for item in list(active_balls):
+        body = item[0] if isinstance(item, (tuple, list)) else item
         for goal in current_goals:
             in_goal = False
-            if hasattr(goal, 'contains'):
+            if hasattr(goal, "contains"):
                 in_goal = goal.contains(body.position)
-            elif hasattr(goal, 'collidepoint'):
+            elif hasattr(goal, "collidepoint"):
                 in_goal = goal.collidepoint(body.position.x, body.position.y)
             elif isinstance(goal, (tuple, list)) and len(goal) == 4:
-                in_goal = (goal[0] <= body.position.x <= goal[0] + goal[2] and
-                           goal[1] <= body.position.y <= goal[1] + goal[3])
-            elif hasattr(goal, 'x') and hasattr(goal, 'y'):
+                in_goal = (
+                    goal[0] <= body.position.x <= goal[0] + goal[2]
+                    and goal[1] <= body.position.y <= goal[1] + goal[3]
+                )
+            elif hasattr(goal, "x") and hasattr(goal, "y"):
                 rad = hole_radius if hole_radius is not None else current_goal_depth
                 in_goal = (body.position - goal).length <= rad
 
             if in_goal:
-                balls_to_remove.append(item)
                 score += 1
+                if respawn_on_goal:
+                    respawn_ball(
+                        body,
+                        space=space,
+                        goals=current_goals,
+                        agent_body=agent_body,
+                        active_balls=active_balls,
+                        agent_radius=b_rad,
+                    )
+                else:
+                    balls_to_remove.append(item)
                 break
 
-    # Remove scored balls from the physics simulation
-    for item in balls_to_remove:
-        body, pivot, gear = item
-        if item in active_balls:
-            active_balls.remove(item)
-            to_remove = [o for o in (body, *body.shapes, pivot, gear) if o is not None]
-            if to_remove:
-                space.remove(*to_remove)
+    if not respawn_on_goal:
+        # Remove scored balls from the physics simulation if respawning is disabled
+        for item in balls_to_remove:
+            body, pivot, gear = item
+            if item in active_balls:
+                active_balls.remove(item)
+                to_remove = [o for o in (body, *body.shapes, pivot, gear) if o is not None]
+                if to_remove:
+                    space.remove(*to_remove)
 
     space.step(dt)
 
 
-def add_box(space, size, mass, elasticity=0.8, goals=None, holes=None, hole_radius=None, agent_radius=BODY_RADIUS):
+def get_random_valid_ball_pos(
+    ball_radius=8.0,
+    goals=None,
+    agent_body=None,
+    active_balls=None,
+    agent_radius=BODY_RADIUS,
+    width=640,
+    height=480,
+    current_ball=None,
+):
+    """
+    Finds a random valid position within the arena boundaries, ensuring the ball
+    does not spawn inside any active goal, on top of the agent, or overlapping another ball.
+    """
+    margin_wall = ball_radius + 20
+    min_x = margin_wall
+    max_x = width - margin_wall
+    min_y = margin_wall
+    max_y = height - margin_wall
+
+    target_goals = goals if goals is not None else []
+
+    if agent_body is not None and hasattr(agent_body, "position"):
+        agent_pos = agent_body.position
+    else:
+        agent_pos = Vec2d(width / 2, height / 2)
+    min_agent_dist = max(55, agent_radius + ball_radius + 25)
+
+    other_balls = []
+    if active_balls:
+        for item in active_balls:
+            b = item[0] if isinstance(item, (tuple, list)) else item
+            if b is not current_ball and hasattr(b, "position"):
+                other_balls.append(b.position)
+
+    for _ in range(300):
+        pos = Vec2d(random.uniform(min_x, max_x), random.uniform(min_y, max_y))
+
+        # Check goals
+        too_close = False
+        for g in target_goals:
+            margin = ball_radius + 15
+            if hasattr(g, "x") and hasattr(g, "y") and hasattr(g, "width") and hasattr(g, "height"):
+                if (
+                    g.x - margin <= pos.x <= g.x + g.width + margin
+                    and g.y - margin <= pos.y <= g.y + g.height + margin
+                ):
+                    too_close = True
+                    break
+            elif hasattr(g, "x") and hasattr(g, "y"):
+                if (pos - g).length < (40 + ball_radius + 20):
+                    too_close = True
+                    break
+        if too_close:
+            continue
+
+        # Check agent
+        if (pos - agent_pos).length < min_agent_dist:
+            continue
+
+        # Check other balls
+        for ob_pos in other_balls:
+            if (pos - ob_pos).length < (ball_radius * 2 + 15):
+                too_close = True
+                break
+        if too_close:
+            continue
+
+        return pos
+
+    # Fallback to center area with small jitter
+    return Vec2d(width / 2 + random.uniform(-40, 40), height / 2 + random.uniform(-40, 40))
+
+
+def respawn_ball(
+    body,
+    space=None,
+    goals=None,
+    agent_body=None,
+    active_balls=None,
+    agent_radius=BODY_RADIUS,
+    width=640,
+    height=480,
+):
+    """
+    Resets velocity and respawns a goaled ball at a random valid location around the field.
+    """
+    ball_radius = 8.0
+    if hasattr(body, "shapes") and body.shapes:
+        shape = next(iter(body.shapes))
+        if hasattr(shape, "radius"):
+            ball_radius = shape.radius
+
+    new_pos = get_random_valid_ball_pos(
+        ball_radius=ball_radius,
+        goals=goals,
+        agent_body=agent_body,
+        active_balls=active_balls,
+        agent_radius=agent_radius,
+        width=width,
+        height=height,
+        current_ball=body,
+    )
+
+    body.position = new_pos
+    body.velocity = Vec2d(0, 0)
+    body.angular_velocity = 0.0
+    body.activate()
+    if space is not None:
+        space.reindex_shapes_for_body(body)
+    return new_pos
+
+
+def add_box(
+    space,
+    size,
+    mass,
+    elasticity=0.8,
+    goals=None,
+    holes=None,
+    hole_radius=None,
+    agent_radius=BODY_RADIUS,
+    agent_body=None,
+    active_balls=None,
+):
     radius = Vec2d(size, size).length
 
     body = pymunk.Body()
     space.add(body)
 
-    # Keep ball inside boundaries and away from goals & agent spawn
-    min_x = radius + 15
-    max_x = 640 - radius - 15
-    min_y = radius + 15
-    max_y = 480 - radius - 15
-
     target_goals = goals if goals is not None else (holes if holes is not None else [])
-
-    while True:
-        pos = Vec2d(
-            random.uniform(min_x, max_x),
-            random.uniform(min_y, max_y),
-        )
-        too_close = False
-        for g in target_goals:
-            if hasattr(g, 'x') and hasattr(g, 'y') and hasattr(g, 'width') and hasattr(g, 'height'):
-                margin = radius + 15
-                if (g.x - margin <= pos.x <= g.x + g.width + margin and
-                    g.y - margin <= pos.y <= g.y + g.height + margin):
-                    too_close = True
-                    break
-            elif hasattr(g, 'x') and hasattr(g, 'y'):
-                if (pos - g).length < (40 + radius + 20):
-                    too_close = True
-                    break
-
-        # Avoid spawning directly on top of the agent (320, 240)
-        min_agent_dist = max(50, agent_radius + radius + 20)
-        if (pos - Vec2d(320, 240)).length < min_agent_dist:
-            too_close = True
-
-        if not too_close:
-            body.position = pos
-            break
+    pos = get_random_valid_ball_pos(
+        ball_radius=radius,
+        goals=target_goals,
+        agent_body=agent_body,
+        active_balls=active_balls,
+        agent_radius=agent_radius,
+        current_ball=body,
+    )
+    body.position = pos
 
     shape = pymunk.Circle(body, radius, offset=(0, 0))
     shape.mass = mass
