@@ -4,7 +4,7 @@ from typing import Tuple, List
 import pygame
 from src.config import (
     TOTAL_WIDTH, TOTAL_HEIGHT, PPM,
-    SCREEN_WIDTH, SCREEN_HEIGHT,
+    SCREEN_WIDTH, SCREEN_HEIGHT, WHEEL_RADIUS,
     COLOR_BG, COLOR_ARENA_BG, COLOR_FLOOR, COLOR_WALL, COLOR_CEILING,
     COLOR_GOAL_ORANGE, COLOR_GOAL_BLUE,
     COLOR_CAR_BLUE, COLOR_CAR_DARK, COLOR_CAR_ACCENT,
@@ -24,6 +24,9 @@ class Renderer:
         self.screen = screen
         self.font = pygame.font.SysFont("monospace", 15, bold=True)
         self.large_font = pygame.font.SysFont("monospace", 22, bold=True)
+        # Reused scratch layer for alpha-blended overlays; allocating one per trail
+        # segment costs ~25 full-screen surfaces every frame.
+        self._alpha_layer = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 
     def world_to_screen(self, x: float, y: float) -> Tuple[int, int]:
         """Convert SI coordinates (meters, +Y up) to screen pixels (+Y down)."""
@@ -93,12 +96,13 @@ class Renderer:
         # Motion trail
         if len(ball.trail) > 1:
             points = [self.world_to_screen(tx, ty) for tx, ty in ball.trail]
+            self._alpha_layer.fill((0, 0, 0, 0))
+            width = max(1, int(r_screen * 0.35))
             for i in range(len(points) - 1):
                 alpha = int(160 * (i / len(points)))
-                trail_color = (*COLOR_BALL_ACCENT, alpha)
-                trail_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-                pygame.draw.line(trail_surf, trail_color, points[i], points[i + 1], width=max(1, int(r_screen * 0.35)))
-                self.screen.blit(trail_surf, (0, 0))
+                pygame.draw.line(self._alpha_layer, (*COLOR_BALL_ACCENT, alpha),
+                                 points[i], points[i + 1], width=width)
+            self.screen.blit(self._alpha_layer, (0, 0))
 
         # Ball body
         pygame.draw.circle(self.screen, COLOR_BALL, center_screen, r_screen)
@@ -124,8 +128,8 @@ class Renderer:
         for local_pos in [car.rear_wheel_local, car.front_wheel_local]:
             w_pos = body.local_to_world(local_pos)
             sw = self.world_to_screen(w_pos.x, w_pos.y)
-            tire_r = int(0.25 * PPM)
-            rim_r = int(0.13 * PPM)
+            tire_r = int(WHEEL_RADIUS * PPM)
+            rim_r = int(WHEEL_RADIUS * 0.52 * PPM)
 
             # Outer tire
             pygame.draw.circle(self.screen, COLOR_WHEELS, sw, tire_r)
@@ -264,7 +268,7 @@ class Renderer:
         """Draw HUD: controls helper, vector legend, telemetry, and boost meter."""
         # --- Top-Left Controls & Legend ---
         help_lines = [
-            "Sideswipe 2D Physics Sandbox (V2)",
+            "Sideswipe 2D Physics Sandbox",
             "[WASD / Arrows] 2D Direction Vector",
             "[Space] Jump / Flip (or Turtle Recovery)",
             "[Shift / O] Rocket Boost",

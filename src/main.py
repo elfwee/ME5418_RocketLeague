@@ -23,7 +23,7 @@ def run_interactive():
         gamepad.init()
         print(f"Gamepad detected: {gamepad.get_name()}")
 
-    pygame.display.set_caption("Rocket League Sideswipe 2D - Refined Physics Sandbox (V2)")
+    pygame.display.set_caption("Rocket League Sideswipe 2D - Suspension Physics Sandbox")
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     clock = pygame.time.Clock()
 

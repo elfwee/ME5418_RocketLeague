@@ -5,7 +5,7 @@ import pymunk
 from src.config import (
     FIELD_WIDTH, FIELD_HEIGHT, CORNER_RADIUS,
     GOAL_DEPTH, GOAL_BOTTOM_Y, GOAL_TOP_Y,
-    MARGIN_X, MARGIN_Y,
+    MARGIN_X, MARGIN_Y, ARENA_SEGMENT_RADIUS,
     COLLISION_ARENA, COLLISION_GOAL_SENSOR
 )
 
@@ -30,7 +30,8 @@ class Arena:
         self._build_arena()
 
     def _add_segment(self, p1: Tuple[float, float], p2: Tuple[float, float],
-                     elasticity: float = 0.8, friction: float = 0.6, radius: float = 0.06) -> pymunk.Segment:
+                     elasticity: float = 0.8, friction: float = 0.6,
+                     radius: float = ARENA_SEGMENT_RADIUS) -> pymunk.Segment:
         """Helper to create and register a static collision segment."""
         seg = pymunk.Segment(self.space.static_body, p1, p2, radius)
         seg.elasticity = elasticity
