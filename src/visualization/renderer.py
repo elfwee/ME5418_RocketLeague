@@ -9,12 +9,14 @@ from src.config import (
     COLOR_BG, COLOR_ARENA_BG, COLOR_FLOOR, COLOR_WALL, COLOR_CEILING,
     COLOR_GOAL_ORANGE, COLOR_GOAL_BLUE,
     COLOR_CAR_BLUE, COLOR_CAR_DARK, COLOR_CAR_ACCENT,
+    COLOR_CAR_ORANGE, COLOR_CAR_ORANGE_DARK, COLOR_CAR_ORANGE_ACCENT,
     COLOR_WHEELS, COLOR_RIM, COLOR_SPOILER,
     COLOR_HEADLIGHT, COLOR_TAILLIGHT, COLOR_BOOST_FLAME,
     COLOR_BALL, COLOR_BALL_ACCENT,
     COLOR_INPUT_VECTOR, COLOR_VELOCITY_VECTOR,
     COLOR_TEXT, COLOR_UI_BAR_BG, COLOR_BOOST_BAR
 )
+from src.core.car import Car
 from src.core.simulation import Simulation
 
 
@@ -36,12 +38,14 @@ class Renderer:
         return (sx, sy)
 
     def render(self, sim: Simulation):
-        """Render complete simulation frame: arena, vectors, ball, car, and HUD."""
+        """Render complete simulation frame: arena, vectors, ball, cars, and HUD."""
         self.screen.fill(COLOR_BG)
 
         self._draw_arena(sim)
         self._draw_ball(sim)
-        self._draw_car(sim)
+        self._draw_car(sim.car)
+        if sim.car_orange is not None:
+            self._draw_car(sim.car_orange)
         self._draw_vector_indicators(sim)
         self._draw_hud(sim)
 
@@ -135,11 +139,14 @@ class Renderer:
             p2 = (int(center_screen[0] + dx), int(center_screen[1] + dy))
             pygame.draw.line(self.screen, COLOR_BALL_ACCENT, p1, p2, 3)
 
-    def _draw_car(self, sim: Simulation):
+    def _draw_car(self, car: Car):
         """Draw stylized Octane-like car with tapered body, wheels, cabin glass, spoiler, lights."""
-        car = sim.car
         body = car.body
         facing = car.facing_x
+        is_orange = car.team == "orange"
+        body_col = COLOR_CAR_ORANGE if is_orange else COLOR_CAR_BLUE
+        accent_col = COLOR_CAR_ORANGE_ACCENT if is_orange else COLOR_CAR_ACCENT
+        dark_col = COLOR_CAR_ORANGE_DARK if is_orange else COLOR_CAR_DARK
 
         # 1. Wheels with Rubber Tires and Inner Alloy Rims
         for local_pos in [car.rear_wheel_local, car.front_wheel_local]:
@@ -183,8 +190,8 @@ class Renderer:
             w = body.local_to_world(v)
             screen_verts.append(self.world_to_screen(w.x, w.y))
 
-        pygame.draw.polygon(self.screen, COLOR_CAR_BLUE, screen_verts)
-        pygame.draw.polygon(self.screen, COLOR_CAR_ACCENT, screen_verts, width=2)
+        pygame.draw.polygon(self.screen, body_col, screen_verts)
+        pygame.draw.polygon(self.screen, accent_col, screen_verts, width=2)
 
         # Lower body dark rocker panel
         dark_p1 = body.local_to_world((-0.95 * cs, -0.30 * cs * facing))
@@ -192,7 +199,7 @@ class Renderer:
         dark_p3 = body.local_to_world((0.85 * cs, -0.15 * cs * facing))
         dark_p4 = body.local_to_world((-0.95 * cs, -0.15 * cs * facing))
         s_dp = [self.world_to_screen(p.x, p.y) for p in [dark_p1, dark_p2, dark_p3, dark_p4]]
-        pygame.draw.polygon(self.screen, COLOR_CAR_DARK, s_dp)
+        pygame.draw.polygon(self.screen, dark_col, s_dp)
 
         # 4. Cockpit Cabin Window (Glass windshield with cyan tint)
         c1 = body.local_to_world((-0.30 * cs, 0.36 * cs * facing))
@@ -232,46 +239,48 @@ class Renderer:
             pygame.draw.polygon(self.screen, (255, 255, 255), [s_top, s_core_tip, s_bot])
 
     def _draw_vector_indicators(self, sim: Simulation):
-        """Draw purple direction input vector and blue heading/velocity arrow."""
-        car = sim.car
-        cx, cy = car.position
-        center_screen = self.world_to_screen(cx, cy)
+        """Draw purple direction input vector and blue heading/velocity arrow for cars."""
+        cars = [sim.car]
+        if sim.car_orange is not None:
+            cars.append(sim.car_orange)
 
-        # --- 1. Purple Direction Input Vector ---
-        dir_x, dir_y = car.last_input_vector
-        input_mag = math.hypot(dir_x, dir_y)
+        for car in cars:
+            cx, cy = car.position
+            center_screen = self.world_to_screen(cx, cy)
+            is_orange = car.team == "orange"
 
-        if input_mag > 0.08:
-            vec_len = int(input_mag * 58.0)
-            # Screen Y is inverted relative to physics Y
-            target_screen = (
-                int(center_screen[0] + (dir_x / input_mag) * vec_len),
-                int(center_screen[1] - (dir_y / input_mag) * vec_len)
-            )
-            # Draw purple vector line
-            pygame.draw.line(self.screen, COLOR_INPUT_VECTOR, center_screen, target_screen, 3)
-            # Draw filled purple arrowhead
-            angle_screen = math.atan2(-(dir_y / input_mag), (dir_x / input_mag))
-            self._draw_arrowhead(target_screen, angle_screen, COLOR_INPUT_VECTOR, size=9)
+            # --- 1. Direction Input Vector ---
+            dir_x, dir_y = car.last_input_vector
+            input_mag = math.hypot(dir_x, dir_y)
 
-        # --- 2. Blue Heading Arrow / Minute Hand (Shares same origin: car center) ---
-        # The Blue Vector strictly represents the car's heading and sweeps toward the Purple target
-        fwd_x, fwd_y = car.forward_vector
-        arrow_angle_screen = math.atan2(-fwd_y, fwd_x)
+            if input_mag > 0.08:
+                vec_len = int(input_mag * 58.0)
+                # Screen Y is inverted relative to physics Y
+                target_screen = (
+                    int(center_screen[0] + (dir_x / input_mag) * vec_len),
+                    int(center_screen[1] - (dir_y / input_mag) * vec_len)
+                )
+                input_col = (251, 191, 36) if is_orange else COLOR_INPUT_VECTOR
+                pygame.draw.line(self.screen, input_col, center_screen, target_screen, 3)
+                angle_screen = math.atan2(-(dir_y / input_mag), (dir_x / input_mag))
+                self._draw_arrowhead(target_screen, angle_screen, input_col, size=9)
 
-        vx, vy = car.body.velocity
-        speed = math.hypot(vx, vy)
+            # --- 2. Heading / Velocity Arrow ---
+            fwd_x, fwd_y = car.forward_vector
+            arrow_angle_screen = math.atan2(-fwd_y, fwd_x)
 
-        # Base length 54px extends beyond chassis (42px) so it is always visible; scales with speed
-        arrow_len = min(110, max(54, int(54 + speed * 2.2)))
+            vx, vy = car.body.velocity
+            speed = math.hypot(vx, vy)
 
-        tip_x = int(center_screen[0] + math.cos(arrow_angle_screen) * arrow_len)
-        tip_y = int(center_screen[1] + math.sin(arrow_angle_screen) * arrow_len)
+            # Base length 54px extends beyond chassis (42px) so it is always visible; scales with speed
+            arrow_len = min(110, max(54, int(54 + speed * 2.2)))
 
-        # Draw blue heading arrow line from shared car center
-        pygame.draw.line(self.screen, COLOR_VELOCITY_VECTOR, center_screen, (tip_x, tip_y), 3)
-        # Draw filled blue arrowhead
-        self._draw_arrowhead((tip_x, tip_y), arrow_angle_screen, COLOR_VELOCITY_VECTOR, size=10)
+            tip_x = int(center_screen[0] + math.cos(arrow_angle_screen) * arrow_len)
+            tip_y = int(center_screen[1] + math.sin(arrow_angle_screen) * arrow_len)
+
+            vel_col = (237, 137, 54) if is_orange else COLOR_VELOCITY_VECTOR
+            pygame.draw.line(self.screen, vel_col, center_screen, (tip_x, tip_y), 3)
+            self._draw_arrowhead((tip_x, tip_y), arrow_angle_screen, vel_col, size=10)
 
     def _draw_arrowhead(self, tip: Tuple[int, int], angle: float, color: Tuple[int, int, int], size: int = 9):
         """Helper to draw a filled equilateral arrowhead polygon."""
@@ -305,13 +314,29 @@ class Renderer:
         self.screen.blit(score_surf, s_rect)
         self.screen.blit(orange_lbl, o_rect)
 
+        # Orange Bot Status Pill (Top Center, below scoreboard)
+        if sim.enable_orange and sim.car_orange is not None:
+            state_label = sim.orange_bot.current_state if sim.orange_bot else "ACTIVE"
+            bot_text = f"ORANGE BOT: {state_label}"
+            bot_col = COLOR_CAR_ORANGE
+        else:
+            bot_text = "ORANGE BOT: OFF"
+            bot_col = (156, 163, 175)
+        bot_surf = self.font.render(bot_text, True, bot_col)
+        b_box = bot_surf.get_rect(center=(cx, score_box_y + score_box_h + 16))
+        pill_rect = pygame.Rect(b_box.x - 10, b_box.y - 3, b_box.width + 20, b_box.height + 6)
+        pygame.draw.rect(self.screen, (22, 27, 38), pill_rect, border_radius=5)
+        pygame.draw.rect(self.screen, (55, 65, 81), pill_rect, width=1, border_radius=5)
+        self.screen.blit(bot_surf, b_box)
+
         # --- Top-Left Controls & Legend ---
         help_lines = [
             "Sideswipe 2D Physics Sandbox",
             "[WASD / Arrows] 2D Direction Vector",
             "[Space] Jump / Flip (or Turtle Recovery)",
             "[Shift / O] Rocket Boost",
-            "[R] Reset Ball & Car"
+            "[R] Reset Ball & Car",
+            "[B] Toggle Orange Bot (ON/OFF)"
         ]
         y_offset = 15
         for line in help_lines:

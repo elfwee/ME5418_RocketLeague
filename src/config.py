@@ -146,6 +146,9 @@ COLOR_GOAL_BLUE = (66, 153, 225)
 COLOR_CAR_BLUE = (49, 130, 206)
 COLOR_CAR_DARK = (26, 54, 93)
 COLOR_CAR_ACCENT = (237, 242, 247)
+COLOR_CAR_ORANGE = (237, 137, 54)
+COLOR_CAR_ORANGE_DARK = (154, 52, 18)
+COLOR_CAR_ORANGE_ACCENT = (251, 191, 36)
 COLOR_WHEELS = (30, 41, 59)
 COLOR_RIM = (148, 163, 184)
 COLOR_SPOILER = (30, 41, 59)
@@ -161,3 +164,10 @@ COLOR_BOOST_BAR = (236, 201, 75)
 # --- Vector Visualizer Colors ---
 COLOR_INPUT_VECTOR = (168, 85, 247)      # Purple arrow for direction input vector
 COLOR_VELOCITY_VECTOR = (59, 130, 246)   # Blue arrow for car velocity vector
+
+# --- Opponent Car & Bot Settings ---
+ENABLE_ORANGE_CAR = False                # Default flag: whether Orange car is present (enabled by default in main.py)
+ORANGE_IS_BOT = True                     # Default flag: whether Orange car is AI-controlled
+BOT_DODGE_STRIKE_DIST = 2.2              # Distance to ball to trigger dodge flip strike (m)
+BOT_AERIAL_MIN_BOOST = 15.0              # Minimum boost required to commit to aerial launch
+BOT_DEFENSE_ZONE_X = 22.0                # X coordinate dividing midfield from defense (m)

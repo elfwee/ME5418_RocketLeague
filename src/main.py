@@ -15,7 +15,7 @@ from src.core.simulation import Simulation
 from src.visualization.renderer import Renderer
 
 
-def run_interactive():
+def run_interactive(enable_orange: bool = True):
     """Launch the Pygame interactive sandbox with 2D vector controls and Octane physics."""
     pygame.init()
     pygame.joystick.init()
@@ -31,7 +31,7 @@ def run_interactive():
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     clock = pygame.time.Clock()
 
-    sim = Simulation()
+    sim = Simulation(enable_orange=enable_orange)
     renderer = Renderer(screen)
 
     running = True
@@ -47,6 +47,9 @@ def run_interactive():
                     running = False
                 elif event.key == pygame.K_r:
                     sim.reset()
+                elif event.key == pygame.K_b:
+                    # Toggle Orange bot on/off
+                    sim.set_orange_enabled(not sim.enable_orange, is_bot=True)
 
         # --- Input Mapping: 2D Direction Vector ---
         action = CarAction()
@@ -98,25 +101,35 @@ def run_interactive():
     pygame.quit()
 
 
-def run_headless(steps: int = 300):
+def run_headless(steps: int = 300, enable_orange: bool = True):
     """Run headless simulation loop for automated benchmark or verification."""
-    print(f"Running headless simulation for {steps} steps...")
-    sim = Simulation()
+    print(f"Running headless simulation for {steps} steps (Orange car: {enable_orange})...")
+    sim = Simulation(enable_orange=enable_orange)
     action = CarAction(dir_x=1.0, dir_y=0.2, boost=True)
 
     for step in range(steps):
         sim.step(action, 1.0 / SIM_HZ)
         if step % 60 == 0:
             state = sim.get_state()
-            print(f"Step {step:03d} | Car Pos: ({state['car']['position'][0]:.2f}, {state['car']['position'][1]:.2f}) | "
-                  f"Ball Pos: ({state['ball']['position'][0]:.2f}, {state['ball']['position'][1]:.2f}) | "
-                  f"Boost: {state['car']['boost']:.1f}%")
+            line = (
+                f"Step {step:03d} | Blue Pos: ({state['car']['position'][0]:.2f}, {state['car']['position'][1]:.2f}) | "
+                f"Ball Pos: ({state['ball']['position'][0]:.2f}, {state['ball']['position'][1]:.2f})"
+            )
+            if "car_orange" in state:
+                line += f" | Orange Pos: ({state['car_orange']['position'][0]:.2f}, {state['car_orange']['position'][1]:.2f}) [{state['car_orange']['bot_state']}]"
+            print(line)
 
     print("Headless simulation benchmark completed successfully!")
 
 
 if __name__ == '__main__':
+    enable_orange = True
+    if "--no-orange" in sys.argv:
+        enable_orange = False
+    elif "--orange" in sys.argv:
+        enable_orange = True
+
     if "--headless" in sys.argv:
-        run_headless()
+        run_headless(enable_orange=enable_orange)
     else:
-        run_interactive()
+        run_interactive(enable_orange=enable_orange)
