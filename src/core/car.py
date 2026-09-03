@@ -25,7 +25,8 @@ from src.config import (
     CAR_AIR_ANGULAR_SPEED, CAR_AIR_ANGULAR_ACCEL, CAR_AIR_SPIN_DECAY_TAU,
     CAR_PITCH_INPUT_THRESHOLD, INPUT_DEADZONE, THROTTLE_DEADZONE,
     FACING_FLIP_THRESHOLD,
-    CAR_JUMP_SPEED, CAR_BOOST_ACCEL, CAR_MAX_AIR_SPEED, CAR_BOOST_SPEED_FADE,
+    CAR_JUMP_SPEED, CAR_DOUBLE_JUMP_SPEED, CAR_DODGE_SPEED, CAR_DODGE_DURATION,
+    CAR_BOOST_ACCEL, CAR_MAX_AIR_SPEED, CAR_BOOST_SPEED_FADE,
     CAR_MAX_BOOST, CAR_BOOST_DRAIN, CAR_BOOST_REFILL,
     TURTLE_UP_THRESHOLD, TURTLE_PROBE_LEN, TURTLE_TRIGGER_DELAY,
     TURTLE_HOP_SPEED, TURTLE_FLIP_DURATION,
@@ -114,6 +115,14 @@ class Car:
         self.is_boosting: bool = False
         self._prev_jump_action: bool = False
 
+        # Rocket League Jump 2 / Dodge state
+        self.has_jump2: bool = True
+        self._flip_active: bool = False
+        self._flip_timer: float = 0.0
+        self._flip_duration: float = CAR_DODGE_DURATION
+        self._flip_start_angle: float = 0.0
+        self._flip_total_spin: float = 0.0
+
         # [rear, front] suspension probes, refreshed every physics sub-step
         self.wheels: List[WheelContact] = [WheelContact(), WheelContact()]
         self._ground_normal: Tuple[float, float] = (0.0, 1.0)
@@ -140,6 +149,11 @@ class Car:
     def wheel_contact_count(self) -> int:
         """Number of axles currently touching a surface."""
         return sum(1 for w in self.wheels if w.hit)
+
+    @property
+    def both_wheels_grounded(self) -> bool:
+        """True if both front and rear suspension wheels are currently touching a surface."""
+        return self.wheels[0].hit and self.wheels[1].hit
 
     @property
     def ground_normal(self) -> Tuple[float, float]:
@@ -237,6 +251,12 @@ class Car:
 
         self._wheels_grounded = hits > 0
 
+        # Whenever both wheels are in contact, jump 2 recharges
+        if hits == 2:
+            self.has_jump2 = True
+            if self._flip_active:
+                self._flip_active = False
+
         # Direct chassis contact with arena surface (touching floor, walls, corners at any angle)
         chassis_hits = [
             c for c in self.space.shape_query(self.chassis_shape)
@@ -315,6 +335,16 @@ class Car:
 
     def _apply_attitude(self, action: CarAction, dt: float):
         """Steer the chassis toward the commanded heading, or damp spin when idle."""
+        if self._flip_active:
+            self._flip_timer += dt
+            p = min(1.0, self._flip_timer / self._flip_duration)
+            omega_target = self._flip_total_spin * (math.pi / (2.0 * self._flip_duration)) * math.sin(math.pi * p)
+            self.body.angular_velocity = omega_target
+            if p >= 1.0:
+                self._flip_active = False
+                self.body.angular_velocity = 0.0
+            return
+
         if self._recovery_time > 0.0:
             upright_target = 0.0 if self.facing_x == 1 else math.pi
             self._drive_angle_to(upright_target, dt, CAR_FLIP_ANGULAR_SPEED, CAR_FLIP_ANGULAR_ACCEL)
@@ -387,23 +417,78 @@ class Car:
     # ------------------------------------------------------------------ #
 
     def _apply_jump(self, action: CarAction):
-        """Edge-triggered jump impulse along the car's roof axis."""
+        """Rocket League jump logic:
+        1. Ground Jump (Jump 1): Requires both wheels in contact; recharges Jump 2.
+        2. Aerial Jump (Jump 2): When both wheels are not in contact together, can be performed once:
+           - Type 1 (neutral, no direction): Double jump impulse ('jump like normal').
+           - Type 2 (with direction): Directional dodge impulse + 360-degree rotation.
+        3. Once Jump 2 is depleted, neither Jump 1 nor Jump 2 can be performed until recharged.
+        """
         jump_just_pressed = action.jump and not self._prev_jump_action
         self._prev_jump_action = action.jump
 
-        if not (jump_just_pressed and self._grounded):
+        if not jump_just_pressed:
             return
 
-        up_x, up_y = self.up_vector
-        impulse = self.mass * CAR_JUMP_SPEED
-        self.body.apply_impulse_at_world_point((impulse * up_x, impulse * up_y), self.body.position)
+        both_wheels = self.wheels[0].hit and self.wheels[1].hit
 
-        # Unload the suspension for this sub-step so it cannot fight the impulse
-        self._grounded = False
-        for wheel in self.wheels:
-            wheel.hit = False
-            wheel.normal_force = 0.0
-            wheel.compression = 0.0
+        if both_wheels:
+            # --- JUMP 1 (Ground Launch) ---
+            self.has_jump2 = True
+            up_x, up_y = self.up_vector
+            impulse = self.mass * CAR_JUMP_SPEED
+            self.body.apply_impulse_at_world_point((impulse * up_x, impulse * up_y), self.body.position)
+
+            # Unload the suspension so it lifts cleanly off the surface
+            self._grounded = False
+            for wheel in self.wheels:
+                wheel.hit = False
+                wheel.normal_force = 0.0
+                wheel.compression = 0.0
+
+        else:
+            # --- JUMP 2 (Airborne) ---
+            # Rule: Whenever jump 2 is depleted, you cannot perform jump 1 either
+            if not self.has_jump2:
+                return
+
+            # Consume Jump 2
+            self.has_jump2 = False
+
+            input_mag = math.hypot(action.dir_x, action.dir_y)
+            if input_mag <= INPUT_DEADZONE:
+                # Type 1: Without direction control -> "jump like normal"
+                up_x, up_y = self.up_vector
+                impulse = self.mass * CAR_DOUBLE_JUMP_SPEED
+                self.body.apply_impulse_at_world_point((impulse * up_x, impulse * up_y), self.body.position)
+            else:
+                # Type 2: With direction control -> "rotate 360 degree depends on the direction it facing"
+                nd_x = action.dir_x / input_mag
+                nd_y = action.dir_y / input_mag
+
+                # Cancel downward fall velocity if dodging upward or horizontally
+                if nd_y >= -0.1 and self.body.velocity.y < 0:
+                    self.body.velocity = pymunk.Vec2d(self.body.velocity.x, max(0.0, self.body.velocity.y * 0.2))
+
+                # Directional dodge impulse
+                impulse = self.mass * CAR_DODGE_SPEED
+                self.body.apply_impulse_at_world_point((impulse * nd_x, impulse * nd_y), self.body.position)
+
+                # 360 degree rotation depending on car's facing direction
+                # nd_x * facing_x >= -0.1: forward half (front flip)
+                # nd_x * facing_x < -0.1: backward half (back flip)
+                fwd_dot = nd_x * self.facing_x
+                if fwd_dot >= -0.1:
+                    total_spin = -2.0 * math.pi * self.facing_x
+                else:
+                    total_spin = +2.0 * math.pi * self.facing_x
+
+                self._flip_active = True
+                self._flip_timer = 0.0
+                self._flip_duration = CAR_DODGE_DURATION
+                self._flip_start_angle = self.body.angle
+                self._flip_total_spin = total_spin
+                self.body.angular_velocity = 0.0
 
     def _apply_boost(self, action: CarAction, dt: float):
         """Rocket thrust along the heading, faded out near top speed."""
@@ -487,8 +572,8 @@ class Car:
         self.is_boosting = False
         self.last_input_vector = (action.dir_x, action.dir_y)
 
-        # Update facing based on heading / input (unless turtled on the ground or recovering)
-        if not (self._is_turtled() or self._recovery_time > 0.0):
+        # Update facing based on heading / input (unless turtled on the ground, recovering, or flipping)
+        if not (self._is_turtled() or self._recovery_time > 0.0 or self._flip_active):
             if self._grounded and abs(action.dir_x) > FACING_FLIP_THRESHOLD:
                 new_facing = 1 if action.dir_x > 0 else -1
                 if new_facing != self.facing_x:
@@ -525,6 +610,9 @@ class Car:
         self.boost_amount = CAR_MAX_BOOST
         self.is_boosting = False
         self._prev_jump_action = False
+        self.has_jump2 = True
+        self._flip_active = False
+        self._flip_timer = 0.0
         self.last_input_vector = (0.0, 0.0)
         self.turtled_time = 0.0
         self._recovery_time = 0.0

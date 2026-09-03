@@ -344,6 +344,19 @@ class Renderer:
         self.screen.blit(facing_surf, (SCREEN_WIDTH - 220, 57))
         self.screen.blit(state_surf, (SCREEN_WIDTH - 220, 78))
 
+        if car._flip_active:
+            jump2_str = "FLIP 360°"
+            jump2_color = (246, 173, 85)
+        elif car.has_jump2:
+            jump2_str = "READY"
+            jump2_color = (72, 187, 120)
+        else:
+            jump2_str = "DEPLETED"
+            jump2_color = (156, 163, 175)
+
+        jump2_surf = self.font.render(f"Jump 2: {jump2_str}", True, jump2_color)
+        self.screen.blit(jump2_surf, (SCREEN_WIDTH - 220, 99))
+
         # --- Bottom-Right Boost Meter Gauge ---
         bar_w = 200
         bar_h = 22

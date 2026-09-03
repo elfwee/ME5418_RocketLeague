@@ -360,5 +360,126 @@ class TestSubStepInvariance(unittest.TestCase):
         self.assertEqual(original, PHYSICS_SUBSTEPS)
 
 
+class TestCarJumpLogic(unittest.TestCase):
+    """Test Jump 1, Jump 2 (neutral and directional 360 flip), and recharge logic."""
+
+    def setUp(self):
+        self.sim = Simulation()
+        # Settle car onto the floor with both wheels grounded
+        for _ in range(35):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+
+    def test_ground_jump1_and_jump2_availability(self):
+        """Verify Jump 1 launches from ground when both wheels touch, retaining Jump 2."""
+        self.assertTrue(self.sim.car.both_wheels_grounded, "Both wheels should be grounded")
+        self.assertTrue(self.sim.car.has_jump2, "Jump 2 must be ready on ground")
+
+        # Execute Jump 1
+        self.sim.step(CarAction(jump=True), 1.0 / 60.0)
+        self.assertGreater(self.sim.car.velocity[1], 5.0, "Jump 1 must impart strong vertical impulse")
+        self.assertTrue(self.sim.car.has_jump2, "Jump 2 must remain available after Jump 1")
+
+        # After 2 frames, car lifts clear of the suspension ray range into full flight
+        self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(self.sim.car.both_wheels_grounded, "Car should be airborne after Jump 1")
+
+    def test_jump2_type1_neutral_double_jump(self):
+        """Verify neutral Jump 2 delivers vertical double jump impulse without rotation."""
+        self.sim.car.reset(16.0, 8.0, angle=0.0, facing_x=1)
+        self.sim.car.has_jump2 = True
+
+        start_angle = self.sim.car.angle
+        self.sim.step(CarAction(dir_x=0.0, dir_y=0.0, jump=True), 1.0 / 60.0)
+
+        self.assertGreater(self.sim.car.velocity[1], 5.0, "Neutral Jump 2 must deliver upward impulse")
+        self.assertFalse(self.sim.car.has_jump2, "Jump 2 must be consumed")
+        self.assertFalse(self.sim.car._flip_active, "Neutral Jump 2 must NOT trigger a flip")
+
+        # Step forward: angle should remain unchanged
+        for _ in range(15):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertAlmostEqual(self.sim.car.angle, start_angle, delta=0.05)
+
+    def test_jump2_type2_directional_dodge_front_and_back_flip(self):
+        """Verify directional Jump 2 rotates exactly 360 degrees depending on facing direction."""
+        # 1. Facing Right + Right input -> Front flip (clockwise, -360 deg)
+        self.sim.car.reset(16.0, 8.0, angle=0.0, facing_x=1)
+        self.sim.car.has_jump2 = True
+        start_ang = self.sim.car.angle
+
+        self.sim.step(CarAction(dir_x=1.0, dir_y=0.0, jump=True), 1.0 / 60.0)
+        self.assertTrue(self.sim.car._flip_active, "Front flip must be active")
+        self.assertFalse(self.sim.car.has_jump2, "Jump 2 must be consumed")
+        self.assertGreater(self.sim.car.velocity[0], 5.0, "Dodge must accelerate car in input direction")
+
+        for _ in range(30):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(self.sim.car._flip_active, "Flip must complete")
+        deg_diff = math.degrees(self.sim.car.angle - start_ang)
+        self.assertAlmostEqual(deg_diff, -360.0, delta=5.0, msg="Must rotate 360 degrees in front flip")
+
+        # 2. Facing Right + Left input -> Back flip (counter-clockwise, +360 deg)
+        self.sim.car.reset(16.0, 8.0, angle=0.0, facing_x=1)
+        self.sim.car.has_jump2 = True
+        start_ang = self.sim.car.angle
+
+        self.sim.step(CarAction(dir_x=-1.0, dir_y=0.0, jump=True), 1.0 / 60.0)
+        self.assertTrue(self.sim.car._flip_active, "Back flip must be active")
+        for _ in range(30):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(self.sim.car._flip_active)
+        deg_diff = math.degrees(self.sim.car.angle - start_ang)
+        self.assertAlmostEqual(deg_diff, 360.0, delta=5.0, msg="Must rotate 360 degrees in back flip")
+
+        # 3. Facing Left + Left input -> Front flip (counter-clockwise, +360 deg)
+        self.sim.car.reset(16.0, 8.0, angle=math.pi, facing_x=-1)
+        self.sim.car.has_jump2 = True
+        start_ang = self.sim.car.angle
+
+        self.sim.step(CarAction(dir_x=-1.0, dir_y=0.0, jump=True), 1.0 / 60.0)
+        self.assertTrue(self.sim.car._flip_active)
+        for _ in range(30):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(self.sim.car._flip_active)
+        deg_diff = math.degrees(self.sim.car.angle - start_ang)
+        self.assertAlmostEqual(deg_diff, 360.0, delta=5.0)
+
+        # 4. Facing Left + Right input -> Back flip (clockwise, -360 deg)
+        self.sim.car.reset(16.0, 8.0, angle=math.pi, facing_x=-1)
+        self.sim.car.has_jump2 = True
+        start_ang = self.sim.car.angle
+
+        self.sim.step(CarAction(dir_x=1.0, dir_y=0.0, jump=True), 1.0 / 60.0)
+        self.assertTrue(self.sim.car._flip_active)
+        for _ in range(30):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(self.sim.car._flip_active)
+        deg_diff = math.degrees(self.sim.car.angle - start_ang)
+        self.assertAlmostEqual(deg_diff, -360.0, delta=5.0)
+
+    def test_jump_depleted_prevents_further_jumps(self):
+        """Verify that once Jump 2 is depleted, neither Jump 1 nor Jump 2 can be performed."""
+        self.sim.car.reset(16.0, 8.0, angle=0.0, facing_x=1)
+        self.sim.car.has_jump2 = False
+
+        vy_before = self.sim.car.velocity[1]
+        self.sim.step(CarAction(jump=True), 1.0 / 60.0)
+        vy_after = self.sim.car.velocity[1]
+
+        self.assertLess(vy_after, vy_before, "No jump impulse may be applied when depleted")
+        self.assertFalse(self.sim.car._flip_active, "No flip may be triggered when depleted")
+
+    def test_jump2_recharge_requires_both_wheels(self):
+        """Verify Jump 2 only recharges when both wheels contact the surface together."""
+        self.sim.car.reset(16.0, 8.0, angle=0.0, facing_x=1)
+        self.sim.car.has_jump2 = False
+
+        for _ in range(70):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+
+        self.assertTrue(self.sim.car.both_wheels_grounded, "Car should settle on floor with both wheels")
+        self.assertTrue(self.sim.car.has_jump2, "Jump 2 must recharge once both wheels make contact")
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -93,8 +93,11 @@ THROTTLE_DEADZONE = 0.08        # Below this |dir_x| the car coasts instead of d
 FACING_FLIP_THRESHOLD = 0.15    # |dir_x| needed to mirror the car left/right
 
 # --- Jump & Rocket Boost ---
-CAR_JUMP_SPEED = 9.5       # Instant jump velocity impulse (m/s)
-CAR_BOOST_ACCEL = 42.0     # Boost acceleration (m/s^2) - net upward thrust is (42 - 28 = 14 m/s^2)
+CAR_JUMP_SPEED = 9.5           # Instant jump velocity impulse for Jump 1 (m/s)
+CAR_DOUBLE_JUMP_SPEED = 9.0    # Instant jump velocity impulse for neutral Jump 2 (m/s)
+CAR_DODGE_SPEED = 10.5         # Velocity impulse for directional dodge Jump 2 (m/s)
+CAR_DODGE_DURATION = 0.42      # Seconds to complete the 360-degree rotation during a dodge
+CAR_BOOST_ACCEL = 42.0         # Boost acceleration (m/s^2) - net upward thrust is (42 - 28 = 14 m/s^2)
 CAR_MAX_AIR_SPEED = 25.0   # Top aerial speed along the heading (m/s)
 CAR_BOOST_SPEED_FADE = 3.0 # Thrust fades out over this speed band instead of clamping velocity
 CAR_MAX_BOOST = 100.0      # Boost capacity (%)
