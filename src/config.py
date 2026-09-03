@@ -97,7 +97,7 @@ FACING_FLIP_THRESHOLD = 0.15    # |dir_x| needed to mirror the car left/right
 
 # --- Jump & Rocket Boost ---
 CAR_JUMP_SPEED = 9.5           # Instant jump velocity impulse for Jump 1 (m/s)
-CAR_DOUBLE_JUMP_SPEED = 9.0    # Instant jump velocity impulse for neutral Jump 2 (m/s)
+CAR_DOUBLE_JUMP_SPEED = 9.5    # Fresh launch velocity for neutral Jump 2 from press point (m/s)
 CAR_DODGE_SPEED = 10.5         # Velocity impulse for directional dodge Jump 2 (m/s)
 CAR_DODGE_DURATION = 0.42      # Seconds to complete the 360-degree rotation during a dodge
 CAR_BOOST_ACCEL = 42.0         # Boost acceleration (m/s^2) - net upward thrust is (42 - 28 = 14 m/s^2)

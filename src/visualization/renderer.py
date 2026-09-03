@@ -355,8 +355,18 @@ class Renderer:
         car = sim.car
         speed_kmh = car.body.velocity.length * 3.6
         pitch_deg = abs(math.degrees(math.atan2(car.forward_vector[1], abs(car.forward_vector[0]))))
-        grounded_str = "GROUNDED" if car.is_grounded else "AIRBORNE"
-        grounded_color = (72, 187, 120) if car.is_grounded else (236, 201, 75)
+        if car.both_wheels_grounded:
+            grounded_str = "GROUNDED"
+            grounded_color = (72, 187, 120)
+        elif car.can_ground_jump:
+            grounded_str = "WHEELIE"
+            grounded_color = (72, 187, 120)
+        elif car.is_grounded and car.is_upright:
+            grounded_str = "UPRIGHT"
+            grounded_color = (246, 173, 85)
+        else:
+            grounded_str = "AIRBORNE"
+            grounded_color = (236, 201, 75)
 
         speed_surf = self.font.render(f"Speed: {speed_kmh:5.1f} km/h", True, COLOR_TEXT)
         pitch_surf = self.font.render(f"Pitch: {pitch_deg:5.1f}°", True, COLOR_TEXT)

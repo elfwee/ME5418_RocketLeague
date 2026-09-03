@@ -114,6 +114,96 @@ class TestVerticalMotion(unittest.TestCase):
         ideal = CAR_JUMP_SPEED ** 2 / (2.0 * GRAVITY_MAG)
         self.assertAlmostEqual(apex - y0, ideal, delta=0.1 * ideal)
 
+    def test_neutral_double_jump_gains_full_jump_height_from_press_point(self):
+        """Neutral Jump 2 must treat the press point as a fresh start point, gaining 1x jump height."""
+        sim = Simulation()
+        settle(sim)
+        y0 = sim.car.position[1]
+
+        # 1. Single jump apex
+        sim.step(CarAction(jump=True), DT)
+        h_single = y0
+        while True:
+            sim.step(CarAction(jump=False), DT)
+            h_single = max(h_single, sim.car.position[1])
+            if sim.car.velocity[1] < 0 and sim.car.is_grounded:
+                break
+        single_jump_gain = h_single - y0
+
+        # 2. Neutral double jump pressed at apex of Jump 1
+        sim.car.reset(FLAT_START_X, sim.spawn_y)
+        settle(sim)
+        sim.step(CarAction(jump=True), DT)
+        while sim.car.velocity[1] > 0.4:
+            sim.step(CarAction(jump=False), DT)
+
+        # Trigger Jump 2 at apex
+        sim.step(CarAction(jump=True), DT)
+        h_double = y0
+        while True:
+            sim.step(CarAction(jump=False), DT)
+            h_double = max(h_double, sim.car.position[1])
+            if sim.car.velocity[1] < 0 and sim.car.is_grounded:
+                break
+        double_jump_total = h_double - y0
+
+        # Must reach ~2.0x single jump height (within 5%)
+        ratio = double_jump_total / single_jump_gain
+        self.assertAlmostEqual(ratio, 2.00, delta=0.05,
+                               msg=f"Double jump at apex should reach ~2.0x single jump height, got {ratio:.2f}x")
+
+    def test_wheelie_can_jump1_and_recovers_jump2(self):
+        """Wheelie stance (rear wheel on ground, pitch < 75 deg) must recharge Jump 2 and trigger Jump 1."""
+        sim = Simulation()
+        sim.car.reset(FLAT_START_X, sim.spawn_y)
+        settle(sim)
+
+        # Deplete Jump 2 by jumping in the air
+        sim.step(CarAction(jump=True), DT)
+        sim.step(CarAction(jump=False), DT)
+        sim.step(CarAction(jump=True), DT)
+        self.assertFalse(sim.car.has_jump2, "Jump 2 must be depleted")
+
+        # Drive into a wheelie on rear wheel
+        sim.car.reset(FLAT_START_X, sim.spawn_y)
+        sim.car.has_jump2 = False  # Keep depleted to test recovery
+        for _ in range(40):
+            sim.step(CarAction(dir_x=1.0, dir_y=0.4), DT)
+
+        # Verify wheelie condition
+        self.assertTrue(sim.car.can_ground_jump, "Wheelie should be considered a drivable ground stance")
+        self.assertTrue(sim.car.has_jump2, "Jump 2 must recharge while doing a wheelie on ground")
+
+        # Pressing Jump during wheelie must trigger Jump 1 (launches off surface and retains Jump 2)
+        v0 = sim.car.velocity[1]
+        sim.step(CarAction(jump=True), DT)
+        self.assertGreater(sim.car.velocity[1] - v0, 5.0, "Wheelie jump must launch car into the air (Jump 1)")
+        self.assertTrue(sim.car.has_jump2, "Jump 2 must still be available in the air after Jump 1 from wheelie")
+
+    def test_upright_on_bumper_cannot_jump1_only_jump2(self):
+        """When car is standing vertically upright on its rear bumper (pitch >= 75 deg), it cannot Jump 1, only Jump 2."""
+        sim = Simulation()
+        sim.car.reset(FLAT_START_X, sim.spawn_y)
+        # Stand upright on rear bumper
+        for _ in range(60):
+            sim.step(CarAction(dir_x=0.0, dir_y=1.0), DT)
+
+        self.assertTrue(sim.car.is_upright, "Car should be standing upright on its rear bumper")
+        self.assertFalse(sim.car.can_ground_jump, "Upright car on bumper cannot do Jump 1")
+        self.assertTrue(sim.car.has_jump2, "Jump 2 is initially available")
+
+        # Trigger jump while upright on bumper: should consume Jump 2
+        sim.step(CarAction(jump=True), DT)
+        self.assertFalse(sim.car.has_jump2, "Jump 2 must be consumed when jumping while upright")
+
+        # Second jump while upright and depleted must be blocked (no upward impulse)
+        sim.step(CarAction(jump=False), DT)
+        v_before = sim.car.velocity[1]
+        sim.step(CarAction(jump=True), DT)
+        self.assertLess(sim.car.velocity[1] - v_before, 2.0,
+                        msg="Cannot jump again when upright and Jump 2 is depleted")
+        self.assertFalse(sim.car.has_jump2, "Jump 2 must remain depleted")
+
     def test_freefall_is_pure_gravity(self):
         sim = Simulation()
         sim.car.reset(16.0, 13.0)

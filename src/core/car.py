@@ -157,6 +157,22 @@ class Car:
         return self.wheels[0].hit and self.wheels[1].hit
 
     @property
+    def pitch_degrees(self) -> float:
+        """Angle in degrees between car chassis and flat horizontal surface (0 = flat, 90 = vertical)."""
+        fwd_x, fwd_y = self.forward_vector
+        return abs(math.degrees(math.atan2(fwd_y, abs(fwd_x))))
+
+    @property
+    def is_upright(self) -> bool:
+        """True if the car is standing vertically upright on its tail/bumper (pitch >= 75 deg) or airborne."""
+        return self.pitch_degrees >= 75.0 or self.wheel_contact_count == 0
+
+    @property
+    def can_ground_jump(self) -> bool:
+        """True if car can perform Jump 1 and recover Jump 2 (flat ground or wheelie < 75 deg)."""
+        return self.both_wheels_grounded or (self.wheel_contact_count >= 1 and not self.is_upright)
+
+    @property
     def ground_normal(self) -> Tuple[float, float]:
         """Averaged surface normal under the car (world up when airborne)."""
         return self._ground_normal
@@ -257,8 +273,8 @@ class Car:
 
         self._wheels_grounded = hits > 0
 
-        # Whenever both wheels are in contact, jump 2 recharges
-        if hits == 2:
+        # Whenever drivable wheel contact is made (flat or wheelie < 75 deg), jump 2 recharges
+        if self.can_ground_jump:
             self.has_jump2 = True
             if self._flip_active:
                 self._flip_active = False
@@ -450,10 +466,8 @@ class Car:
         if not jump_just_pressed:
             return
 
-        both_wheels = self.wheels[0].hit and self.wheels[1].hit
-
-        if both_wheels:
-            # --- JUMP 1 (Ground Launch) ---
+        if self.can_ground_jump:
+            # --- JUMP 1 (Ground Launch & Wheelie Launch) ---
             self.has_jump2 = True
             up_x, up_y = self.up_vector
             impulse = self.mass * CAR_JUMP_SPEED
@@ -467,7 +481,7 @@ class Car:
                 wheel.compression = 0.0
 
         else:
-            # --- JUMP 2 (Airborne) ---
+            # --- JUMP 2 (Standing Upright on Bumper or Airborne) ---
             # Rule: Whenever jump 2 is depleted, you cannot perform jump 1 either
             if not self.has_jump2:
                 return
@@ -477,10 +491,16 @@ class Car:
 
             input_mag = math.hypot(action.dir_x, action.dir_y)
             if input_mag <= INPUT_DEADZONE:
-                # Type 1: Without direction control -> "jump like normal"
+                # Type 1: Without direction control -> fresh start jump from the current point
                 up_x, up_y = self.up_vector
-                impulse = self.mass * CAR_DOUBLE_JUMP_SPEED
-                self.body.apply_impulse_at_world_point((impulse * up_x, impulse * up_y), self.body.position)
+                vx, vy = self.body.velocity
+                # Decompose velocity into normal (along up_vector) and tangential (perpendicular)
+                v_up = vx * up_x + vy * up_y
+                v_tan_x = vx - v_up * up_x
+                v_tan_y = vy - v_up * up_y
+                # Treat press position as the fresh start point of Jump 2 with full launch speed
+                launch_speed = CAR_DOUBLE_JUMP_SPEED
+                self.body.velocity = pymunk.Vec2d(v_tan_x + launch_speed * up_x, v_tan_y + launch_speed * up_y)
             else:
                 # Type 2: With direction control -> "rotate 360 degree depends on the direction it facing"
                 nd_x = action.dir_x / input_mag
