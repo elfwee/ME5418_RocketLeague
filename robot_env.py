@@ -12,22 +12,45 @@ import math
 ROLLING_BALL = True       # Set to True for bouncy rolling balls, False for heavy sliding crates
 CLAW_WIDTH = 25           # Width (gap / opening) between the claw arms
 CLAW_DEPTH = 20           # Depth (length / reach) of the claw arms
-NUM_BALLS = 4             # Number of balls in the environment
-NUM_HOLES = 4             # Number of corner holes (1-4, clockwise starting from top-right)
-HOLE_RADIUS = 35          # Radius of each corner hole
+NUM_BALLS = 1             # Number of balls in the environment
+NUM_GOALS = 1             # Number of rectangular goals (1-4). If 2, goals are opposite each other
+GOAL_WIDTH = 140          # Long edge of the goal flush to the wall
+GOAL_DEPTH = 40           # Depth of the goal extending inward from the wall
+# Backward compatibility aliases
+NUM_HOLES = NUM_GOALS
+HOLE_RADIUS = GOAL_DEPTH
 BODY_RADIUS = 20          # Radius of the ball-like agent body
 KICK_RADIUS = 50          # Kick radius around the agent body
 KICK_INTENSITY = 500      # Fixed impulse intensity for kicking balls
 KICK_ALL = True           # If True, kicks all balls within radius; if False, kicks only the nearest ball
 
+class Goal(pygame.Rect):
+    """
+    Represents a rectangular goal positioned on an arena border wall.
+    The long edge of the goal is flush to the wall.
+    """
+    def __init__(self, side, x, y, width, height):
+        super().__init__(int(x), int(y), int(width), int(height))
+        self.side = side  # 'left', 'right', 'top', 'bottom'
+
+    def contains(self, pos):
+        px = pos.x if hasattr(pos, 'x') else pos[0]
+        py = pos.y if hasattr(pos, 'y') else pos[1]
+        return self.collidepoint(px, py)
+
+
 # Global state
 score = 0
-active_holes = []
+active_goals = []
+active_holes = active_goals  # Backward compatibility alias
 active_balls = []
 current_body_radius = BODY_RADIUS
 current_kick_radius = KICK_RADIUS
 current_kick_intensity = KICK_INTENSITY
 current_kick_all = KICK_ALL
+current_num_goals = NUM_GOALS
+current_goal_width = GOAL_WIDTH
+current_goal_depth = GOAL_DEPTH
 agent_body = None
 tank_body = None
 agent_control_body = None
@@ -37,19 +60,33 @@ kick_cooldown_timer = 0.0
 kick_visual_timer = 0.0
 
 
-def get_hole_positions(num_holes=NUM_HOLES, width=640, height=480):
+def get_goal_positions(num_goals=NUM_GOALS, width=640, height=480, goal_width=GOAL_WIDTH, goal_depth=GOAL_DEPTH):
     """
-    Returns corner hole coordinates in clockwise order starting from Top-Right.
-    1: Top-Right, 2: Bottom-Right, 3: Bottom-Left, 4: Top-Left
+    Returns rectangular goals positioned on the arena borders with their long edge flush to the wall.
+    1 goal:  ['left']
+    2 goals: ['left', 'right'] (opposite each other)
+    3 goals: ['left', 'right', 'top']
+    4 goals: ['left', 'right', 'top', 'bottom']
+    Can also accept a list/tuple of side names like ['left', 'right'].
     """
-    all_corners = [
-        Vec2d(width, 0),       # 1: Top-Right
-        Vec2d(width, height),  # 2: Bottom-Right
-        Vec2d(0, height),      # 3: Bottom-Left
-        Vec2d(0, 0),           # 4: Top-Left
-    ]
-    num = max(0, min(4, num_holes))
-    return all_corners[:num]
+    goals_dict = {
+        'left': Goal('left', 0, height / 2 - goal_width / 2, goal_depth, goal_width),
+        'right': Goal('right', width - goal_depth, height / 2 - goal_width / 2, goal_depth, goal_width),
+        'top': Goal('top', width / 2 - goal_width / 2, 0, goal_width, goal_depth),
+        'bottom': Goal('bottom', width / 2 - goal_width / 2, height - goal_depth, goal_width, goal_depth),
+    }
+
+    if isinstance(num_goals, (list, tuple)):
+        return [goals_dict[str(side).lower()] for side in num_goals if str(side).lower() in goals_dict]
+
+    order = ['right', 'left', 'top', 'bottom']
+    num = max(0, min(4, int(num_goals)))
+    return [goals_dict[side] for side in order[:num]]
+
+
+# Backward compatibility alias
+get_hole_positions = get_goal_positions
+
 
 
 def kick(
@@ -128,7 +165,8 @@ def update(
     surface=None,
     speed=200,
     turn_speed=3.0,
-    hole_radius=HOLE_RADIUS,
+    hole_radius=None,
+    goals=None,
     body_radius=None,
     kick_radius=None,
     kick_intensity=None,
@@ -138,14 +176,16 @@ def update(
     global agent_control_body, tank_control_body
     global score
     global active_balls
-    global active_holes
+    global active_goals, active_holes
     global current_body_radius, current_kick_radius, current_kick_intensity, current_kick_all
+    global current_goal_depth
     global kick_key_prev, kick_cooldown_timer, kick_visual_timer
 
     b_rad = body_radius if body_radius is not None else current_body_radius
     k_rad = kick_radius if kick_radius is not None else current_kick_radius
     k_int = kick_intensity if kick_intensity is not None else current_kick_intensity
     k_all = kick_all if kick_all is not None else current_kick_all
+    current_goals = goals if goals is not None else active_goals
 
     # Sync control body with agent body
     if agent_control_body is not None and agent_body is not None:
@@ -200,38 +240,53 @@ def update(
         else:
             kick_key_prev = False
 
-    # Check if any ball dropped into an active corner hole
+    # Check if any ball entered an active goal
     balls_to_remove = []
     for item in active_balls:
         body, pivot, gear = item
-        for hole in active_holes:
-            if (body.position - hole).length <= hole_radius:
+        for goal in current_goals:
+            in_goal = False
+            if hasattr(goal, 'contains'):
+                in_goal = goal.contains(body.position)
+            elif hasattr(goal, 'collidepoint'):
+                in_goal = goal.collidepoint(body.position.x, body.position.y)
+            elif isinstance(goal, (tuple, list)) and len(goal) == 4:
+                in_goal = (goal[0] <= body.position.x <= goal[0] + goal[2] and
+                           goal[1] <= body.position.y <= goal[1] + goal[3])
+            elif hasattr(goal, 'x') and hasattr(goal, 'y'):
+                rad = hole_radius if hole_radius is not None else current_goal_depth
+                in_goal = (body.position - goal).length <= rad
+
+            if in_goal:
                 balls_to_remove.append(item)
                 score += 1
                 break
 
-    # Remove potted balls from the physics simulation
+    # Remove scored balls from the physics simulation
     for item in balls_to_remove:
         body, pivot, gear = item
         if item in active_balls:
             active_balls.remove(item)
-            space.remove(body, *body.shapes, pivot, gear)
+            to_remove = [o for o in (body, *body.shapes, pivot, gear) if o is not None]
+            if to_remove:
+                space.remove(*to_remove)
 
     space.step(dt)
 
 
-
-def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADIUS, agent_radius=BODY_RADIUS):
+def add_box(space, size, mass, elasticity=0.8, goals=None, holes=None, hole_radius=None, agent_radius=BODY_RADIUS):
     radius = Vec2d(size, size).length
 
     body = pymunk.Body()
     space.add(body)
 
-    # Keep ball inside boundaries and away from holes & agent spawn
+    # Keep ball inside boundaries and away from goals & agent spawn
     min_x = radius + 15
     max_x = 640 - radius - 15
     min_y = radius + 15
     max_y = 480 - radius - 15
+
+    target_goals = goals if goals is not None else (holes if holes is not None else [])
 
     while True:
         pos = Vec2d(
@@ -239,11 +294,18 @@ def add_box(space, size, mass, elasticity=0.8, holes=None, hole_radius=HOLE_RADI
             random.uniform(min_y, max_y),
         )
         too_close = False
-        if holes:
-            for hole in holes:
-                if (pos - hole).length < (hole_radius + radius + 20):
+        for g in target_goals:
+            if hasattr(g, 'x') and hasattr(g, 'y') and hasattr(g, 'width') and hasattr(g, 'height'):
+                margin = radius + 15
+                if (g.x - margin <= pos.x <= g.x + g.width + margin and
+                    g.y - margin <= pos.y <= g.y + g.height + margin):
                     too_close = True
                     break
+            elif hasattr(g, 'x') and hasattr(g, 'y'):
+                if (pos - g).length < (40 + radius + 20):
+                    too_close = True
+                    break
+
         # Avoid spawning directly on top of the agent (320, 240)
         min_agent_dist = max(50, agent_radius + radius + 20)
         if (pos - Vec2d(320, 240)).length < min_agent_dist:
@@ -367,8 +429,11 @@ def init(
     claw_width=CLAW_WIDTH,
     claw_depth=CLAW_DEPTH,
     num_balls=NUM_BALLS,
-    num_holes=NUM_HOLES,
-    hole_radius=HOLE_RADIUS,
+    num_holes=None,
+    num_goals=NUM_GOALS,
+    hole_radius=None,
+    goal_width=GOAL_WIDTH,
+    goal_depth=GOAL_DEPTH,
     body_radius=BODY_RADIUS,
     kick_radius=KICK_RADIUS,
     kick_intensity=KICK_INTENSITY,
@@ -376,15 +441,22 @@ def init(
     has_claw=False,
 ):
     global score
-    global active_holes
+    global active_goals, active_holes
     global active_balls
     global agent_body, tank_body
     global agent_control_body, tank_control_body
     global current_body_radius, current_kick_radius, current_kick_intensity, current_kick_all
+    global current_num_goals, current_goal_width, current_goal_depth
     global kick_key_prev, kick_cooldown_timer, kick_visual_timer
 
+    if num_holes is not None:
+        num_goals = num_holes
+    if hole_radius is not None:
+        goal_depth = hole_radius
+
     score = 0
-    active_holes = get_hole_positions(num_holes, 640, 480)
+    active_goals = get_goal_positions(num_goals, 640, 480, goal_width, goal_depth)
+    active_holes = active_goals
     active_balls = []
     kick_key_prev = False
     kick_cooldown_timer = 0.0
@@ -394,6 +466,9 @@ def init(
     current_kick_radius = kick_radius
     current_kick_intensity = kick_intensity
     current_kick_all = kick_all
+    current_num_goals = num_goals
+    current_goal_width = goal_width
+    current_goal_depth = goal_depth
 
     space = pymunk.Space()
     space.iterations = 10
@@ -419,8 +494,7 @@ def init(
             5,
             1,
             elasticity=ball_elasticity,
-            holes=active_holes,
-            hole_radius=hole_radius,
+            goals=active_goals,
             agent_radius=body_radius,
         )
 
@@ -464,22 +538,28 @@ if __name__ == "__main__":
     space = init(
         rolling_ball=ROLLING_BALL,
         num_balls=NUM_BALLS,
-        num_holes=NUM_HOLES,
-        hole_radius=HOLE_RADIUS,
+        num_goals=NUM_GOALS,
+        goal_width=GOAL_WIDTH,
+        goal_depth=GOAL_DEPTH,
         body_radius=BODY_RADIUS,
         kick_radius=KICK_RADIUS,
         kick_intensity=KICK_INTENSITY,
         kick_all=KICK_ALL,
     )
+    UI_HEIGHT = 60
+    WINDOW_WIDTH = 640
+    WINDOW_HEIGHT = 480 + UI_HEIGHT
+
     pygame.init()
-    screen = pygame.display.set_mode((640, 480))
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     clock = pygame.time.Clock()
-    draw_options = pymunk.pygame_util.DrawOptions(screen)
+
+    # The arena sits below the top UI header bar, placing all wordings outside the border
+    arena_rect = pygame.Rect(0, UI_HEIGHT, 640, 480)
+    arena_surface = screen.subsurface(arena_rect)
+    draw_options = pymunk.pygame_util.DrawOptions(arena_surface)
 
     font = pygame.font.Font(None, 24)
-    instructions_text = font.render(
-        "Arrow keys/WASD: Move/Turn | Space: Kick | T: Toggle Mode", True, pygame.Color("white")
-    )
 
     while True:
         for event in pygame.event.get():
@@ -491,18 +571,58 @@ if __name__ == "__main__":
                 exit()
             elif event.type == pygame.KEYDOWN and event.key in [pygame.K_t, pygame.K_m]:
                 current_kick_all = not current_kick_all
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_g:
+                next_n = 1 if len(active_goals) >= 4 else (len(active_goals) + 1)
+                active_goals = get_goal_positions(next_n, 640, 480, current_goal_width, current_goal_depth)
+                active_holes = active_goals
+                current_num_goals = next_n
+            elif event.type == pygame.KEYDOWN and event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
+                n = event.key - pygame.K_0
+                active_goals = get_goal_positions(n, 640, 480, current_goal_width, current_goal_depth)
+                active_holes = active_goals
+                current_num_goals = n
 
-        screen.fill(pygame.Color("black"))
+        # Clear UI header (outside border) and arena surface (inside border)
+        screen.fill((18, 22, 28))
+        arena_surface.fill(pygame.Color("black"))
 
-        # Draw corner holes (high-contrast vibrant green theme)
-        for hole in active_holes:
-            pos = (int(hole.x), int(hole.y))
-            # Base vibrant green fill (high contrast against black)
-            pygame.draw.circle(screen, (34, 160, 75), pos, HOLE_RADIUS)
-            # Inner pocket depth circle
-            pygame.draw.circle(screen, (20, 110, 50), pos, int(HOLE_RADIUS * 0.65))
-            # Bright neon green outer rim
-            pygame.draw.circle(screen, (100, 255, 140), pos, HOLE_RADIUS, 3)
+        # Header separator bar separating outside UI from the playing field
+        pygame.draw.line(screen, (60, 80, 105), (0, UI_HEIGHT - 1), (WINDOW_WIDTH, UI_HEIGHT - 1), 2)
+
+        # Draw rectangular goals flush to the border walls on arena_surface
+        for goal in active_goals:
+            # Semi-transparent net interior fill
+            goal_surf = pygame.Surface((goal.width, goal.height), pygame.SRCALPHA)
+            goal_surf.fill((20, 80, 45, 180))
+            arena_surface.blit(goal_surf, (goal.x, goal.y))
+
+            # Net grid lines
+            grid_spacing = 10
+            for gx in range(goal.x, goal.x + goal.width + 1, grid_spacing):
+                pygame.draw.line(arena_surface, (30, 110, 60), (gx, goal.y), (gx, goal.y + goal.height), 1)
+            for gy in range(goal.y, goal.y + goal.height + 1, grid_spacing):
+                pygame.draw.line(arena_surface, (30, 110, 60), (goal.x, gy), (goal.x + goal.width, gy), 1)
+
+            # Bright goalposts outline
+            pygame.draw.rect(arena_surface, (60, 220, 100), goal, 2)
+
+            # Goal mouth entrance line (facing the field) with corner post markers
+            if goal.side == "left":
+                pygame.draw.line(arena_surface, (255, 255, 255), (goal.right, goal.top), (goal.right, goal.bottom), 3)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.right, goal.top), 4)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.right, goal.bottom), 4)
+            elif goal.side == "right":
+                pygame.draw.line(arena_surface, (255, 255, 255), (goal.left, goal.top), (goal.left, goal.bottom), 3)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.left, goal.top), 4)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.left, goal.bottom), 4)
+            elif goal.side == "top":
+                pygame.draw.line(arena_surface, (255, 255, 255), (goal.left, goal.bottom), (goal.right, goal.bottom), 3)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.left, goal.bottom), 4)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.right, goal.bottom), 4)
+            elif goal.side == "bottom":
+                pygame.draw.line(arena_surface, (255, 255, 255), (goal.left, goal.top), (goal.right, goal.top), 3)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.left, goal.top), 4)
+                pygame.draw.circle(arena_surface, (255, 215, 0), (goal.right, goal.top), 4)
 
         # Draw kick radius around agent body
         if agent_body is not None:
@@ -525,7 +645,7 @@ if __name__ == "__main__":
                 pygame.draw.circle(kick_surf, (0, 180, 255, 20), c_pos, eff_kick_radius)
                 pygame.draw.circle(kick_surf, (0, 200, 255, 90), c_pos, eff_kick_radius, 1)
 
-            screen.blit(kick_surf, (agent_x - c_pos[0], agent_y - c_pos[1]))
+            arena_surface.blit(kick_surf, (agent_x - c_pos[0], agent_y - c_pos[1]))
 
         space.debug_draw(draw_options)
 
@@ -535,29 +655,36 @@ if __name__ == "__main__":
             angle = agent_body.angle
             dir_x = agent_x + int(math.cos(angle) * current_body_radius)
             dir_y = agent_y + int(math.sin(angle) * current_body_radius)
-            pygame.draw.line(screen, (255, 255, 255), (agent_x, agent_y), (dir_x, dir_y), 3)
-            pygame.draw.circle(screen, (255, 220, 0), (dir_x, dir_y), 4)
+            pygame.draw.line(arena_surface, (255, 255, 255), (agent_x, agent_y), (dir_x, dir_y), 3)
+            pygame.draw.circle(arena_surface, (255, 220, 0), (dir_x, dir_y), 4)
 
-        # Instructions on top left
-        screen.blit(instructions_text, (15, 12))
-        mode_str = "All Balls" if current_kick_all else "Nearest Ball"
+        # Wordings rendered outside the border in the dedicated UI bar
+        instructions_text = font.render(
+            "Move: Arrows/WASD | Space: Kick | T: Kick Mode | G/1-4: Goals",
+            True,
+            pygame.Color("white"),
+        )
+        screen.blit(instructions_text, (15, 10))
+
+        mode_str = "All" if current_kick_all else "Nearest"
+        goal_sides_str = "+".join([g.side.capitalize() for g in active_goals])
         sub_text = font.render(
-            f"Body R: {current_body_radius} | Kick R: {current_kick_radius} | Intensity: {current_kick_intensity} | Target: {mode_str}",
+            f"Goals: {len(active_goals)} ({goal_sides_str}) | Body R: {current_body_radius} | Kick R: {current_kick_radius} | Kick: {mode_str}",
             True,
             (160, 200, 240),
         )
-        screen.blit(sub_text, (15, 34))
+        screen.blit(sub_text, (15, 32))
 
-        # Score on top right
+        # Score on top right outside the border
         score_surface = font.render("Score: {}".format(score), True, pygame.Color("yellow"))
-        screen.blit(score_surface, (640 - score_surface.get_width() - 15, 15))
+        screen.blit(score_surface, (WINDOW_WIDTH - score_surface.get_width() - 15, 18))
 
         fps = 60
         update(
             space,
             1 / fps,
-            screen,
-            hole_radius=HOLE_RADIUS,
+            arena_surface,
+            goals=active_goals,
             body_radius=current_body_radius,
             kick_radius=current_kick_radius,
             kick_intensity=current_kick_intensity,
