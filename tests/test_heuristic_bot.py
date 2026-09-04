@@ -180,6 +180,21 @@ class TestHeuristicBot(unittest.TestCase):
         # Orange car should have moved right toward its defensive zone
         self.assertGreater(car_o.position[0], 17.5, "Orange car must advance toward its defensive half")
 
+    def test_kickoff_respawn_is_always_symmetrical(self):
+        """Verify that Orange and Blue car respawn positions are 100% symmetrical across all rounds."""
+        for r in range(6):
+            bx = self.sim.car.position[0]
+            ox = self.sim.car_orange.position[0]
+            dist_blue = self.sim.center_x - bx
+            dist_orange = ox - self.sim.center_x
+            self.assertAlmostEqual(
+                dist_blue, dist_orange, delta=1e-4,
+                msg=f"Round {r}: Blue dist to ball ({dist_blue:.2f}m) != Orange dist to ball ({dist_orange:.2f}m)"
+            )
+            self.assertEqual(self.sim.car.facing_x, 1, "Blue must face Right (+1)")
+            self.assertEqual(self.sim.car_orange.facing_x, -1, "Orange must face Left (-1)")
+            self.sim.reset()
+
 
 if __name__ == '__main__':
     unittest.main()

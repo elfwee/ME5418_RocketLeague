@@ -62,6 +62,8 @@ class Simulation:
             if self.orange_is_bot:
                 self.orange_bot = HeuristicBot(team="orange")
 
+        self._spawn_index += 1
+
         self._setup_collision_handlers()
 
     def set_orange_enabled(self, enabled: bool, is_bot: bool = True):
@@ -74,9 +76,10 @@ class Simulation:
 
         if enabled:
             if self.car_orange is None:
-                ox, oy, oang, ofac = self.get_spawn_position("orange")
-                self.car_orange = Car(self.space, x=ox, y=oy, angle=oang, team="orange")
-                self.car_orange.reset(ox, oy, angle=oang, facing_x=ofac)
+                ox = 2.0 * self.center_x - self.car.position[0]
+                oy = self.spawn_y
+                self.car_orange = Car(self.space, x=ox, y=oy, angle=math.pi, team="orange")
+                self.car_orange.reset(ox, oy, angle=math.pi, facing_x=-1)
             if self.orange_is_bot and self.orange_bot is None:
                 self.orange_bot = HeuristicBot(team="orange")
         else:
@@ -95,17 +98,16 @@ class Simulation:
         """Floor elevation that places the ball resting on the arena floor."""
         return MARGIN_Y + ARENA_SEGMENT_RADIUS + BALL_RADIUS
 
-    def get_spawn_position(self, team: Optional[str] = None) -> Tuple[float, float, float, int]:
-        """Get the next alternating kickoff spawn (x, y, angle, facing_x) on the team's side."""
+    def get_spawn_position(self, team: Optional[str] = None, spawn_index: Optional[int] = None) -> Tuple[float, float, float, int]:
+        """Get the kickoff spawn (x, y, angle, facing_x) on the team's side for the kickoff round."""
         team = team or self.car.team
         positions = [CAR_SPAWN_X_DEFENSIVE, CAR_SPAWN_X_ATTACK]
-        x_blue = positions[self._spawn_index % len(positions)]
-        if team == "blue":
-            self._spawn_index += 1
+        idx = self._spawn_index if spawn_index is None else spawn_index
+        x_blue = positions[idx % len(positions)]
 
         if team == "orange":
-            # Symmetrical position on Orange side, facing Left (angle = pi)
-            x_orange = self.arena.x_right - (x_blue - self.arena.x_left)
+            # Exact symmetrical position on Orange side, facing Left (angle = pi)
+            x_orange = 2.0 * self.center_x - x_blue
             return (x_orange, self.spawn_y, math.pi, -1)
         else:
             return (x_blue, self.spawn_y, 0.0, 1)
@@ -200,7 +202,7 @@ class Simulation:
         # 1. Ball spawns resting on the ground at center
         self.ball.reset(self.center_x, self.ball_spawn_y)
 
-        # 2. Blue Car spawns at its next alternating position on its side
+        # 2. Blue Car spawns at kickoff position for current round
         if spawn_pos is None:
             x, y, angle, facing = self.get_spawn_position("blue")
         else:
@@ -208,10 +210,19 @@ class Simulation:
 
         self.car.reset(x, y, angle=angle, facing_x=facing)
 
-        # 3. Orange Car spawns at its mirrored kickoff position
+        # 3. Orange Car spawns at the exact symmetrical position mirrored across center_x
         if self.car_orange is not None:
-            ox, oy, oang, ofacing = self.get_spawn_position("orange")
+            if spawn_pos is None:
+                ox, oy, oang, ofacing = self.get_spawn_position("orange")
+            else:
+                ox = 2.0 * self.center_x - x
+                oy = y
+                oang = math.pi
+                ofacing = -1
             self.car_orange.reset(ox, oy, angle=oang, facing_x=ofacing)
+
+        # Advance kickoff spawn index for the next kickoff round
+        self._spawn_index += 1
 
         self.time_elapsed = 0.0
 
