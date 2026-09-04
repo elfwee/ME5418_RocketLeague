@@ -292,7 +292,9 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
 
 ```python
 {
-    "time": 4.35,                          # Elapsed match time (seconds)
+    "time": 4.35,                          # Round time since last kickoff (seconds)
+    "match_time": 18.75,                   # Cumulative match time across kickoffs (seconds)
+    "goal_scored_step": "blue",            # Non-null only on the single frame a goal is scored ("blue"/"orange"/None)
     "ball": {
         "position": (13.0, 2.75),          # (x, y) coordinates in meters
         "velocity": (4.2, -1.1),           # (vx, vy) velocity in m/s

@@ -33,8 +33,10 @@ class Simulation:
         self.score_blue: int = 0
         self.score_orange: int = 0
         self.last_goal_team: Optional[str] = None
+        self.goal_scored_this_step: Optional[str] = None
         self._spawn_index: int = 0
         self.time_elapsed: float = 0.0
+        self.match_time: float = 0.0
 
         # Center coordinates
         self.center_x = MARGIN_X + FIELD_WIDTH / 2.0
@@ -167,6 +169,8 @@ class Simulation:
 
     def step(self, action: CarAction, dt: float = 1.0 / SIM_HZ, action_orange: Optional[CarAction] = None):
         """Advance the physics simulation by dt using sub-stepping for stability."""
+        self.goal_scored_this_step = None
+
         if self.car_orange is not None and action_orange is None and self.orange_bot is not None:
             action_orange = self.orange_bot.compute_action(self)
 
@@ -180,6 +184,7 @@ class Simulation:
 
         self.ball.record_trail()
         self.time_elapsed += dt
+        self.match_time += dt
 
         # Score logic: goal only counts when ball is 100% inside the goal pocket
         scoring_team = self._check_goal()
@@ -189,6 +194,7 @@ class Simulation:
             elif scoring_team == "orange":
                 self.score_orange += 1
             self.last_goal_team = scoring_team
+            self.goal_scored_this_step = scoring_team
             # Reset kickoff after goal
             self.reset(reset_scores=False)
 
@@ -198,6 +204,8 @@ class Simulation:
             self.score_blue = 0
             self.score_orange = 0
             self.last_goal_team = None
+            self.goal_scored_this_step = None
+            self.match_time = 0.0
 
         # 1. Ball spawns resting on the ground at center
         self.ball.reset(self.center_x, self.ball_spawn_y)
@@ -221,6 +229,10 @@ class Simulation:
                 ofacing = -1
             self.car_orange.reset(ox, oy, angle=oang, facing_x=ofacing)
 
+        # Reset bot if active
+        if self.orange_bot is not None:
+            self.orange_bot.reset()
+
         # Advance kickoff spawn index for the next kickoff round
         self._spawn_index += 1
 
@@ -230,6 +242,8 @@ class Simulation:
         """Query complete simulation state for headless evaluation or RL."""
         state = {
             "time": self.time_elapsed,
+            "match_time": self.match_time,
+            "goal_scored_step": self.goal_scored_this_step,
             "ball": {
                 "position": self.ball.position,
                 "velocity": self.ball.velocity,

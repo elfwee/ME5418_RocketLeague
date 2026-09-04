@@ -19,6 +19,13 @@ class HeuristicBot:
         self._jump_press_timer = 0
         self._last_dodge_time = 0.0
 
+    def reset(self):
+        """Reset internal timers and behavioral state upon kickoff."""
+        self.current_state = "KICKOFF"
+        self._jump_cooldown = 0.0
+        self._jump_press_timer = 0
+        self._last_dodge_time = 0.0
+
     def predict_ball_position(self, sim, dt_ahead: float) -> Tuple[float, float]:
         """Predict ball position dt_ahead seconds into the future assuming ballistic trajectory and floor bounce."""
         bx, by = sim.ball.position
@@ -48,6 +55,16 @@ class HeuristicBot:
         # 1. KICKOFF: Ball is stationary near center field
         if abs(bx - sim.center_x) < 0.5 and b_speed < 1.0 and abs(by - sim.ball_spawn_y) < 0.2:
             return "KICKOFF"
+
+        # 2. AERIAL Persistence: If already airborne and committed to an aerial, stay in AERIAL
+        if self.current_state == "AERIAL" and not car.both_wheels_grounded:
+            if car.boost_amount > 5.0 and by > 2.5:
+                # If ball drops behind defense in own half, swap to DEFEND
+                if self.team == "orange" and bx > (BOT_DEFENSE_ZONE_X + 2.0):
+                    return "DEFEND"
+                elif self.team == "blue" and bx < (sim.arena.x_left + 7.5):
+                    return "DEFEND"
+                return "AERIAL"
 
         if self.team == "orange":
             # 1. In defensive half, DEFEND takes top priority!
@@ -112,9 +129,16 @@ class HeuristicBot:
                 if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
                     action.jump = True
                     self._jump_cooldown = 0.6
+                    self._jump_press_timer = 1
                 elif not car.both_wheels_grounded and car.has_jump2:
-                    action.jump = True
-                    action.dir_x = -1.0 if self.team == "orange" else 1.0
+                    if self._jump_press_timer == 1:
+                        # Release jump button for 1 frame so edge-detector resets
+                        action.jump = False
+                        self._jump_press_timer = 2
+                    else:
+                        action.jump = True
+                        action.dir_x = -1.0 if self.team == "orange" else 1.0
+                        self._jump_press_timer = 0
             return action
 
         # -------------------------------------------------------------

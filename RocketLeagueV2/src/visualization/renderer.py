@@ -30,6 +30,7 @@ class Renderer:
         # Reused scratch layer for alpha-blended overlays; allocating one per trail
         # segment costs ~25 full-screen surfaces every frame.
         self._alpha_layer = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        self._cached_goal_surfaces = {}
 
     def world_to_screen(self, x: float, y: float) -> Tuple[int, int]:
         """Convert SI coordinates (meters, +Y up) to screen pixels (+Y down)."""
@@ -82,30 +83,39 @@ class Renderer:
             is_left = getattr(sensor, "team", "") == "left"
             color = COLOR_GOAL_BLUE if is_left else COLOR_GOAL_ORANGE
 
-            # Soft translucent goal pocket fill with smooth inside corners
-            goal_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            radii = {
+            # Soft translucent goal pocket fill with smooth inside corners (cached to avoid per-frame allocations)
+            cache_key = (is_left, rect.width, rect.height)
+            if cache_key not in self._cached_goal_surfaces:
+                goal_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                radii = {
+                    "border_top_left_radius": r_px if is_left else 0,
+                    "border_bottom_left_radius": r_px if is_left else 0,
+                    "border_top_right_radius": 0 if is_left else r_px,
+                    "border_bottom_right_radius": 0 if is_left else r_px,
+                }
+                pygame.draw.rect(goal_surf, (*color, 45), pygame.Rect(0, 0, rect.width, rect.height), **radii)
+
+                # Netting grid lines masked to the rounded goal pocket
+                net_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                for gy in range(0, rect.height, 16):
+                    pygame.draw.line(net_surf, (*color, 75), (0, gy), (rect.width, gy), 1)
+                for gx in range(0, rect.width, 16):
+                    pygame.draw.line(net_surf, (*color, 55), (gx, 0), (gx, rect.height), 1)
+
+                mask_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(mask_surf, (255, 255, 255, 255), pygame.Rect(0, 0, rect.width, rect.height), **radii)
+                net_surf.blit(mask_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                goal_surf.blit(net_surf, (0, 0))
+                self._cached_goal_surfaces[cache_key] = goal_surf
+
+            radii_outline = {
                 "border_top_left_radius": r_px if is_left else 0,
                 "border_bottom_left_radius": r_px if is_left else 0,
                 "border_top_right_radius": 0 if is_left else r_px,
                 "border_bottom_right_radius": 0 if is_left else r_px,
             }
-            pygame.draw.rect(goal_surf, (*color, 45), pygame.Rect(0, 0, rect.width, rect.height), **radii)
-
-            # Netting grid lines masked to the rounded goal pocket
-            net_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            for gy in range(0, rect.height, 16):
-                pygame.draw.line(net_surf, (*color, 75), (0, gy), (rect.width, gy), 1)
-            for gx in range(0, rect.width, 16):
-                pygame.draw.line(net_surf, (*color, 55), (gx, 0), (gx, rect.height), 1)
-
-            mask_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(mask_surf, (255, 255, 255, 255), pygame.Rect(0, 0, rect.width, rect.height), **radii)
-            net_surf.blit(mask_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-            goal_surf.blit(net_surf, (0, 0))
-
-            self.screen.blit(goal_surf, (rect.x, rect.y))
-            pygame.draw.rect(self.screen, color, rect, width=2, **radii)
+            self.screen.blit(self._cached_goal_surfaces[cache_key], (rect.x, rect.y))
+            pygame.draw.rect(self.screen, color, rect, width=2, **radii_outline)
 
     def _draw_ball(self, sim: Simulation):
         """Draw ball, rotation seam indicator, and trailing trajectory path."""

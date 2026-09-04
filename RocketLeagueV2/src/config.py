@@ -92,8 +92,8 @@ CAR_AIR_ANGULAR_ACCEL = 70.0    # rad/s^2 cap for air control
 CAR_AIR_SPIN_DECAY_TAU = 0.45   # Exponential spin decay time constant in air (s)
 CAR_PITCH_INPUT_THRESHOLD = 0.35# |dir_y| above this overrides ground-contour following
 INPUT_DEADZONE = 0.15           # Below this input magnitude no heading is commanded
-THROTTLE_DEADZONE = 0.08        # Below this |dir_x| the car coasts instead of driving
-FACING_FLIP_THRESHOLD = 0.15    # |dir_x| needed to mirror the car left/right
+THROTTLE_DEADZONE = 0.10        # Below this |dir_x| the car coasts instead of driving
+FACING_FLIP_THRESHOLD = 0.10    # |dir_x| needed to mirror the car left/right
 
 # --- Jump & Rocket Boost ---
 CAR_JUMP_SPEED = 11.76            # Instant jump velocity impulse for Jump 1 (m/s) (+20% jump height: 1.63m -> 1.96m)

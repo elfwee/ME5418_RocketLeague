@@ -418,7 +418,7 @@ class Car:
 
         vel = self.body.velocity
         v_t = vel.x * t_x + vel.y * t_y
-        throttle = abs(action.dir_x)
+        throttle = action.dir_x * self.facing_x
 
         # All-Wheel Drive (AWD): both front and rear axles contribute to ground grip.
         # If the car is resting on its chassis (bumper/nose dragging), use baseline contact load
@@ -435,6 +435,11 @@ class Car:
         max_speed = CAR_MAX_GROUND_SPEED * speed_factor
 
         if throttle > THROTTLE_DEADZONE:
+            target_speed = max_speed * throttle
+            accel = _clamp((target_speed - v_t) / dt, -CAR_DRIVE_ACCEL, CAR_DRIVE_ACCEL)
+            grip = TIRE_GRIP * total_normal_load
+            point = self.body.position
+        elif throttle < -THROTTLE_DEADZONE:
             target_speed = max_speed * throttle
             accel = _clamp((target_speed - v_t) / dt, -CAR_DRIVE_ACCEL, CAR_DRIVE_ACCEL)
             grip = TIRE_GRIP * total_normal_load

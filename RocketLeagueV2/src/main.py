@@ -80,14 +80,23 @@ def run_interactive(enable_orange: bool = True):
         action.dir_y = dir_y
         action.clamp()
 
+        # Safe button query helper
+        def _gamepad_btn(pad, idx: int) -> bool:
+            if pad is None:
+                return False
+            try:
+                return pad.get_numbuttons() > idx and bool(pad.get_button(idx))
+            except (pygame.error, SystemError):
+                return False
+
         # Jump: Space bar or Gamepad Button A (button 0)
-        action.jump = bool(keys[pygame.K_SPACE] or (gamepad and gamepad.get_button(0)))
+        action.jump = bool(keys[pygame.K_SPACE] or _gamepad_btn(gamepad, 0))
 
         # Rocket Boost: Shift, O, J, or Gamepad Button B / Trigger (buttons 1, 5)
         action.boost = bool(
             keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or
             keys[pygame.K_o] or keys[pygame.K_j] or
-            (gamepad and (gamepad.get_button(1) or gamepad.get_button(5)))
+            _gamepad_btn(gamepad, 1) or _gamepad_btn(gamepad, 5)
         )
 
         # --- Simulation Step ---
