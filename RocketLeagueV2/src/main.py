@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import pygame
 from src.config import (
-    SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
+    SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 )
 from src.core.actions import CarAction
 from src.core.simulation import Simulation
@@ -123,7 +123,7 @@ def run_headless(steps: int = 300, enable_orange: bool = True):
 
 
 if __name__ == '__main__':
-    enable_orange = True
+    enable_orange = ENABLE_ORANGE_CAR
     if "--no-orange" in sys.argv:
         enable_orange = False
     elif "--orange" in sys.argv:
