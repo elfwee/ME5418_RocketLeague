@@ -174,6 +174,70 @@ class TestCarBallCollision(unittest.TestCase):
         self.assertAlmostEqual(sim.car.position[0], 13.5, places=2)
         self.assertEqual(sim.car.facing_x, 1)
 
+    def test_car_pushes_ball_forward_without_roof_roll(self):
+        """Verify that driving forward into the ball at kickoff pushes the ball forward
+
+        rather than wedging under it and letting the ball roll onto the roof.
+        """
+        # --- 1. Blue Car drives right into kickoff ball ---
+        self.sim.reset(reset_scores=True)
+        self.sim.car.reset(10.0, self.sim.spawn_y, angle=0.0, facing_x=1)
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+
+        act = CarAction(dir_x=1.0, dir_y=0.0, boost=True)
+        ball_was_pushed_forward = False
+        ball_rolled_on_roof = False
+
+        for step in range(60):
+            self.sim.step(act, dt=1.0 / 60.0)
+            cx, cy = self.sim.car.position
+            bx, by = self.sim.ball.position
+
+            if bx > self.sim.center_x + 1.0:
+                ball_was_pushed_forward = True
+
+            # Stop check once ball enters opponent goal zone
+            if bx > 26.0:
+                break
+
+            # A roof roll would mean ball is directly above car chassis rather than ahead
+            if (cx - 0.8) <= bx <= (cx + 0.4) and by > 3.0:
+                ball_rolled_on_roof = True
+                break
+
+        self.assertFalse(ball_rolled_on_roof, "Ball rolled onto car roof during forward drive!")
+        self.assertTrue(ball_was_pushed_forward, "Ball was not pushed forward by the car!")
+        self.assertGreater(self.sim.ball.position[0], self.sim.car.position[0])
+
+        # --- 2. Left-facing car drives left into kickoff ball ---
+        self.sim.reset(reset_scores=True)
+        self.sim.car.reset(24.0, self.sim.spawn_y, angle=0.0, facing_x=-1)
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+
+        act_left = CarAction(dir_x=-1.0, dir_y=0.0, boost=True)
+        ball_was_pushed_left = False
+        ball_rolled_on_roof_left = False
+
+        for step in range(60):
+            self.sim.step(act_left, dt=1.0 / 60.0)
+            cx, cy = self.sim.car.position
+            bx, by = self.sim.ball.position
+
+            if bx < self.sim.center_x - 1.0:
+                ball_was_pushed_left = True
+
+            if bx < 8.0:
+                break
+
+            if (cx - 0.4) <= bx <= (cx + 0.8) and by > 3.0:
+                ball_rolled_on_roof_left = True
+                break
+
+        self.assertFalse(ball_rolled_on_roof_left, "Ball rolled onto car roof during leftward drive!")
+        self.assertTrue(ball_was_pushed_left, "Ball was not pushed leftward by the car!")
+        self.assertLess(self.sim.ball.position[0], self.sim.car.position[0])
+
+
 
 if __name__ == '__main__':
     unittest.main()

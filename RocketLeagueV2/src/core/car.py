@@ -76,13 +76,14 @@ class Car:
         # Horizontal facing state: +1 for facing Right, -1 for facing Left
         self.facing_x: int = 1
 
-        # Base tapered convex polygon vertices (facing Right, counter-clockwise)
+        # Base convex polygon vertices with blunt vertical front bumper (facing Right, CCW)
         # Scaled by CAR_SCALE (25% smaller)
         self.base_chassis_vertices: List[Tuple[float, float]] = [
             (-1.00 * CAR_SCALE, -0.32 * CAR_SCALE),   # Rear bottom
             (0.95 * CAR_SCALE, -0.32 * CAR_SCALE),    # Front bottom
-            (1.05 * CAR_SCALE, -0.15 * CAR_SCALE),    # Low tapered nose tip (wedge)
-            (0.35 * CAR_SCALE, 0.36 * CAR_SCALE),     # Hood slope to cabin
+            (1.05 * CAR_SCALE, -0.24 * CAR_SCALE),    # Front bumper lower
+            (1.05 * CAR_SCALE, 0.18 * CAR_SCALE),     # Front bumper upper (vertical grille face)
+            (0.40 * CAR_SCALE, 0.32 * CAR_SCALE),     # Hood / Cowl
             (-0.35 * CAR_SCALE, 0.38 * CAR_SCALE),    # Cabin roof
             (-1.00 * CAR_SCALE, 0.22 * CAR_SCALE)     # Rear spoiler deck
         ]
@@ -201,8 +202,8 @@ class Car:
 
     @property
     def nose_position(self) -> Tuple[float, float]:
-        """World position of the tapered front nose tip."""
-        p = self.body.local_to_world((1.05 * CAR_SCALE, -0.15 * CAR_SCALE * self.facing_x))
+        """World position of the front bumper face."""
+        p = self.body.local_to_world((1.05 * CAR_SCALE, -0.03 * CAR_SCALE * self.facing_x))
         return (p.x, p.y)
 
     @property

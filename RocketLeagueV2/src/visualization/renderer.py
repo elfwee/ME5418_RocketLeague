@@ -220,10 +220,16 @@ class Renderer:
         pygame.draw.polygon(self.screen, (125, 211, 252), s_cabin)
         pygame.draw.polygon(self.screen, (224, 242, 254), s_cabin, width=2)
 
-        # 5. Headlight & Forward Light Cone
-        headlight_pos = body.local_to_world((1.02 * cs, -0.14 * cs * facing))
+        # 5. Headlight & Front Grille
+        headlight_pos = body.local_to_world((1.02 * cs, 0.05 * cs * facing))
         s_hl = self.world_to_screen(headlight_pos.x, headlight_pos.y)
         pygame.draw.circle(self.screen, COLOR_HEADLIGHT, s_hl, 3)
+
+        g_top = body.local_to_world((1.04 * cs, 0.16 * cs * facing))
+        g_bot = body.local_to_world((1.04 * cs, -0.22 * cs * facing))
+        sg_top = self.world_to_screen(g_top.x, g_top.y)
+        sg_bot = self.world_to_screen(g_bot.x, g_bot.y)
+        pygame.draw.line(self.screen, (30, 41, 59), sg_top, sg_bot, 2)
 
         # Taillight
         tail_pos = body.local_to_world((-1.00 * cs, 0.05 * cs * facing))

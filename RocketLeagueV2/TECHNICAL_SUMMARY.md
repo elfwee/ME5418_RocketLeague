@@ -137,6 +137,12 @@ When inverted on its roof ($\vec{u}_y < -0.55$) for $t > 0.08\text{ s}$, the car
 1. Applies a vertical hop impulse ($v_{hop} = 4.5\text{ m/s}$).
 2. Engages high-authority flip torque ($\omega_{max} = 22\text{ rad/s}, \alpha_{max} = 260\text{ rad/s}^2$) for $0.45\text{ s}$ to snap upright without teleportation.
 
+#### G. Convex Chassis Hull & Vertical Front Bumper Profile
+To guarantee authentic vehicle-ball collision mechanics and prevent the car from wedging underneath the ball on kickoff or ground approaches, the chassis is formed by a strictly convex 7-vertex polygon featuring a blunt, vertical front bumper grille:
+* **Front Bumper Face**: Spans $(1.05 \cdot s, -0.24 \cdot s)$ to $(1.05 \cdot s, 0.18 \cdot s)$ (where $s = \text{CAR\_SCALE} = 0.75$).
+* **Horizontal Normal Alignment**: In world space, this vertical bumper face spans $y \in [1.83, 2.15]\text{ m}$, aligning directly against the equatorial lower hemisphere of the grounded ball ($y_{center} = 2.50\text{ m}, R = 0.9375\text{ m}$).
+* **Impact Mechanics**: Ground collisions produce a pure horizontal contact normal $(1.0, 0.0)$, pushing/punching the ball directly forward downfield rather than generating an upward vertical normal that scoops the ball onto the roof.
+
 ---
 
 ### 3.3. Ball Dynamics (`src/core/ball.py`)
