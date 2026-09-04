@@ -180,6 +180,30 @@ class TestVerticalMotion(unittest.TestCase):
         self.assertGreater(sim.car.velocity[1] - v0, 5.0, "Wheelie jump must launch car into the air (Jump 1)")
         self.assertTrue(sim.car.has_jump2, "Jump 2 must still be available in the air after Jump 1 from wheelie")
 
+    def test_first_jump_launches_straight_up_regardless_of_orientation(self):
+        """Jump 1 impulse must be purely vertical in world space (0, 1), not tilted by car orientation."""
+        sim = Simulation()
+        sim.car.reset(FLAT_START_X, sim.spawn_y)
+        # Tilt into a wheelie
+        for _ in range(40):
+            sim.step(CarAction(dir_x=1.0, dir_y=0.4), DT)
+
+        self.assertGreater(sim.car.pitch_degrees, 15.0, "Car should be pitched in a wheelie")
+        vx0 = sim.car.velocity[0]
+        vy0 = sim.car.velocity[1]
+
+        # Trigger Jump 1 while tilted
+        sim.step(CarAction(dir_x=1.0, dir_y=0.4, jump=True), DT)
+        vx1 = sim.car.velocity[0]
+        vy1 = sim.car.velocity[1]
+
+        # Horizontal velocity should be undisturbed by jump impulse
+        self.assertAlmostEqual(vx1, vx0, delta=0.01,
+                               msg="Jump 1 should not exert any horizontal impulse regardless of tilt")
+        # Vertical velocity should gain the full upward jump impulse
+        self.assertGreater(vy1 - vy0, CAR_JUMP_SPEED * 0.8,
+                           msg="Jump 1 must launch straight up with full vertical impulse")
+
     def test_upright_on_bumper_cannot_jump1_only_jump2(self):
         """When car is standing vertically upright on its rear bumper (pitch >= 75 deg), it cannot Jump 1, only Jump 2."""
         sim = Simulation()

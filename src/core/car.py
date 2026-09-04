@@ -468,10 +468,10 @@ class Car:
 
         if self.can_ground_jump:
             # --- JUMP 1 (Ground Launch & Wheelie Launch) ---
+            # Launches straight up in world space (0.0, 1.0) regardless of car orientation
             self.has_jump2 = True
-            up_x, up_y = self.up_vector
             impulse = self.mass * CAR_JUMP_SPEED
-            self.body.apply_impulse_at_world_point((impulse * up_x, impulse * up_y), self.body.position)
+            self.body.apply_impulse_at_world_point((0.0, impulse), self.body.position)
 
             # Unload the suspension so it lifts cleanly off the surface
             self._grounded = False
