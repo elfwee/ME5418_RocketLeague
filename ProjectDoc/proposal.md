@@ -32,6 +32,22 @@ where the ball will end up.
     - physics
     - strategy
     - prediction
+- Exsisting methods
+    - rule-based ai
+    - finite state machine
+    - utility ai
+    - Physics Prediction
+    - montecarlo tree search algorithm. 
+    - model predictive control
+- possible RL methods:
+    - Proximal poilicy optimization
+    - Q learning
+    - deep q learning 
+    - soft actor critic
+    - TD3
+    - multiagent reinforcement learning 
+    - self play
+    - curriculum learning
 
 # Problem Statements
 - Continuous State
