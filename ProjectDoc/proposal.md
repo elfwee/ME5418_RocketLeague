@@ -9,6 +9,29 @@ This project evaluates the effectiveness of continuous reinforcement learning ag
 
 # Conventional Algorithms
 - General ways to solve the problem is to provide a rules for the bots to perform certain predefined actions to score points.
+- Should RL be used to solve the proble?
+    - No obvious optimal policy,
+    - Delayed rewards as planning over many episodes to score in needed.
+    - clear desired outcome. 
+- What is to be learnt:
+    - Contact dynamics
+    - sparse rewards
+    - planning
+    - multi objective optimization
+    - multi agent extension
+    - Continuous physics
+    - momentum
+    - bouncing
+    - gravity
+    - timing
+    - strategic positioning
+- Robot must learn that hitting ball in the past led to scoring. 
+- search space is large given possible states, possible actions, and predicting \
+where the ball will end up. 
+- problem consists of:
+    - physics
+    - strategy
+    - prediction
 
 # Problem Statements
 - Continuous State
