@@ -195,6 +195,24 @@ class TestHeuristicBot(unittest.TestCase):
             self.assertEqual(self.sim.car_orange.facing_x, -1, "Orange must face Left (-1)")
             self.sim.reset()
 
+    def test_bot_scores_against_idle_opponent_without_own_goal(self):
+        """Verify Orange bot attacks and scores against an idle Blue car without scoring an own goal."""
+        self.sim.car_orange.reset(26.5, self.sim.spawn_y, angle=math.pi, facing_x=-1)
+        self.sim.car.reset(8.5, self.sim.spawn_y, angle=0.0, facing_x=1)
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+        self.sim.orange_bot.reset()
+
+        scored = None
+        for step in range(900):  # 15 seconds
+            self.sim.step(CarAction(), 1.0 / 60.0)
+            if self.sim.goal_scored_this_step:
+                scored = self.sim.goal_scored_this_step
+                break
+
+        self.assertEqual(scored, "orange", "Orange bot should score in Blue net, never score on itself")
+        self.assertEqual(self.sim.score_orange, 1)
+        self.assertEqual(self.sim.score_blue, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

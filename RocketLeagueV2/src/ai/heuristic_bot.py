@@ -119,15 +119,16 @@ class HeuristicBot:
         if self.current_state == "KICKOFF":
             dx = bx - cx
             dist_to_ball = abs(dx)
-            # Full throttle toward center
-            action.dir_x = -1.0 if self.team == "orange" else 1.0
+            sign = -1.0 if self.team == "orange" else 1.0
+            action.dir_x = sign
             action.dir_y = 0.0
             action.boost = True
 
-            # When closing in on kickoff ball, execute a power dodge flip
-            if dist_to_ball < 3.2 and car.has_jump2:
+            # Chip/pop on kickoff approach: launch ball on an elevated arc toward elevated goal mouth
+            if dist_to_ball < 2.9 and car.has_jump2:
                 if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
                     action.jump = True
+                    action.dir_y = 0.55
                     self._jump_cooldown = 0.6
                     self._jump_press_timer = 1
                 elif not car.both_wheels_grounded and car.has_jump2:
@@ -137,7 +138,8 @@ class HeuristicBot:
                         self._jump_press_timer = 2
                     else:
                         action.jump = True
-                        action.dir_x = -1.0 if self.team == "orange" else 1.0
+                        action.dir_x = sign
+                        action.dir_y = 0.40
                         self._jump_press_timer = 0
             return action
 
@@ -148,15 +150,34 @@ class HeuristicBot:
             # Dynamic safe target behind the ball: at least 3.0m behind ball or at defensive post
             if self.team == "orange":
                 safe_target_x = min(sim.arena.x_right - 2.0, max(bx + 3.0, own_goal_x - 3.5))
+                dx = safe_target_x - cx
+                if abs(dx) > 0.4:
+                    action.dir_x = 1.0 if dx > 0 else -1.0
+                else:
+                    action.dir_x = -1.0
+
+                # Anti-Own-Goal: If caught on wrong side and approaching ball, jump cleanly OVER it
+                if cx < bx and (bx - cx) < 3.5 and by < 4.0:
+                    action.dir_x = 1.0
+                    action.dir_y = 0.8
+                    action.jump = True
+                    action.boost = True
+                    return action
             else:
                 safe_target_x = max(sim.arena.x_left + 2.0, min(bx - 3.0, own_goal_x + 3.5))
+                dx = safe_target_x - cx
+                if abs(dx) > 0.4:
+                    action.dir_x = 1.0 if dx > 0 else -1.0
+                else:
+                    action.dir_x = 1.0
 
-            dx = safe_target_x - cx
-            if abs(dx) > 0.4:
-                action.dir_x = 1.0 if dx > 0 else -1.0
-            else:
-                # Reached defensive position: immediately face toward the ball / opponent net!
-                action.dir_x = -1.0 if self.team == "orange" else 1.0
+                # Anti-Own-Goal: If Blue caught on wrong side and approaching ball, jump OVER it
+                if cx > bx and (cx - bx) < 3.5 and by < 4.0:
+                    action.dir_x = -1.0
+                    action.dir_y = 0.8
+                    action.jump = True
+                    action.boost = True
+                    return action
 
             action.dir_y = 0.0
 
@@ -179,15 +200,25 @@ class HeuristicBot:
             dist = math.hypot(dx, dy)
 
             if self.team == "orange":
-                # Orange defends Right goal (x = 30.5).
-                # If Orange is to the left of the ball (cx < pred_bx - 0.2), drive RIGHT (+1.0) toward ball.
-                # If Orange is to the right of the ball (cx >= pred_bx - 0.2), drive LEFT (-1.0) to clear.
-                clear_dir_x = 1.0 if dx > 0.2 else -1.0
+                # Orange defends Right goal (x = 30.5). Clearance MUST ALWAYS BE DIRECTED LEFT (-1.0)!
+                if cx < pred_bx - 0.5:
+                    action.dir_x = 1.0
+                    if (pred_bx - cx) < 3.5 and pred_by < 4.0:
+                        action.jump = True
+                        action.dir_y = 0.8
+                    return action
+                else:
+                    clear_dir_x = -1.0
             else:
-                # Blue defends Left goal (x = 4.5).
-                # If Blue is to the right of the ball (cx > pred_bx + 0.2), drive LEFT (-1.0) toward ball.
-                # If Blue is to the left of the ball (cx <= pred_bx + 0.2), drive RIGHT (+1.0) to clear.
-                clear_dir_x = -1.0 if dx < -0.2 else 1.0
+                # Blue defends Left goal (x = 4.5). Clearance MUST ALWAYS BE DIRECTED RIGHT (+1.0)!
+                if cx > pred_bx + 0.5:
+                    action.dir_x = -1.0
+                    if (cx - pred_bx) < 3.5 and pred_by < 4.0:
+                        action.jump = True
+                        action.dir_y = 0.8
+                    return action
+                else:
+                    clear_dir_x = 1.0
 
             # High shot: execute aerial save
             if pred_by > 3.0 and car.boost_amount > 10.0:
@@ -203,7 +234,7 @@ class HeuristicBot:
                 # Ground clearance toward opponent net
                 action.dir_x = clear_dir_x
                 action.dir_y = 0.0
-                if dist < 1.5 and pred_by > 2.7 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                if dist < 2.0 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
                     action.jump = True
                     self._jump_cooldown = 0.6
 
@@ -242,17 +273,21 @@ class HeuristicBot:
         if self.team == "orange":
             # Orange shoots toward Blue net (Left, -X)
             if cx >= pred_bx - 0.25:
-                # Behind the ball, drive left directly into the ball toward the net
                 action.dir_x = -1.0
             else:
-                # Trapped between ball and Blue net, loop around behind to the right
                 action.dir_x = 1.0
+                if abs(dx_to_ball) < 3.0 and pred_by < 4.0:
+                    action.jump = True
+                    action.dir_y = 0.8
         else:
             # Blue shoots toward Orange net (Right, +X)
             if cx <= pred_bx + 0.25:
                 action.dir_x = 1.0
             else:
                 action.dir_x = -1.0
+                if abs(dx_to_ball) < 3.0 and pred_by < 4.0:
+                    action.jump = True
+                    action.dir_y = 0.8
 
         action.dir_y = 0.0
 
