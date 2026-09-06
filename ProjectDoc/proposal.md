@@ -48,6 +48,10 @@ where the ball will end up.
     - multiagent reinforcement learning 
     - self play
     - curriculum learning
+- to reference later:
+    - RLGym/rlgym
+    - arXiv:1712.01815
+    - arXiv:1912.06680
 
 # Problem Statements
 - Continuous State
