@@ -52,10 +52,11 @@ where the ball will end up.
     - RLGym/rlgym
     - arXiv:1712.01815
     - arXiv:1912.06680
+    - https://sohum-padhye.medium.com/building-a-reinforcement-learning-agent-that-can-play-rocket-league-5df59c69b1f5
+
 # Conventional Algorithms
-In the space of bots used in games, the common methods are rule-based ai, finite\
-state machine, utility ai, physical prediction, monte carlo tree search algorithm\
-and model predictive control. 
+In the space of bots used in games, the common methods are rule-based ai, finite state machine, utility ai, physical \
+prediction, monte carlo tree search algorithm and model predictive control. 
 
 # Problem Statements
 The environment consists of a fully observable, gravity-bound, continuous 2D enclosed arena containing an RL-controlled car, a ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. The agent must control its vehicle to direct the ball into the opponent's goal while simultaneously preventing the opponent from scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball toward the opponent's goal along the ground.
