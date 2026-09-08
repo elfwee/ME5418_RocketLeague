@@ -1,22 +1,26 @@
-# Autonomous Decision-making Under Dynamic, Adversarial Constraints for 2D Soccer
+# Autonomous Decision-Making Under Dynamic and Adversarial Constraints for 2D Soccer
 _Project Proposal for Group 41_
 *Benjamin Teh, Jensen Lu, Wee Fook Choon*
 
 # Motivation
-A soccer-like environment inspired by Rocket League presents continuous control challenges which requires the agent to\
-perform dynamic ball interception, momemtum catching and strategic positioning to score goals (or point). The agent \
-also needs to navigate the field with an opponent chasing after the ball to score goals, which provides additional \
-layer of challenge for the agent to consider the next best of actions.
 
-For this project, the environment has been reduced to 2D plane to reduce computational overhead for the training. \
-However, this is still a non-trivial abstraction for the problem. Formulation of this problem in 2D is to include \
-continuous state representations on ball kinetics, vehicle pose, and dynamic opponent vectors. Additionally, the agent\
-is trained against a rule-based opponent, rather than a operating in a static environment.
+Dynamic target interception and nonprehensible manipulation in multi-agent environments are fundamental challenges in \
+mobile robotics. These autonomous agents range from the low-velocity-high-intertia tugboats berthing a ship [2] to the \
+high-velocity-low-inertia unmanned aerial vehicles [4]. One less serious application of this topic is on robot soccer [1]. 
 
-This project evaluates the effectiveness of continuous reinforcement learning against established heuristic rules to \
-discover whether superior tactics can surface which surpass human-engineered logics.
+Inspired by the popular video game Rocketed League, this project seeks to create a policy for dynamic target \
+interception and nonprehensible manipulation in multi-agent environments. Here, the agent would have to knock a ball \
+into a goal against an opponent and vice versa.
+
+To simplify the problem, this project uses a 2D planar robot soccer framework. However, the key challenges are still \
+apparent from it's 3D counterpart. Namely, indirecti actuation of the ball, adversarial non-stationarity, and \
+alternating dynamics between continous flight and discontinuous impact. 
 
 # Conventional Algorithms
+
+A traditional approach for robot soccer is finite state machines where the robot switches between states such as defend, \
+attack, 
+
 Traditional algorithms for robotic soccer and dynamic object manipulation often rely on behavior trees, finite state\
 machines, rule-based controllers, and trajectory planning algorithms. For example, the robot may switch between \
 predefined behaviors such as chasing the ball, defending the goal, or attempting a shot based on manually designed \
@@ -27,7 +31,7 @@ opponents whose behavior cannot be predicted in advance. As the number of possib
 designing effective decision rules becomes increasingly challenging, not to mention the complexity of the problem\
 increases the computational load. 
 
-Reinforement learning offers a promising alternative by allowing an agent to learn successful strategies directly \
+Reinforement learning offers a promising alternative by allowing an agent to learn successful strategies directly
 
 # Problem Statements
 The environment consists of a fully observable, gravity-bound, continuous 2D enclosed arena containing an RL-controlled\
@@ -66,3 +70,10 @@ so that the agent remains primarily motivated to score goals while preventing th
 
 # RL Algorithm
 DQN, PPO, A2C etc...
+
+# References:
+[1] Taourirte, Aya, and Md Sohag Mia. “Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic Soccer for Virtual Environments.” arXiv, 2025. DOI.org (Datacite), https://doi.org/10.48550/ARXIV.2512.03166.
+[2] Oh, Jaejin, and Jongdae Jung. “Contact-Based Cooperative Tugboat-Assisted Ship Berthing Control via Physics-Informed Reinforcement Learning.” Ocean Engineering, vol. 363, Aug. 2026, p. 126675. DOI.org (Crossref), https://doi.org/10.1016/j.oceaneng.2026.126675.
+[3] T. M. Cao, H. A. Pham, M. Walter, V. Gies and T. Soriano, "Multi-Agent Robot Swarms: A Review of Sensing and Perceptual Strategies for RoboCup Soccer," 2025 11th International Conference on Mechatronics and Robotics Engineering (ICMRE), Lille, France, 2025, pp. 126-131, doi: 10.1109/ICMRE64970.2025.10976285.
+[4] Brust, Matthias R., et al. “Swarm-Based Counter UAV Defense System.” Discover Internet of Things, vol. 1, no. 1, Dec. 2021, p. 2. DOI.org (Crossref), https://doi.org/10.1007/s43926-021-00002-x.
+ 
