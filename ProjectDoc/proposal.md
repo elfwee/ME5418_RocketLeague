@@ -50,7 +50,7 @@ from scoring in its own goal. The elevated goals and non-uniform arena boundarie
 maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball 
 toward the opponent's goal along the ground, which would cause it to rebound from the wall beneath the elevated goal.
 
-The opponent follows a fixed heuristic policy, creating a dynamic adversarial environment in which the agent must 
+The opponent follows a finite state machine, creating a dynamic adversarial environment in which the agent must 
 respond to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of
 combining low-level vehicle mechanics with higher-level attacking and defensive behaviours.
 
