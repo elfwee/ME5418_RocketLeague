@@ -8,7 +8,7 @@ Dynamic target interception and nonprehensible manipulation in multi-agent envir
 mobile robotics. These autonomous agents range from the low-velocity-high-intertia tugboats berthing a ship [2] to the \
 high-velocity-low-inertia unmanned aerial vehicles [4]. One less serious application of this topic is on robot soccer [1]. 
 
-Inspired by the popular video game Rocketed League, this project seeks to create a policy for dynamic target \
+Inspired by the popular video game Rocket League, this project seeks to create a policy for dynamic target \
 interception and nonprehensible manipulation in multi-agent environments. Here, the agent would have to knock a ball \
 into a goal against an opponent and vice versa.
 
@@ -18,20 +18,26 @@ alternating dynamics between continous flight and discontinuous impact.
 
 # Conventional Algorithms
 
-A traditional approach for robot soccer is finite state machines where the robot switches between states such as defend, \
-attack, 
+A traditional approach for robot soccer is finite state machines where the robot switches between states such as \
+defend the goal, chase the ball, and attempting a shot where the robot switches between depending on user defined \
+conditions based on sensor information. This in a highly interpretable approach but is limited to the capability of the \
+programmer's knowledge space and is suceptiable to edge cases to be omitted. 
 
-Traditional algorithms for robotic soccer and dynamic object manipulation often rely on behavior trees, finite state\
-machines, rule-based controllers, and trajectory planning algorithms. For example, the robot may switch between \
-predefined behaviors such as chasing the ball, defending the goal, or attempting a shot based on manually designed \
-heruristics. These approaches are highly interpretable, and computationally efficient. 
+Within each state machine, the robots actions can be defined by rule-based approaches which are computationally efficient \
+but limited in complexity, but also more complex approaches such as dynamic window approach (DWA) and model predictive \
+control (MPC) approaches. In DWA, a selection of fixed dynamics (throttle, jump, boost) is applied to a lookahead time \
+(the window), then the reward is calculated for that window based on a defined reward funtion, and finally the dynamics \
+with the highest reward is selected for the next time-step. In MPC, the programmer would have to formulate the equations \
+that describe the dynamics of that particular task such as scoring a goal, so that the MPC can optimise for it. Both \
+approaches are computationally intensive and balloon in complexity when in an advisarial environment, thus struggles to \
+be real-time. 
 
-However, these rule based systems often require extensive tuning and often struggle when interacting with intelligent\
-opponents whose behavior cannot be predicted in advance. As the number of possible game situations increases, manually \
-designing effective decision rules becomes increasingly challenging, not to mention the complexity of the problem\
-increases the computational load. 
-
-Reinforement learning offers a promising alternative by allowing an agent to learn successful strategies directly
+Reinforcement learning (RL) is an alternative approach that eliviates the issues presented by traditional approaches. \
+During training, reinforcement learning explores the state-action space which which allows the agent to find niche states \
+that may be omitted by a programmer thus bypassing the need for extensive tuning of parameters and states. During runtime, \
+RL optimises for the maximum return of state-action pairs which includes the discounted rewards across a long time horizon. \
+This means that the long term return is encoded in the state which reduces the computational intensity, and is able to \
+optimise for a longer time horizon. 
 
 # Problem Statements
 The environment consists of a fully observable, gravity-bound, continuous 2D enclosed arena containing an RL-controlled\
