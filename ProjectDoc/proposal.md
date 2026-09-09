@@ -83,7 +83,10 @@ DQN, PPO, A2C etc... (To be expanded once more RL algorithm like Policy Gradient
 
 # References:
 [1] Taourirte, Aya, and Md Sohag Mia. “Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic Soccer for Virtual Environments.” arXiv, 2025. DOI.org (Datacite), https://doi.org/10.48550/ARXIV.2512.03166.
+
 [2] Oh, Jaejin, and Jongdae Jung. “Contact-Based Cooperative Tugboat-Assisted Ship Berthing Control via Physics-Informed Reinforcement Learning.” Ocean Engineering, vol. 363, Aug. 2026, p. 126675. DOI.org (Crossref), https://doi.org/10.1016/j.oceaneng.2026.126675.
+
 [3] T. M. Cao, H. A. Pham, M. Walter, V. Gies and T. Soriano, "Multi-Agent Robot Swarms: A Review of Sensing and Perceptual Strategies for RoboCup Soccer," 2025 11th International Conference on Mechatronics and Robotics Engineering (ICMRE), Lille, France, 2025, pp. 126-131, doi: 10.1109/ICMRE64970.2025.10976285.
+
 [4] Brust, Matthias R., et al. “Swarm-Based Counter UAV Defense System.” Discover Internet of Things, vol. 1, no. 1, Dec. 2021, p. 2. DOI.org (Crossref), https://doi.org/10.1007/s43926-021-00002-x.
  
