@@ -14,33 +14,33 @@ and non-prehensile manipulation in a multi-agent environment. Here, the agent mu
 while simultaneously preventing the opponent from doing the same.
 
 To simplify the problem, this project uses a 2D planar robot soccer framework. However, several key challenges are still 
-apparent from its 3D counterpart, namely, indirect actuation of the ball, adversarial non-stationarity, and alternating 
-dynamics between continuous flight and discontinuous impact. The combination of these challenges makes this project a 
-simplified testbed for studying dynamic and nonlinear control problems involving aerial control, contact dynamics, and 
+apparent from its 3D counterpart, namely, indirect manipulation of the ball, adversarial non-stationarity, and alternating 
+dynamics between continuous motion and discontinuous impact. The combination of these challenges makes this project a 
+simplified testbed for studying dynamic and nonlinear control problems, contact dynamics, and 
 decision-making in adversarial situations.
 
 # Conventional Algorithms
 
-A traditional approach for robot soccer is finite state machines where the robot switches between states such as 
-defend the goal, chase the ball, and attempting a shot where the robot switches between depending on user defined 
-conditions based on sensor information. This in a highly interpretable approach but is limited to the capability of the 
-programmer's knowledge space and is suceptiable to edge cases to be omitted. 
+A traditional approach for robot soccer is using finite state machines, where the robot switches between states such as 
+defend the goal, chase the ball, and attempting a shot, depending on user defined conditions based on sensor information.
+This is a highly interpretable approach but is limited to the capability of the programmer's knowledge space and is
+susceptible to edge cases being omitted. 
 
-Within each state machine, the robots actions can be defined by rule-based approaches which are computationally efficient 
-but limited in complexity, but also more complex approaches such as dynamic window approach (DWA) and model predictive 
+Within each state machine, the robot actions can be defined by rule-based approaches (which are computationally efficient 
+but limited in complexity), more complex approaches (for example, dynamic window approach (DWA)), and model predictive 
 control (MPC) approaches. In DWA, a selection of fixed dynamics (throttle, jump, boost) is applied to a lookahead time 
-(the window), then the reward is calculated for that window based on a defined reward funtion, and finally the dynamics 
+(the window), then the reward is calculated for that window based on a defined reward function, and finally the dynamics 
 with the highest reward is selected for the next time-step. In MPC, the programmer would have to formulate the equations 
 that describe the dynamics of that particular task such as scoring a goal, so that the MPC can optimise for it. Both 
 approaches are computationally intensive and balloon in complexity when in an advisarial environment, thus struggles to 
 be real-time. 
 
-Reinforcement learning (RL) is an alternative approach that eliviates the issues presented by traditional approaches. 
-During training, reinforcement learning explores the state-action space which which allows the agent to find niche states 
-that may be omitted by a programmer thus bypassing the need for extensive tuning of parameters and states. During runtime, 
-RL optimises for the maximum return of state-action pairs which includes the discounted rewards across a long time horizon. 
-This means that the long term return is encoded in the state which reduces the computational intensity, and is able to 
-optimise for a longer time horizon. 
+Reinforcement learning (RL) is an alternative approach that alleviates the issues presented by traditional approaches. 
+During training, RL explores the state-action space which allows the agent to find niche states that may be omitted by a
+programmer, thus bypassing the need for extensive tuning of parameters and states. During runtime, RL optimises for the 
+maximum return of state-action pairs which includes the discounted rewards across a long time horizon. This means that 
+the long term return is encoded in the state which reduces the computational intensity, and is able to optimise for a
+longer time horizon. 
 
 # Problem Statements
 The environment consists of a fully observable, gravity-bound, continuous 2D enclosed arena containing an RL-controlled
@@ -52,17 +52,24 @@ toward the opponent's goal along the ground, which would cause it to rebound fro
 
 The opponent follows a finite state machine, creating a dynamic adversarial environment in which the agent must 
 respond to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of
-combining low-level vehicle mechanics with higher-level attacking and defensive behaviours.
-
+combining low-level vehicle mechanics with high-level attacking and defensive behaviours.
 
 # RL Cast
-State space: At each timestep, the agent observes the normalized kinematic states of itself, the opponent, and the ball.
- The agent and opponent states contain 2D position, linear velocity, orientation, and angular velocity, while the ball 
- state contains its position, linear velocity, and angular velocity. Relative direction and distance information is also 
- provided for the agent-to-ball, opponent-to-ball, ball-to-opponent-goal, and ball-to-own-goal relationships. The 
- observation additionally contains boost availability, grounded/aerial state, and second-jump availability, together 
- with eight normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the
- non-uniform arena boundaries without the need to directly encode the static arena geometry.
+State space: At each timestep, the agent observes the following:
+- Kinematic state of itself and opponent:
+    - in terms of position, orientation, linear velocity, and angular velocity
+- Kinematic state of ball:
+    - in terms of position, linear velocity, and angular velocity
+- Relative direction and distance for the following relationships:
+    - agent-to-ball
+    - opponent-to-ball
+    - ball-to-opponent's goal
+    - ball-to-own goal
+- Other information:
+    - Availability of boost control
+    - Availability of second-jump
+    - Grounded/aerial state
+    - 8 normalized boundary raycasts separated by 45-degree intevals
 
 Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36 
 possible simultaneous action combinations. The directional component consists of eight directions at 45-degree intervals
