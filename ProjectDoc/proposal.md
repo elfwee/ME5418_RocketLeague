@@ -4,17 +4,20 @@ _Project Proposal for Group 41_
 
 # Motivation
 
-Dynamic target interception and nonprehensible manipulation in multi-agent environments are fundamental challenges in \
-mobile robotics. These autonomous agents range from the low-velocity-high-intertia tugboats berthing a ship [2] to the \
-high-velocity-low-inertia unmanned aerial vehicles [4]. One less serious application of this topic is on robot soccer [1]. 
+Dynamic target interception and non-prehensile manipulation in multi-agent environments are fundamental challenges in \
+mobile robotics. These autonomous agents range from the low-velocity, high-inertia tugboats used for ship berthing [2] to \
+high-velocity, low-inertia unmanned aerial vehicles [4]. One less safety-critical application of these challenges is \
+robot soccer [1]. 
 
-Inspired by the popular video game Rocket League, this project seeks to create a policy for dynamic target \
-interception and nonprehensible manipulation in multi-agent environments. Here, the agent would have to knock a ball \
-into a goal against an opponent and vice versa.
+Inspired by the popular video game Rocket League, this project seeks to develop a policy for dynamic target interception \
+and non-prehensile manipulation in a multi-agent environment. Here, the agent must knock a ball into the opponent's goal \
+while simultaneously preventing the opponent from doing the same.
 
-To simplify the problem, this project uses a 2D planar robot soccer framework. However, the key challenges are still \
-apparent from it's 3D counterpart. Namely, indirecti actuation of the ball, adversarial non-stationarity, and \
-alternating dynamics between continous flight and discontinuous impact. 
+To simplify the problem, this project uses a 2D planar robot soccer framework. However, several key challenges are still \
+apparent from its 3D counterpart, namely, indirect actuation of the ball, adversarial non-stationarity, and alternating \
+dynamics between continuous flight and discontinuous impact. The combination of these challenges makes this project a 
+simplified testbed for studying dynamic and nonlinear control problems involving aerial control, contact dynamics, and \
+decision-making in adversarial situations.
 
 # Conventional Algorithms
 
@@ -76,7 +79,7 @@ clearing the ball away from its own goal gets rewarded. The goal-scoring rewards
 the intermediate rewards so that scoring and preventing goals remain the agent's primary objectives.
 
 # RL Algorithm
-DQN, PPO, A2C etc...
+DQN, PPO, A2C etc... (To be expanded once more RL algorithm like Policy Gradient Methods are learnt)
 
 # References:
 [1] Taourirte, Aya, and Md Sohag Mia. “Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic Soccer for Virtual Environments.” arXiv, 2025. DOI.org (Datacite), https://doi.org/10.48550/ARXIV.2512.03166.
