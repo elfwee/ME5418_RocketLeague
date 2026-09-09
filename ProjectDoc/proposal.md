@@ -39,7 +39,7 @@ car, a ball, and a scripted adversarial car. Two elevated goal regions are locat
 agent must control its vehicle to direct the ball into the opponent's goal while simultaneously preventing the opponent\
 from scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex \
 maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball \
-toward the opponent's goal along the ground.
+toward the opponent's goal along the ground, which would cause it to rebound from the wall beneath the elevated goal.
 
 The opponent follows a fixed heuristic policy, creating a dynamic adversarial environment in which the agent must \
 respond to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of\
@@ -53,7 +53,7 @@ State space: At each timestep, the agent observes the normalized kinematic state
  provided for the agent-to-ball, opponent-to-ball, ball-to-opponent-goal, and ball-to-own-goal relationships. The \
  observation additionally contains boost availability, grounded/aerial state, and second-jump availability, together \
  with eight normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the\
-non-uniform arena boundaries without explicitly providing the complete arena geometry.
+ non-uniform arena boundaries without the need to directly encode the static arena geometry.
 
 Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36 \
 possible simultaneous action combinations. The directional component consists of eight directions at 45-degree intervals\
@@ -62,11 +62,12 @@ while airborne triggers a directional dodge.
 
 Reward structure: The primary reward is based on the outcome of the game. The agent receives a large positive reward\
 (e.g., +20) when it scores in the opponent's goal and a large negative reward (e.g., −20) when the opponent scores in\
-its own goal. Since goal-scoring events are relatively sparse, a smaller intermediate reward is provided based on the\
-ball's progress toward the opponent's goal. If the ball moves closer to the opponent's goal between consecutive \
-timesteps, the agent receives a small positive reward proportional to that progress; if the ball moves farther away,\
-it receives a small negative reward. The goal-scoring rewards are substantially larger than these intermediate rewards\
-so that the agent remains primarily motivated to score goals while preventing the opponent from scoring.
+its own goal. Since goal-scoring events are relatively sparse, smaller intermediate rewards are provided based on the\
+ball's movement and position within the arena. Progress toward the opponent's goal is positively rewarded, while movement\
+toward the agent's own goal is penalized. The magnitude of these intermediate rewards is scaled according to the ball's\
+position, such that moving the ball toward its own goal becomes increasingly penalized as the ball approaches it, while\
+clearing the ball away from its own goal gets rewarded. The goal-scoring rewards are substantially larger than\
+the intermediate rewards so that scoring and preventing goals remain the agent's primary objectives.
 
 # RL Algorithm
 DQN, PPO, A2C etc...
