@@ -1,0 +1,1 @@
+# Learning Robust Stair-Climbing Skills for Open Duck Mini through Reward Shaping and Curriculum Learning
