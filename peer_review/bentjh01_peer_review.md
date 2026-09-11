@@ -5,3 +5,18 @@
 - should state what ZMP is and add a reference. 
 ## Problem Statement
 ## Difficulty
+
+# Thermal and Payload Aware Control of a Two Joint Robot Arm
+
+## Motivation
+- Starting from a simple 2-link reacher, added with uncertain payload sensor and motor overheating creates an interesting resource management problem between motor control and payload/heat constraint. This provides reasonable motivation for RL due to delayed consequences from motor use.
+- The proposed experiments are strong, with comparisons against manual controller and tests on payload generalization and sensing errors.
+## Problem Statement & RL Cast
+- Problem statement is clear and precise, with well defined state, action and reward criteria. 
+- Using accumulated motor torque as a temperature model is reasonable, without the need to model detailed thermodynamics.
+## Difficulty
+- The 2-link arm is relatively simple, but the added payload uncertainty, thermal constraints, sensor errors, and generalization experiments make the overall project challenging.
+## Suggestion
+- The main concern is the heavy discretization of the state and action space. Discretizing them may lose useful information that may cause imprecise and jerky arm motion.
+- The project seems designed to make DQN feasible. It maybe worth clarifying why DQN was preferred over policy gradient or action-critic approach, which can handle continuous observations and actions.
+- The reward contains multiple shaping terms. Balancing many reward terms require immense amount of trial and error and may introduce unintended agent behaviours.
