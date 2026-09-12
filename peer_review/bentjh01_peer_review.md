@@ -1,10 +1,3 @@
-# Reinforcement Learning Robust Stair-Climbing Skills for Open Duck Mini through Reward Shaping and Curriculum Learning
-
-## Motivation
-- Good to highlight that IK struggles with 
-- should state what ZMP is and add a reference. 
-## Problem Statement
-## Difficulty
 
 # Thermal and Payload Aware Control of a Two Joint Robot Arm
 
@@ -33,3 +26,12 @@ Suggestions:
 - It would be helpful to spell out acronyms (e.g., PPO, GRU, MLP, SUMO) upon their first use to ensure clarity for readers.
 - While the proposal mentions using a predictive clustering module to route MLP experts, providing a more detailed description of how these experts will be trained and specialized for different traffic patterns would help with the methodology section.
 - The proposla could further elborate on why predefined control rules fail for this context. For example, which traffic scenario requires experience-based strategies to overcome and not Max-Pressure rules.
+=======
+- continous joint commands
+- this project sounds a little too difficult to be building from scratch. Seems like it would rely heavily on libraries
+so that the architecture of the RL is focused on. 
+
+# RL-based Soft Manipulator Controller for Cleaning Tasks in Confined Environments
+- clear need for RL as soft robotics is difficult to model the kinematics and dynamics of. 
+- this also means building a robot in simulation for this may be difficult. 
+>>>>>>> Stashed changes
