@@ -1,61 +1,65 @@
 # Autonomous Decision-Making Under Dynamic and Adversarial Constraints for 2D Soccer
+
 _Project Proposal for Group 41_
-*Benjamin Teh, Jensen Lu, Wee Fook Choon*
+_Benjamin Teh, Jensen Lu, Wee Fook Choon_
 
 # Motivation
 
-Dynamic target interception and non-prehensile manipulation in multi-agent environments are fundamental challenges in 
-mobile robotics. These autonomous agents range from the low-velocity, high-inertia tugboats used for ship berthing [2] to 
-high-velocity, low-inertia unmanned aerial vehicles [4]. One less safety-critical application of these challenges is 
-robot soccer [1]. 
+Dynamic target interception and non-prehensile manipulation in multi-agent environments are fundamental challenges in
+mobile robotics. These autonomous agents range from the low-velocity, high-inertia tugboats used for ship berthing [2] to
+high-velocity, low-inertia unmanned aerial vehicles [4]. One less safety-critical application of these challenges is
+robot soccer [1].
 
-Inspired by the popular video game Rocket League, this project seeks to develop a policy for dynamic target interception 
-and non-prehensile manipulation in a multi-agent environment. Here, the agent must knock a ball into the opponent's goal 
+Inspired by the popular video game Rocket League, this project seeks to develop a policy for dynamic target interception
+and non-prehensile manipulation in a multi-agent environment. Here, the agent must knock a ball into the opponent's goal
 while simultaneously preventing the opponent from doing the same.
 
-To simplify the problem, this project uses a 2D planar robot soccer framework. However, several key challenges are still 
-apparent from its 3D counterpart, namely, indirect manipulation of the ball, adversarial non-stationarity, and alternating 
-dynamics between continuous motion and discontinuous impact. The combination of these challenges makes this project a 
-simplified testbed for studying dynamic and nonlinear control problems, contact dynamics, and 
+To simplify the problem, this project uses a 2D planar robot soccer framework. However, several key challenges are still
+apparent from its 3D counterpart, namely, indirect manipulation of the ball, adversarial non-stationarity, and alternating
+dynamics between continuous motion and discontinuous impact. The combination of these challenges makes this project a
+simplified testbed for studying dynamic and nonlinear control problems, contact dynamics, and
 decision-making in adversarial situations.
 
 # Conventional Algorithms
 
-A traditional approach for robot soccer is using finite state machines, where the robot switches between states such as 
+A traditional approach for robot soccer is using finite state machines, where the robot switches between states such as
 defend the goal, chase the ball, and attempting a shot, depending on user defined conditions based on sensor information.
 This is a highly interpretable approach but is limited to the capability of the programmer's knowledge space and is
-susceptible to edge cases being omitted. 
+susceptible to edge cases being omitted.
 
-Within each state machine, the robot actions can be defined by rule-based approaches (which are computationally efficient 
-but limited in complexity), more complex approaches (for example, dynamic window approach (DWA)), and model predictive 
-control (MPC) approaches. In DWA, a selection of fixed dynamics (throttle, jump, boost) is applied to a lookahead time 
-(the window), then the reward is calculated for that window based on a defined reward function, and finally the dynamics 
-with the highest reward is selected for the next time-step. In MPC, the programmer would have to formulate the equations 
-that describe the dynamics of that particular task such as scoring a goal, so that the MPC can optimise for it. Both 
-approaches are computationally intensive and balloon in complexity when in an advisarial environment, thus struggles to 
-be real-time. 
+Within each state machine, the robot actions can be defined by rule-based approaches (which are computationally efficient
+but limited in complexity), more complex approaches (for example, dynamic window approach (DWA)), and model predictive
+control (MPC) approaches. In DWA, a selection of fixed dynamics (throttle, jump, boost) is applied to a lookahead time
+(the window), then the reward is calculated for that window based on a defined reward function, and finally the dynamics
+with the highest reward is selected for the next time-step. In MPC, the programmer would have to formulate the equations
+that describe the dynamics of that particular task such as scoring a goal, so that the MPC can optimise for it. Both
+approaches are computationally intensive and balloon in complexity when in an advisarial environment, thus struggles to
+be real-time.
 
-Reinforcement learning (RL) is an alternative approach that alleviates the issues presented by traditional approaches. 
+Reinforcement learning (RL) is an alternative approach that alleviates the issues presented by traditional approaches.
 During training, RL explores the state-action space which allows the agent to find niche states that may be omitted by a
-programmer, thus bypassing the need for extensive tuning of parameters and states. During runtime, RL optimises for the 
-maximum return of state-action pairs which includes the discounted rewards across a long time horizon. This means that 
+programmer, thus bypassing the need for extensive tuning of parameters and states. During runtime, RL optimises for the
+maximum return of state-action pairs which includes the discounted rewards across a long time horizon. This means that
 the long term return is encoded in the state which reduces the computational intensity, and is able to optimise for a
-longer time horizon. 
+longer time horizon.
 
 # Problem Statements
+
 The environment consists of a fully observable, gravity-bound, continuous 2D enclosed arena containing an RL-controlled
-car, a ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. The 
+car, a ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. The
 agent must control its vehicle to direct the ball into the opponent's goal while simultaneously preventing the opponent
-from scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex 
-maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball 
+from scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex
+maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball
 toward the opponent's goal along the ground, which would cause it to rebound from the wall beneath the elevated goal.
 
-The opponent follows a finite state machine, creating a dynamic adversarial environment in which the agent must 
+The opponent follows a finite state machine, creating a dynamic adversarial environment in which the agent must
 respond to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of
 combining low-level vehicle mechanics with high-level attacking and defensive behaviours.
 
 # RL Cast
+
 State space: At each timestep, the agent observes the following:
+
 - Kinematic state of itself and opponent:
     - in terms of position, orientation, linear velocity, and angular velocity
 - Kinematic state of ball:
@@ -71,9 +75,9 @@ State space: At each timestep, the agent observes the following:
     - Grounded/aerial state
     - 8 normalized boundary raycasts separated by 45-degree intevals
 
-Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36 
+Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36
 possible simultaneous action combinations. The directional component consists of eight directions at 45-degree intervals
-and one neutral input, while jump and boost are binary on/off commands. A directional input combined with a second jump 
+and one neutral input, while jump and boost are binary on/off commands. A directional input combined with a second jump
 while airborne triggers a directional dodge.
 
 Reward structure: The primary reward is based on the outcome of the game. The agent receives a large positive reward
@@ -86,9 +90,11 @@ clearing the ball away from its own goal gets rewarded. The goal-scoring rewards
 the intermediate rewards so that scoring and preventing goals remain the agent's primary objectives.
 
 # RL Algorithm
+
 DQN, PPO, A2C etc... (To be expanded once more RL algorithm like Policy Gradient Methods are learnt)
 
 # References:
+
 [1] Taourirte, Aya, and Md Sohag Mia. “Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic Soccer for Virtual Environments.” arXiv, 2025. DOI.org (Datacite), https://doi.org/10.48550/ARXIV.2512.03166.
 
 [2] Oh, Jaejin, and Jongdae Jung. “Contact-Based Cooperative Tugboat-Assisted Ship Berthing Control via Physics-Informed Reinforcement Learning.” Ocean Engineering, vol. 363, Aug. 2026, p. 126675. DOI.org (Crossref), https://doi.org/10.1016/j.oceaneng.2026.126675.
@@ -96,4 +102,3 @@ DQN, PPO, A2C etc... (To be expanded once more RL algorithm like Policy Gradient
 [3] T. M. Cao, H. A. Pham, M. Walter, V. Gies and T. Soriano, "Multi-Agent Robot Swarms: A Review of Sensing and Perceptual Strategies for RoboCup Soccer," 2025 11th International Conference on Mechatronics and Robotics Engineering (ICMRE), Lille, France, 2025, pp. 126-131, doi: 10.1109/ICMRE64970.2025.10976285.
 
 [4] Brust, Matthias R., et al. “Swarm-Based Counter UAV Defense System.” Discover Internet of Things, vol. 1, no. 1, Dec. 2021, p. 2. DOI.org (Crossref), https://doi.org/10.1007/s43926-021-00002-x.
- 
