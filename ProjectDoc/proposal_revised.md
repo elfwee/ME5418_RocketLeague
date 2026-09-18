@@ -54,8 +54,7 @@ toward the opponent's goal along the ground, which would cause it to rebound fro
 
 The opponent follows a finite state machine, creating a dynamic adversarial environment in which the agent must respond
 to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of
-combining low-level vehicle mechanics with high-level attacking and defensive behaviours. Observation noise may be
-introduced during evaluation to investigate robustness to imperfect state estimation.
+combining low-level vehicle mechanics with high-level attacking and defensive behaviours.
 
 # RL Cast
 
@@ -74,9 +73,7 @@ State space: At each timestep, the agent observes the following:
     - Availability of boost control
     - Availability of second-jump
     - Grounded/aerial state
-    - 8 normalized boundary raycasts separated by 45-degree intervals
-
-These raycasts provide local awareness of the non-uniform arena boundaries without the need to directly encode the
+    - 8 normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the non-uniform arena boundaries without the need to directly encode the
 static arena geometry.
 
 Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36
