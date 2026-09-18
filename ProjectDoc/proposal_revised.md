@@ -1,9 +1,9 @@
-# Autonomous Decision-Making Under Dynamic and Adversarial Constraints for 2D Soccer
+#### Autonomous Decision-Making Under Dynamic and Adversarial Constraints for 2D Soccer
 
 _Project Proposal for Group 41_
 _Benjamin Teh, Jensen Lu, Wee Fook Choon_
 
-# Motivation
+#### Motivation
 
 Dynamic target interception and non-prehensile manipulation in multi-agent environments are fundamental challenges in
 mobile robotics. These autonomous agents range from the low-velocity, high-inertia tugboats used for ship berthing [2]
@@ -21,7 +21,7 @@ a controlled testbed for studying several challenges shared with robotic systems
 non-prehensile object manipulation, contact-rich control, and sequential decision-making in the presence of another
 autonomous agent.
 
-# Conventional Algorithms
+#### Conventional Algorithms
 
 A traditional approach for robot soccer is using finite state machines, where the robot switches between states such as
 defending the goal, chasing the ball, and attempting a shot, depending on user-defined conditions based on sensor
@@ -42,11 +42,11 @@ allowing actions to be learned based on their longer-term consequences rather th
 trained, these behaviours are represented by the learned policy, allowing actions to be selected directly during runtime
 without repeatedly performing an online search over future trajectories.
 
-# Problem Statements
+#### Problem Statements
 
 The environment consists of a gravity-bound, side-view 2D enclosed arena containing an RL-controlled car, a
-ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. This poses
-as a continous state environment for the agent to explore. The agent must
+ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. This poses 
+as a continous state environment for the agent to explore. The agent must 
 simultaneously control its vehicle to direct the ball into the opponent's goal and prevent the opponent from
 scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex
 maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball
@@ -56,25 +56,15 @@ The opponent follows a finite state machine, creating a dynamic adversarial envi
 to both ball dynamics and opponent behaviour. The learning objective is to discover a control policy capable of
 combining low-level vehicle mechanics with high-level attacking and defensive behaviours.
 
-# RL Cast
+#### RL Cast
 
 State space: At each timestep, the agent observes the following:
 
-- Kinematic state of itself and opponent:
-    - in terms of position, orientation, linear velocity, and angular velocity
-- Kinematic state of ball:
-    - in terms of position, linear velocity, and angular velocity
-- Relative direction and distance for the following relationships:
-    - agent-to-ball
-    - opponent-to-ball
-    - ball-to-opponent's goal
-    - ball-to-own goal
-- Other information: 
-    - Availability of boost control 
-    - Availability of second-jump 
-    - Grounded/aerial state 
-    - 8 normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the 
-    non-uniform arena boundaries without the need to directly encode the static arena geometry.
+- Kinematic state of itself and opponent: in terms of position, orientation, linear velocity, and angular velocity
+- Kinematic state of ball: in terms of position, linear velocity, and angular velocity
+- Relative direction and distance for the following relationships: agent-to-ball, opponent-to-ball, ball-to-opponent's goal, ball-to-own goal
+- Other information: Availability of boost control, availability of second-jump, grounded/aerial state, and 8 normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the non-uniform arena boundaries without the need to directly encode the
+static arena geometry.
 
 Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36
 possible simultaneous action combinations. The directional component consists of eight directions at 45-degree intervals
@@ -90,7 +80,7 @@ the ball's position, such that moving the ball toward its own goal becomes incre
 it, while clearing the ball away from its own goal gets rewarded. The goal-scoring rewards are substantially larger than
 the intermediate rewards so that scoring and preventing goals remain the agent's primary objectives.
 
-# RL Algorithm
+#### RL Algorithm
 
 - Our problem has a continuous state space and a relatively small
   discrete action space, so both value-based and policy-based
@@ -115,7 +105,7 @@ the intermediate rewards so that scoring and preventing goals remain the agent's
   observation vector. The actor outputs the action distributions,
   while the critic outputs a scalar state-value estimate.
 
-# Experiment & Evaluation
+#### Experiment & Evaluation
 
 - Training will use a curriculum of increasing opponent difficulty.
   The initial stage contains no adversarial opponent, allowing the
@@ -144,7 +134,7 @@ the intermediate rewards so that scoring and preventing goals remain the agent's
 - Observation noise may additionally be introduced during evaluation
   to test robustness to imperfect state estimation.
 
-# References:
+#### References:
 
 [1] Taourirte, Aya, and Md Sohag Mia. "Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic
 Soccer for Virtual Environments." arXiv, 2025. DOI.org (Datacite), https://doi.org/10.48550/ARXIV.2512.03166.
