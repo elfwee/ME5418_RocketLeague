@@ -35,12 +35,8 @@ online planning, their computational requirements and design complexity can incr
 continuous vehicle-ball interactions and the actions of an adversarial opponent.
 
 Reinforcement learning (RL) provides an alternative by allowing the agent to learn its control policy through repeated
-interaction with the environment. During training, the agent explores the state-action space and can encounter
-situations that may not have been explicitly considered when designing a rule-based controller, reducing the need to
-manually specify behaviours for every possible scenario. RL optimizes for cumulative discounted rewards over time,
-allowing actions to be learned based on their longer-term consequences rather than only their immediate outcomes. Once
-trained, these behaviours are represented by the learned policy, allowing actions to be selected directly during runtime
-without repeatedly performing an online search over future trajectories.
+interaction with the environment. Through exploration, the agent will find optimal state-actions over a long horizon
+which will then allow optimal actions to be selected during implementation with lower compute during runtime.
 
 #### Problem Statements
 
