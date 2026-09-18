@@ -45,8 +45,8 @@ without repeatedly performing an online search over future trajectories.
 # Problem Statements
 
 The environment consists of a gravity-bound, side-view 2D enclosed arena containing an RL-controlled car, a
-ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. This poses 
-as a continous state environment for the agent to explore. The agent must 
+ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. This poses
+as a continous state environment for the agent to explore. The agent must
 simultaneously control its vehicle to direct the ball into the opponent's goal and prevent the opponent from
 scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex
 maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball
@@ -69,12 +69,12 @@ State space: At each timestep, the agent observes the following:
     - opponent-to-ball
     - ball-to-opponent's goal
     - ball-to-own goal
-- Other information:
-    - Availability of boost control
-    - Availability of second-jump
-    - Grounded/aerial state
-    - 8 normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the non-uniform arena boundaries without the need to directly encode the
-static arena geometry.
+- Other information: 
+    - Availability of boost control 
+    - Availability of second-jump 
+    - Grounded/aerial state 
+    - 8 normalized boundary raycasts separated by 45-degree intervals. These raycasts provide local awareness of the 
+    non-uniform arena boundaries without the need to directly encode the static arena geometry.
 
 Action space: A factored multi-discrete action space consisting of direction, jump, and boost provides 9 x 2 x 2 = 36
 possible simultaneous action combinations. The directional component consists of eight directions at 45-degree intervals
