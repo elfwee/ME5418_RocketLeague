@@ -82,57 +82,11 @@ the intermediate rewards so that scoring and preventing goals remain the agent's
 
 #### RL Algorithm
 
-- Our problem has a continuous state space and a relatively small
-  discrete action space, so both value-based and policy-based
-  algorithms, such as DQN and PPO, are applicable.
-- DQN estimates the expected return of each discrete action and
-  selects the action with the highest estimated value. With 36 closely
-  related action combinations, approximation errors between similarly
-  valued actions may lead to abrupt changes in the selected action,
-  particularly during early training.
-- PPO instead learns a stochastic policy over the available actions.
-  For our factored action space, the actor can output separate
-  probability distributions for direction, jump, and boost, while the
-  critic estimates the expected return of the current state.
-- We will use PPO as the primary algorithm because it supports
-  stochastic exploration and is generally stable to train with an
-  actor-critic architecture. Although on-policy PPO is less
-  sample-efficient than off-policy methods, our simulation can be
-  initialized cheaply and run in parallel to collect experience.
-- DQN will be used as a comparison to investigate whether the
-  policy-based formulation is more suitable for this task.
-- Neural network: an MLP actor-critic architecture will process the
-  observation vector. The actor outputs the action distributions,
-  while the critic outputs a scalar state-value estimate.
+Our problem has a continuous state space and a relatively small discrete action space, making both value-based and policy-based algorithms such as DQN and PPO applicable. We will use PPO as the primary algorithm because its stochastic policy provides natural exploration, while its actor-critic architecture is generally stable to train. For our factored action space, the actor will output separate probability distributions for direction, jump, and boost, while the critic estimates the expected return of the current state. Although PPO is less sample-efficient than off-policy methods, experience can be collected cheaply and in parallel within our simulation. The policy and value functions will be represented using an MLP actor-critic network. DQN will additionally be used as a comparison to investigate whether a policy-based formulation is more suitable for this task.
 
 #### Experiment & Evaluation
 
-- Training will use a curriculum of increasing opponent difficulty.
-  The initial stage contains no adversarial opponent, allowing the
-  agent to first learn basic movement, ball interaction, and scoring.
-  An opponent is then introduced with progressively stronger scripted
-  behaviours.
-- The lowest-level opponent will primarily follow the ball with
-  limited use of jumping and boosting. More capable opponents will use
-  scripted lookahead of the future ball and vehicle states. Opponent
-  difficulty can be varied by changing the lookahead horizon and
-  available behaviours.
-- Policies trained at each curriculum level will be evaluated against
-  opponents from multiple difficulty levels. The results will be
-  summarized using a comparison matrix to determine whether policies
-  learned at one level transfer to more difficult or different
-  opponents.
-- Performance will be evaluated using match win rate, goals scored,
-  goals conceded, and goal differential over repeated matches.
-- We will compare the proposed shaped reward against a sparse-reward
-  baseline containing only the goal-scoring and goal-conceding
-  rewards, to evaluate whether the intermediate rewards improve
-  learning.
-- Since the action space is discrete, we will also compare PPO and DQN
-  under the same environment and evaluation conditions to investigate
-  which formulation is more suitable for the task.
-- Observation noise may additionally be introduced during evaluation
-  to test robustness to imperfect state estimation.
+Training will follow a curriculum of increasing opponent difficulty, beginning without an opponent so that the agent can learn basic movement, ball interaction, and scoring before progressively stronger scripted opponents are introduced. Opponent difficulty will be varied through behaviours such as jumping, boosting, and lookahead of future ball and vehicle states. Policies trained at different curriculum levels will be evaluated against multiple opponent difficulties using win rate, goals scored, goals conceded, and goal differential, with the results summarized in a comparison matrix to examine transfer across opponents. We will also compare PPO against DQN under the same conditions and compare the proposed shaped reward against a sparse-reward baseline containing only goal-scoring and goal-conceding rewards. Observation noise may additionally be introduced during evaluation to test robustness to imperfect state estimation.
 
 #### References:
 
