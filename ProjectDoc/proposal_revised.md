@@ -162,3 +162,5 @@ Perceptual Strategies for RoboCup Soccer," 2025 11th International Conference on
 
 [4] Brust, Matthias R., et al. "Swarm-Based Counter UAV Defense System." Discover Internet of Things, vol. 1, no. 1,
 Dec. 2021, p. 2. DOI.org (Crossref), https://doi.org/10.1007/s43926-021-00002-x.
+
+![Rocket League Screenshot](Screenshot.png)
