@@ -46,8 +46,8 @@ without repeatedly performing an online search over future trajectories.
 
 The environment consists of a gravity-bound, side-view 2D enclosed arena containing an RL-controlled car, a
 ball, and a scripted adversarial car. Two elevated goal regions are located on opposing sides of the arena. This poses 
-as a continous state environment for the agent to explore. The agent
-must control its vehicle to direct the ball into the opponent's goal while simultaneously preventing the opponent from
+as a continous state environment for the agent to explore. The agent must 
+simultaneously control its vehicle to direct the ball into the opponent's goal and prevent the opponent from
 scoring in its own goal. The elevated goals and non-uniform arena boundaries require the agent to learn complex
 maneuvers such as dynamic positioning, aerial ball handling, and ball juggling, rather than simply pushing the ball
 toward the opponent's goal along the ground, which would cause it to rebound from the wall beneath the elevated goal.
