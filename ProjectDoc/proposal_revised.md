@@ -35,8 +35,10 @@ online planning, their computational requirements and design complexity can incr
 continuous vehicle-ball interactions and the actions of an adversarial opponent.
 
 Reinforcement learning (RL) provides an alternative by allowing the agent to learn its control policy through repeated
-interaction with the environment. Through exploration, the agent will find optimal state-actions over a long horizon
-which will then allow optimal actions to be selected during implementation with lower compute during runtime.
+interaction with the environment. Through exploration, the agent can learn actions that maximize expected long-term return, allowing the trained policy to select actions with relatively low runtime computation.
+
+<img src="Screenshot.png"
+     style="width:35%; float:right; margin-left:15px; margin-bottom:5px;">
 
 #### Problem Statements
 
@@ -84,6 +86,9 @@ Our problem has a continuous state space and a relatively small discrete action 
 
 Training will follow a curriculum of increasing opponent difficulty, beginning without an opponent so that the agent can learn basic movement, ball interaction, and scoring before progressively stronger scripted opponents are introduced. Opponent difficulty will be varied through behaviours such as jumping, boosting, and lookahead of future ball and vehicle states. Policies trained at different curriculum levels will be evaluated against multiple opponent difficulties using win rate, goals scored, goals conceded, and goal differential, with the results summarized in a comparison matrix to examine transfer across opponents. We will also compare PPO against DQN under the same conditions and compare the proposed shaped reward against a sparse-reward baseline containing only goal-scoring and goal-conceding rewards. Observation noise may additionally be introduced during evaluation to test robustness to imperfect state estimation.
 
+
+<br />
+
 #### References:
 
 [1] Taourirte, Aya, and Md Sohag Mia. "Multi-Agent Reinforcement Learning and Real-Time Decision-Making in Robotic
@@ -100,4 +105,3 @@ Perceptual Strategies for RoboCup Soccer," 2025 11th International Conference on
 [4] Brust, Matthias R., et al. "Swarm-Based Counter UAV Defense System." Discover Internet of Things, vol. 1, no. 1,
 Dec. 2021, p. 2. DOI.org (Crossref), https://doi.org/10.1007/s43926-021-00002-x.
 
-![Rocket League Screenshot](Screenshot.png)
