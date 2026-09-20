@@ -15,16 +15,22 @@ class HeuristicBot:
         self.team = team
         self.difficulty = difficulty
         self.current_state = "KICKOFF"
+        self._is_kickoff = True
         self._jump_cooldown = 0.0
         self._jump_press_timer = 0
         self._last_dodge_time = 0.0
+        self._stuck_timer = 0.0
+        self._unstick_active = 0.0
 
     def reset(self):
         """Reset internal timers and behavioral state upon kickoff."""
         self.current_state = "KICKOFF"
+        self._is_kickoff = True
         self._jump_cooldown = 0.0
         self._jump_press_timer = 0
         self._last_dodge_time = 0.0
+        self._stuck_timer = 0.0
+        self._unstick_active = 0.0
 
     def predict_ball_position(self, sim, dt_ahead: float) -> Tuple[float, float]:
         """Predict ball position dt_ahead seconds into the future assuming ballistic trajectory and floor bounce."""
@@ -52,26 +58,39 @@ class HeuristicBot:
         b_speed = math.hypot(b_vel[0], b_vel[1])
         cx, cy = car.position
 
-        # 1. KICKOFF: Ball is stationary near center field
-        if abs(bx - sim.center_x) < 0.5 and b_speed < 1.0 and abs(by - sim.ball_spawn_y) < 0.2:
-            return "KICKOFF"
+        # Kickoff tracking: true kickoff ends once ball is struck or moves from center
+        if self._is_kickoff:
+            if abs(bx - sim.center_x) > 0.6 or b_speed > 1.2 or (by - sim.ball_spawn_y) > 0.4:
+                self._is_kickoff = False
+
+        # 1. KICKOFF: Only during actual kickoff phase AND when car is on its own side of the ball
+        if self._is_kickoff:
+            on_kickoff_side = (cx > bx + 0.5) if self.team == "orange" else (cx < bx - 0.5)
+            if on_kickoff_side:
+                return "KICKOFF"
+            else:
+                self._is_kickoff = False
+
+        def_zone_depth = 8.5
+        att_zone_depth = 7.5
+        aerial_def_depth = 6.5
 
         # 2. AERIAL Persistence: If already airborne and committed to an aerial, stay in AERIAL
         if self.current_state == "AERIAL" and not car.both_wheels_grounded:
             if car.boost_amount > 5.0 and by > 2.5:
                 # If ball drops behind defense in own half, swap to DEFEND
-                if self.team == "orange" and bx > (BOT_DEFENSE_ZONE_X + 2.0):
+                if self.team == "orange" and bx > (sim.arena.x_right - aerial_def_depth):
                     return "DEFEND"
-                elif self.team == "blue" and bx < (sim.arena.x_left + 7.5):
+                elif self.team == "blue" and bx < (sim.arena.x_left + aerial_def_depth):
                     return "DEFEND"
                 return "AERIAL"
 
         if self.team == "orange":
             # 1. In defensive half, DEFEND takes top priority!
-            if bx > BOT_DEFENSE_ZONE_X:
+            if bx > (sim.arena.x_right - def_zone_depth):
                 return "DEFEND"
             # 2. In opponent half (attacking third), never rotate back; stay on attack to score
-            if bx < 12.0:
+            if bx < (sim.arena.x_left + att_zone_depth):
                 if by > 4.0 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
                     return "AERIAL"
                 return "ATTACK"
@@ -80,9 +99,9 @@ class HeuristicBot:
                 return "ROTATE_BACK"
         else:
             # Blue defends Left goal
-            if bx < (sim.arena.x_left + 9.5):
+            if bx < (sim.arena.x_left + def_zone_depth):
                 return "DEFEND"
-            if bx > (sim.arena.x_right - 12.0):
+            if bx > (sim.arena.x_right - att_zone_depth):
                 if by > 4.0 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
                     return "AERIAL"
                 return "ATTACK"
@@ -113,13 +132,44 @@ class HeuristicBot:
         own_goal_x = sim.arena.x_right if self.team == "orange" else sim.arena.x_left
         goal_target_y = (sim.arena.goal_y_bot + sim.arena.goal_y_top) * 0.5
 
+        # Obstacle Stagnation Detector: If bot is trying to advance toward ball but blocked by an obstacle or wall
+        if self._unstick_active > 0.0:
+            self._unstick_active = max(0.0, self._unstick_active - (1.0 / 60.0))
+            if cx < (sim.arena.x_left + 3.0):
+                action.dir_x = 1.0
+            elif cx > (sim.arena.x_right - 3.0):
+                action.dir_x = -1.0
+            else:
+                action.dir_x = 1.0 if (bx - cx) > 0 else -1.0
+            action.dir_y = 0.60
+            action.jump = True
+            action.boost = True
+            return action
+        elif (car.is_grounded or car.can_ground_jump or car.wheel_contact_count >= 1) and abs(car.velocity[0]) < 0.20:
+            self._stuck_timer += (1.0 / 60.0)
+            if self._stuck_timer > 0.5:
+                self._stuck_timer = 0.0
+                self._unstick_active = 0.35
+                if cx < (sim.arena.x_left + 3.0):
+                    action.dir_x = 1.0
+                elif cx > (sim.arena.x_right - 3.0):
+                    action.dir_x = -1.0
+                else:
+                    action.dir_x = 1.0 if (bx - cx) > 0 else -1.0
+                action.dir_y = 0.70
+                action.jump = True
+                action.boost = True
+                return action
+        else:
+            self._stuck_timer = max(0.0, self._stuck_timer - (2.0 / 60.0))
+
         # -------------------------------------------------------------
         # STATE 1: KICKOFF
         # -------------------------------------------------------------
         if self.current_state == "KICKOFF":
             dx = bx - cx
             dist_to_ball = abs(dx)
-            sign = -1.0 if self.team == "orange" else 1.0
+            sign = 1.0 if dx > 0 else -1.0
             action.dir_x = sign
             action.dir_y = 0.0
             action.boost = True
@@ -202,20 +252,46 @@ class HeuristicBot:
             if self.team == "orange":
                 # Orange defends Right goal (x = 30.5). Clearance MUST ALWAYS BE DIRECTED LEFT (-1.0)!
                 if cx < pred_bx - 0.5:
-                    action.dir_x = 1.0
-                    if (pred_bx - cx) < 3.5 and pred_by < 4.0:
-                        action.jump = True
-                        action.dir_y = 0.8
+                    if pred_bx > 28.0:
+                        if b_vx < -1.5:
+                            # Rebound coming out to midfield: hold outside to strike it
+                            action.dir_x = 1.0 if cx < 26.0 else -1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                        else:
+                            # Ball slow or stopped in corner: drive in along floor to dislodge/clear it!
+                            action.dir_x = 1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                    else:
+                        action.dir_x = 1.0
+                        if (pred_bx - cx) < 3.5 and pred_by < 4.0:
+                            action.jump = True
+                            action.dir_y = 0.8
                     return action
                 else:
                     clear_dir_x = -1.0
             else:
                 # Blue defends Left goal (x = 4.5). Clearance MUST ALWAYS BE DIRECTED RIGHT (+1.0)!
                 if cx > pred_bx + 0.5:
-                    action.dir_x = -1.0
-                    if (cx - pred_bx) < 3.5 and pred_by < 4.0:
-                        action.jump = True
-                        action.dir_y = 0.8
+                    if pred_bx < 7.0:
+                        if b_vx > 1.5:
+                            action.dir_x = -1.0 if cx > 9.0 else 1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                        else:
+                            action.dir_x = -1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                    else:
+                        action.dir_x = -1.0
+                        if (cx - pred_bx) < 3.5 and pred_by < 4.0:
+                            action.jump = True
+                            action.dir_y = 0.8
                     return action
                 else:
                     clear_dir_x = 1.0

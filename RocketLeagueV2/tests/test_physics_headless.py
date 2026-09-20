@@ -334,6 +334,21 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertGreater(self.sim.car.velocity[1], 8.0, "Vertical velocity should be strongly positive at 45 deg")
         self.assertGreater(self.sim.car.velocity[0], 8.0, "Horizontal velocity should be strongly positive (Right)")
 
+    def test_car_inside_goal_pocket_does_not_float(self):
+        """Verify car inside the elevated goal pocket rests on the goal floor without phantom floating."""
+        # Goal bottom is at g_bot = 5.86, car floor spawn_y = 5.86 + 0.35 = 6.21
+        self.sim.car.reset(3.5, 6.25, angle=0.0, facing_x=1)
+        for _ in range(60):
+            self.sim.step(CarAction(), dt=1.0 / 60.0)
+
+        # Car must settle on the goal floor (y ~ 6.37), NOT float into mid-air (y > 7.0)
+        self.assertAlmostEqual(self.sim.car.position[1], 6.37, delta=0.05,
+                               msg="Car inside goal must settle on floor, not float")
+        self.assertLess(abs(self.sim.car.velocity[1]), 0.1,
+                        msg="Car inside goal must be at rest vertically")
+        self.assertTrue(self.sim.car.both_wheels_grounded,
+                        msg="Car inside goal must have both wheels grounded on the goal floor")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -213,6 +213,78 @@ class TestHeuristicBot(unittest.TestCase):
         self.assertEqual(self.sim.score_orange, 1)
         self.assertEqual(self.sim.score_blue, 0)
 
+    def test_corner_ball_retrieval_stationary_orange(self):
+        """Verify Orange bot drives in and clears a stationary corner ball to midfield in < 5.0s."""
+        self.sim.ball.reset(29.5, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+        self.sim.car_orange.reset(26.0, self.sim.spawn_y, angle=0.0, facing_x=1)
+        self.sim.orange_bot.reset()
+
+        cleared = False
+        for _ in range(300):  # 5.0 seconds
+            self.sim.step(CarAction(), 1.0 / 60.0)
+            if self.sim.ball.position[0] < 22.0:
+                cleared = True
+                break
+
+        self.assertTrue(cleared, f"Orange bot must clear corner ball to x < 22.0m (got x={self.sim.ball.position[0]:.2f}m)")
+
+    def test_corner_ball_retrieval_stationary_blue(self):
+        """Verify Blue bot drives in and clears a stationary corner ball to midfield in < 5.0s."""
+        blue_bot = HeuristicBot(team="blue")
+        self.sim.ball.reset(5.5, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+        self.sim.car.reset(9.0, self.sim.spawn_y, angle=math.pi, facing_x=-1)
+        blue_bot.reset()
+
+        cleared = False
+        for _ in range(300):  # 5.0 seconds
+            action_blue = blue_bot.compute_action(self.sim)
+            self.sim.step(action_blue, 1.0 / 60.0, action_orange=CarAction())
+            if self.sim.ball.position[0] > 13.0:
+                cleared = True
+                break
+
+        self.assertTrue(cleared, f"Blue bot must clear corner ball to x > 13.0m (got x={self.sim.ball.position[0]:.2f}m)")
+
+    def test_bot_in_opponent_corner_with_center_ball_does_not_get_stuck_orange(self):
+        """Verify Orange bot in Blue corner with stationary center ball does not falsely enter KICKOFF and escapes corner."""
+        self.sim.car_orange.reset(6.0, 2.3, angle=math.pi, facing_x=-1)
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+
+        state = self.sim.orange_bot.determine_state(self.sim, self.sim.car_orange)
+        self.assertNotEqual(state, "KICKOFF", "Orange bot should not enter KICKOFF when on opponent side of ball")
+        self.assertEqual(state, "ROTATE_BACK", "Orange bot should rotate back to get behind ball")
+
+        act = self.sim.orange_bot.compute_action(self.sim)
+        self.assertEqual(act.dir_x, 1.0, "Orange bot should drive RIGHT away from Blue corner fillet")
+
+        # Step 120 frames (2.0s)
+        for _ in range(120):
+            self.sim.step(CarAction(), 1.0 / 60.0)
+
+        self.assertGreater(self.sim.car_orange.position[0], 15.0,
+                           f"Orange bot must escape corner toward midfield/defense, got x={self.sim.car_orange.position[0]:.2f}m")
+
+    def test_bot_in_opponent_corner_with_center_ball_does_not_get_stuck_blue(self):
+        """Verify Blue bot in Orange corner with stationary center ball does not falsely enter KICKOFF and escapes corner."""
+        blue_bot = HeuristicBot(team="blue")
+        self.sim.car.reset(29.0, 2.3, angle=0.0, facing_x=1)
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, vx=0.0, vy=0.0)
+
+        state = blue_bot.determine_state(self.sim, self.sim.car)
+        self.assertNotEqual(state, "KICKOFF", "Blue bot should not enter KICKOFF when on opponent side of ball")
+        self.assertEqual(state, "ROTATE_BACK", "Blue bot should rotate back to get behind ball")
+
+        act = blue_bot.compute_action(self.sim)
+        self.assertEqual(act.dir_x, -1.0, "Blue bot should drive LEFT away from Orange corner fillet")
+
+        # Step 120 frames (2.0s)
+        for _ in range(120):
+            act_b = blue_bot.compute_action(self.sim)
+            self.sim.step(act_b, 1.0 / 60.0, action_orange=CarAction())
+
+        self.assertLess(self.sim.car.position[0], 20.0,
+                        f"Blue bot must escape corner toward midfield/defense, got x={self.sim.car.position[0]:.2f}m")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -65,7 +65,6 @@ class Simulation:
                 self.orange_bot = HeuristicBot(team="orange")
 
         self._spawn_index += 1
-
         self._setup_collision_handlers()
 
     def set_orange_enabled(self, enabled: bool, is_bot: bool = True):
@@ -78,10 +77,9 @@ class Simulation:
 
         if enabled:
             if self.car_orange is None:
-                ox = 2.0 * self.center_x - self.car.position[0]
-                oy = self.spawn_y
-                self.car_orange = Car(self.space, x=ox, y=oy, angle=math.pi, team="orange")
-                self.car_orange.reset(ox, oy, angle=math.pi, facing_x=-1)
+                ox, oy, oang, ofac = self.get_spawn_position("orange")
+                self.car_orange = Car(self.space, x=ox, y=oy, angle=oang, team="orange")
+                self.car_orange.reset(ox, oy, angle=oang, facing_x=ofac)
             if self.orange_is_bot and self.orange_bot is None:
                 self.orange_bot = HeuristicBot(team="orange")
         else:
@@ -115,28 +113,38 @@ class Simulation:
             return (x_blue, self.spawn_y, 0.0, 1)
 
     def _setup_collision_handlers(self):
-        """Configure contact listeners for car/ball strikes and goal detection."""
-        # Car Body <-> Ball: momentum transfer
-        h_car_ball = self.space.add_collision_handler(COLLISION_CAR_BODY, COLLISION_BALL)
+        """Configure contact listeners for car/ball strikes and goal detection.
 
-        def _car_ball_pre_solve(arbiter, space, data):
+        Supports both the legacy handler-object API (pymunk < 7) and the
+        functional `on_collision` API (pymunk >= 7, which removed
+        `add_collision_handler`).
+        """
+        def _car_ball_pre_solve(arbiter, space, data=None):
             arbiter.restitution = CAR_BALL_RESTITUTION
             return True
 
-        h_car_ball.pre_solve = _car_ball_pre_solve
-
-        # Car Body <-> Car Body: two cars collide and bounce
-        h_car_car = self.space.add_collision_handler(COLLISION_CAR_BODY, COLLISION_CAR_BODY)
-
-        def _car_car_pre_solve(arbiter, space, data):
+        def _car_car_pre_solve(arbiter, space, data=None):
             arbiter.restitution = 0.70
             return True
 
-        h_car_car.pre_solve = _car_car_pre_solve
+        def _ball_goal_begin(arbiter, space, data=None):
+            return False
 
-        # Ball <-> Goal Sensor: passive pass-through
-        h_ball_goal = self.space.add_collision_handler(COLLISION_BALL, COLLISION_GOAL_SENSOR)
-        h_ball_goal.begin = lambda arbiter, space, data: False
+        if hasattr(self.space, "on_collision"):
+            # pymunk >= 7
+            self.space.on_collision(COLLISION_CAR_BODY, COLLISION_BALL, pre_solve=_car_ball_pre_solve)
+            self.space.on_collision(COLLISION_CAR_BODY, COLLISION_CAR_BODY, pre_solve=_car_car_pre_solve)
+            self.space.on_collision(COLLISION_BALL, COLLISION_GOAL_SENSOR, begin=_ball_goal_begin)
+        else:
+            # pymunk < 7
+            h_car_ball = self.space.add_collision_handler(COLLISION_CAR_BODY, COLLISION_BALL)
+            h_car_ball.pre_solve = _car_ball_pre_solve
+
+            h_car_car = self.space.add_collision_handler(COLLISION_CAR_BODY, COLLISION_CAR_BODY)
+            h_car_car.pre_solve = _car_car_pre_solve
+
+            h_ball_goal = self.space.add_collision_handler(COLLISION_BALL, COLLISION_GOAL_SENSOR)
+            h_ball_goal.begin = _ball_goal_begin
 
     def _check_goal(self) -> Optional[str]:
         """Check if the ball is 100% inside either goal pocket.
@@ -218,7 +226,7 @@ class Simulation:
 
         self.car.reset(x, y, angle=angle, facing_x=facing)
 
-        # 3. Orange Car spawns at the exact symmetrical position mirrored across center_x
+        # 3. Orange Car spawns at kickoff position
         if self.car_orange is not None:
             if spawn_pos is None:
                 ox, oy, oang, ofacing = self.get_spawn_position("orange")

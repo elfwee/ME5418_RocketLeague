@@ -128,5 +128,6 @@ class Arena:
         sensor.sensor = True
         sensor.collision_type = COLLISION_GOAL_SENSOR
         sensor.team = team
+        sensor.filter = pymunk.ShapeFilter(mask=0)
         self.space.add(sensor)
         self.goal_sensors.append(sensor)
