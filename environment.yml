@@ -1,0 +1,26 @@
+name: me5418_projenv
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2.0
+  - scipy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - tqdm
+  - tensorboard
+  - jupyterlab
+  # PyTorch stack (CUDA 12.1 setup; replace 'pytorch-cuda=12.1' with 'cpuonly' for CPU systems)
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  - pip:
+    - gymnasium[classic_control,box2d]
+    - torchrl
+    - moviepy
