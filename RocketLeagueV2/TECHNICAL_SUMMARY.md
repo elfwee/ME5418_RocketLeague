@@ -364,12 +364,27 @@ Calling `sim.get_state_norm()` provides fully scaled observations optimized for 
 | **Relative directions** | Normalized 2D unit vector $(d_x, d_y)$ | $[-1, 1] \times [-1, 1]$ |
 | **8 Boundary raycasts** | $d / \text{ARENA\_DIAGONAL}$ (field boundary distance only) | $[0, 1]$ |
 | **Boost amount** | $\text{boost} / \text{CAR\_MAX\_BOOST}$ | $[0, 1]$ |
-| **Grounded status** | $1.0$ if grounded else $0.0$ | $\{0.0, 1.0\}$ |
+| **Wheel contacts** | Axle contact count $/ 2.0$ (replaces binary grounded) | $\{0.0, 0.5, 1.0\}$ |
 | **Second-jump ready** | $1.0$ if Jump 2 available else $0.0$ | $\{0.0, 1.0\}$ |
+| **Dodge flip active (`is_flipping`)** | $1.0$ if flip maneuver currently active else $0.0$ | $\{0.0, 1.0\}$ |
+| **Boost recovery (`is_boost_recovery`)** | $1.0$ if grounded and not boosting else $0.0$ | $\{0.0, 1.0\}$ |
+| **Opponent present (`opponent_present`)** | $1.0$ if opponent exists else $0.0$ | $\{0.0, 1.0\}$ |
 
-Optional 1D flat feature vector:
+#### Invariant Flat Observation Vector (`as_flat_array=True`):
+Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list of **58 floats** suitable for standard `gym.spaces.Box(low=-1.0, high=1.0, shape=(58,), dtype=np.float32)`:
+1. **Ego Car (20 floats)**: `[pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts, has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]`
+2. **Ball (5 floats)**: `[pos_x, pos_y, vel_x, vel_y, ang_vel]`
+3. **Ego Relations (9 floats)**:
+   - `agent_to_ball`: `[mag, dir_x, dir_y]` (3)
+   - `ball_to_opponent_goal`: `[mag, dir_x, dir_y]` (3)
+   - `ball_to_own_goal`: `[mag, dir_x, dir_y]` (3)
+4. **Opponent Present Flag (1 float)**: `[1.0 if opponent exists else 0.0]`
+5. **Opponent-Dependent Features (23 floats)**:
+   - If opponent present: `car_orange` features (20 floats, identical format to ego car) + `opponent_to_ball` relation (`[mag, dir_x, dir_y]`, 3 floats).
+   - If no opponent: strictly zero-filled with 23 zeros (`[0.0] * 23`).
+
 ```python
-obs_vector = sim.get_state_norm(as_flat_array=True)  # List of floats for Gym Box space
+obs_vector = sim.get_state_norm(as_flat_array=True)  # Strictly fixed 58 floats in all modes
 ```
 
 ---

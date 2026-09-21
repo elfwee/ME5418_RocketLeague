@@ -339,9 +339,10 @@ class Simulation:
                 "wheel_contacts": self.car.wheel_contact_count,
                 "both_wheels_grounded": self.car.both_wheels_grounded,
                 "has_jump2": self.car.has_jump2,
-                "is_flipping": self.car._flip_active,
+                "is_flipping": self.car.is_flipping,
                 "boost": self.car.boost_amount,
                 "is_boosting": self.car.is_boosting,
+                "is_boost_recovery": self.car.is_boost_recovery,
                 "input_vector": self.car.last_input_vector,
                 "facing_x": self.car.facing_x,
                 "boundary_raycasts": self.car.compute_boundary_raycasts(),
@@ -368,9 +369,10 @@ class Simulation:
                 "wheel_contacts": self.car_orange.wheel_contact_count,
                 "both_wheels_grounded": self.car_orange.both_wheels_grounded,
                 "has_jump2": self.car_orange.has_jump2,
-                "is_flipping": self.car_orange._flip_active,
+                "is_flipping": self.car_orange.is_flipping,
                 "boost": self.car_orange.boost_amount,
                 "is_boosting": self.car_orange.is_boosting,
+                "is_boost_recovery": self.car_orange.is_boost_recovery,
                 "input_vector": self.car_orange.last_input_vector,
                 "facing_x": self.car_orange.facing_x,
                 "bot_state": self.orange_bot.current_state if self.orange_bot else None,
@@ -392,11 +394,26 @@ class Simulation:
         - relative direction: normalized unit vector (dx, dy) in [-1, 1] x [-1, 1]
         - 8 wall raycasts: d / ARENA_DIAGONAL -> [0, 1]
         - boost amount: boost / CAR_MAX_BOOST -> [0, 1]
-        - grounded: 1.0 (grounded) or 0.0 (airborne)
+        - wheel contacts: count / 2.0 -> {0.0, 0.5, 1.0} in [0, 1]
         - second-jump available: 1.0 (available) or 0.0 (spent)
+        - is_flipping: 1.0 (dodge flip active) or 0.0 (inactive)
+        - is_boost_recovery: 1.0 (grounded and not boosting) or 0.0
+        - opponent_present: 1.0 (opponent present) or 0.0 (no opponent)
+
+        Flat Array Layout (fixed 58 floats invariant length):
+        - Ego Car (20): [pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts,
+                         has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]
+        - Ball (5): [pos_x, pos_y, vel_x, vel_y, ang_vel]
+        - Relations (9): [agent_to_ball (mag, dir_x, dir_y),
+                          ball_to_opp_goal (mag, dir_x, dir_y),
+                          ball_to_own_goal (mag, dir_x, dir_y)]
+        - Opponent Present Flag (1): [1.0 if opponent exists else 0.0]
+        - Opponent-Dependent Features (23):
+            - If opponent present: opponent car (20) + opponent_to_ball (3)
+            - If no opponent: 23 zero-filled floats ([0.0] * 23)
 
         Args:
-            as_flat_array: If True, returns a flat 1D list of float features suitable for Box space.
+            as_flat_array: If True, returns a flat 1D list of 58 float features suitable for Box space.
                            If False (default), returns structured Dict[str, Any].
         """
         # 1. Normalized Relational State
@@ -484,15 +501,17 @@ class Simulation:
                 "wheel_contacts": c.wheel_contact_count / 2.0,
                 "both_wheels_grounded": 1.0 if c.both_wheels_grounded else 0.0,
                 "has_jump2": 1.0 if c.has_jump2 else 0.0,
-                "is_flipping": 1.0 if c._flip_active else 0.0,
+                "is_flipping": 1.0 if c.is_flipping else 0.0,
                 "boost": _clamp(c.boost_amount / CAR_MAX_BOOST, 0.0, 1.0),
                 "is_boosting": 1.0 if c.is_boosting else 0.0,
+                "is_boost_recovery": 1.0 if c.is_boost_recovery else 0.0,
                 "input_vector": c.last_input_vector,
                 "facing_x": float(c.facing_x),
                 "boundary_raycasts": norm_rays,
                 "boundary_distances": [r["distance"] for r in norm_rays]
             }
 
+        has_opp = bool(self.enable_orange and self.car_orange is not None)
         state_norm = {
             "time": self.time_elapsed,
             "match_time": self.match_time,
@@ -505,7 +524,8 @@ class Simulation:
                 "orange": self.score_orange
             },
             "last_goal": self.last_goal_team,
-            "orange_enabled": self.enable_orange
+            "orange_enabled": self.enable_orange,
+            "opponent_present": 1.0 if has_opp else 0.0
         }
 
         if self.car_orange is not None:
@@ -519,26 +539,36 @@ class Simulation:
         car = state_norm["car"]
         ball = state_norm["ball"]
         rel = state_norm["relations"]
+
+        # 1. Ego agent car features (20 floats)
         vec = [
             car["position"][0], car["position"][1],
             car["velocity"][0], car["velocity"][1],
             car["orientation"][0], car["orientation"][1],
             car["angular_velocity"],
             car["boost"],
-            car["is_grounded"],
+            car["wheel_contacts"],
             car["has_jump2"],
+            car["is_flipping"],
+            car["is_boost_recovery"],
             *car["boundary_distances"],
+            # 2. Ball features (5 floats)
             ball["position"][0], ball["position"][1],
             ball["velocity"][0], ball["velocity"][1],
             ball["angular_velocity"],
+            # 3. Agent relations (9 floats)
             rel["agent_to_ball"]["magnitude"],
             rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
             rel["ball_to_opponent_goal"]["magnitude"],
             rel["ball_to_opponent_goal"]["direction"][0], rel["ball_to_opponent_goal"]["direction"][1],
             rel["ball_to_own_goal"]["magnitude"],
-            rel["ball_to_own_goal"]["direction"][0], rel["ball_to_own_goal"]["direction"][1]
+            rel["ball_to_own_goal"]["direction"][0], rel["ball_to_own_goal"]["direction"][1],
+            # 4. Opponent present flag (1 float, placed immediately before car_orange)
+            state_norm["opponent_present"]
         ]
-        if state_norm.get("car_orange") is not None:
+
+        # 5. Opponent-dependent features (23 floats: 20 car features + 3 opponent_to_ball features)
+        if has_opp and state_norm.get("car_orange") is not None:
             co = state_norm["car_orange"]
             vec.extend([
                 co["position"][0], co["position"][1],
@@ -546,16 +576,24 @@ class Simulation:
                 co["orientation"][0], co["orientation"][1],
                 co["angular_velocity"],
                 co["boost"],
-                co["is_grounded"],
+                co["wheel_contacts"],
                 co["has_jump2"],
-                *co["boundary_distances"]
+                co["is_flipping"],
+                co["is_boost_recovery"],
+                *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
             ])
-            if rel.get("opponent_to_ball") is not None:
+            opp_rel = rel.get("opponent_to_ball")
+            if opp_rel is not None:
                 vec.extend([
-                    rel["opponent_to_ball"]["magnitude"],
-                    rel["opponent_to_ball"]["direction"][0],
-                    rel["opponent_to_ball"]["direction"][1]
+                    opp_rel["magnitude"],
+                    opp_rel["direction"][0],
+                    opp_rel["direction"][1]
                 ])
+            else:
+                vec.extend([0.0, 0.0, 0.0])
+        else:
+            # Zero-fill when no opponent is present to preserve fixed observation size
+            vec.extend([0.0] * 23)
 
         return vec
 

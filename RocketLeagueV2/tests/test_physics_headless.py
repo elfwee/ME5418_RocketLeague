@@ -637,11 +637,84 @@ class TestPhysicsHeadless(unittest.TestCase):
         vec = sim.get_state_norm(as_flat_array=True)
 
         self.assertIsInstance(vec, list)
-        self.assertGreater(len(vec), 30)
+        self.assertEqual(len(vec), 58, "Flat vector must have invariant length of 58 floats with opponent")
         for val in vec:
             self.assertIsInstance(val, float)
             self.assertFalse(math.isnan(val), "Flat vector contains NaN")
             self.assertFalse(math.isinf(val), "Flat vector contains Inf")
+
+    def test_is_boost_recovery_behavior(self):
+        """Verify is_boost_recovery property and state tracking under grounded/airborne/boosting conditions."""
+        sim = Simulation(enable_orange=False)
+
+        # Settle car on ground
+        for _ in range(60):
+            sim.step(CarAction(), 1.0 / 60.0)
+
+        self.assertTrue(sim.car.is_grounded, "Car must be grounded after settling")
+        self.assertTrue(sim.car.is_boost_recovery, "is_boost_recovery must be True when grounded and not boosting")
+
+        # In get_state and get_state_norm
+        st = sim.get_state()
+        sn = sim.get_state_norm()
+        self.assertTrue(st["car"]["is_boost_recovery"])
+        self.assertEqual(sn["car"]["is_boost_recovery"], 1.0)
+
+        # Deplete some boost and verify it refills while is_boost_recovery is active
+        sim.car.boost_amount = 50.0
+        sim.step(CarAction(), 1.0 / 60.0)
+        self.assertTrue(sim.car.is_boost_recovery)
+        self.assertGreater(sim.car.boost_amount, 50.0)
+
+        # While holding boost, is_boost_recovery must be False
+        sim.step(CarAction(boost=True), 1.0 / 60.0)
+        self.assertFalse(sim.car.is_boost_recovery, "is_boost_recovery must be False when boost action is active")
+        self.assertEqual(sim.get_state_norm()["car"]["is_boost_recovery"], 0.0)
+
+        # In the air (after jumping), is_boost_recovery must be False
+        sim.car.body.position = (17.5, 8.0)
+        sim.car.body.velocity = (0.0, 0.0)
+        sim.step(CarAction(), 1.0 / 60.0)
+        self.assertFalse(sim.car.is_grounded)
+        self.assertFalse(sim.car.is_boost_recovery, "is_boost_recovery must be False when airborne")
+
+        # After car.reset(), is_boost_recovery is False
+        sim.car.reset(17.5, 2.0)
+        self.assertFalse(sim.car.is_boost_recovery, "is_boost_recovery must be False on reset")
+
+    def test_flat_array_schema_and_zerofill(self):
+        """Verify flat vector has fixed length 58 and correctly zero-fills opponent features when absent."""
+        # 1. With opponent absent (single-agent mode)
+        sim_solo = Simulation(enable_orange=False)
+        vec_solo = sim_solo.get_state_norm(as_flat_array=True)
+
+        self.assertEqual(len(vec_solo), 58, "Flat vector length must be exactly 58 floats even without opponent")
+        # Opponent present flag (index 34) must be 0.0
+        self.assertEqual(vec_solo[34], 0.0, "Opponent present flag at index 34 must be 0.0 when opponent absent")
+        # All 23 opponent-dependent features (indices 35 to 57) must be 0.0
+        self.assertEqual(vec_solo[35:], [0.0] * 23, "Opponent-dependent features must be zero-filled")
+
+        # 2. With opponent present (1v1 mode)
+        sim_duo = Simulation(enable_orange=True)
+        vec_duo = sim_duo.get_state_norm(as_flat_array=True)
+
+        self.assertEqual(len(vec_duo), 58, "Flat vector length must be exactly 58 floats with opponent present")
+        # Opponent present flag (index 34) must be 1.0
+        self.assertEqual(vec_duo[34], 1.0, "Opponent present flag at index 34 must be 1.0 when opponent present")
+        # Opponent features (indices 35 to 57) must not all be zero
+        opp_slice = vec_duo[35:]
+        self.assertEqual(len(opp_slice), 23)
+        self.assertTrue(any(v != 0.0 for v in opp_slice), "Opponent features must contain actual non-zero values")
+
+        # Verify ego car indices (0-19)
+        # index 8 is wheel_contacts
+        self.assertTrue(0.0 <= vec_duo[8] <= 1.0)
+        # index 9 is has_jump2
+        self.assertIn(vec_duo[9], [0.0, 1.0])
+        # index 10 is is_flipping
+        self.assertIn(vec_duo[10], [0.0, 1.0])
+        # index 11 is is_boost_recovery
+        self.assertIn(vec_duo[11], [0.0, 1.0])
 
 
 if __name__ == '__main__':

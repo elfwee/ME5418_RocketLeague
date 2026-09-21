@@ -115,6 +115,7 @@ class Car:
         # Internal state tracking
         self.boost_amount: float = CAR_MAX_BOOST
         self.is_boosting: bool = False
+        self._is_boost_recovery: bool = False
         self._prev_jump_action: bool = False
 
         # Rocket League Jump 2 / Dodge state
@@ -149,6 +150,16 @@ class Car:
     def is_grounded(self) -> bool:
         """True if at least one suspension probe found a drivable surface."""
         return self._grounded
+
+    @property
+    def is_boost_recovery(self) -> bool:
+        """True if car is touching ground and not using boost, fulfilling boost recovery condition."""
+        return self._is_boost_recovery
+
+    @property
+    def is_flipping(self) -> bool:
+        """True if dodge / flip maneuver is currently active."""
+        return self._flip_active
 
     @property
     def wheel_contact_count(self) -> int:
@@ -571,7 +582,8 @@ class Car:
 
     def _apply_boost_recovery(self, action: CarAction, dt: float):
         """Recover boost when touching the ground, unless boost is currently being used."""
-        if self._grounded and not action.boost:
+        self._is_boost_recovery = bool(self._grounded and not action.boost)
+        if self._is_boost_recovery:
             if self.boost_amount < CAR_MAX_BOOST:
                 self.boost_amount = min(CAR_MAX_BOOST, self.boost_amount + CAR_BOOST_REFILL * dt)
 
@@ -658,6 +670,7 @@ class Car:
         self.body.torque = 0.0
         self.boost_amount = CAR_MAX_BOOST
         self.is_boosting = False
+        self._is_boost_recovery = False
         self._prev_jump_action = False
         self.has_jump2 = True
         self._flip_active = False
