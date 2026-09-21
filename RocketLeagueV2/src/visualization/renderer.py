@@ -408,6 +408,16 @@ class Renderer:
         jump2_surf = self.font.render(f"Jump 2: {jump2_str}", True, jump2_color)
         self.screen.blit(jump2_surf, (SCREEN_WIDTH - 220, 99))
 
+        # Ball spin telemetry
+        spin = sim.ball.body.angular_velocity
+        if abs(spin) > 0.5:
+            spin_dir = "CW" if spin < 0 else "CCW"
+            spin_col = (237, 137, 54) if spin < 0 else (66, 153, 225)
+            spin_surf = self.font.render(f"Ball: {spin_dir} ({spin:+5.1f} rad/s)", True, spin_col)
+        else:
+            spin_surf = self.font.render("Ball: NO SPIN (0.0)", True, (156, 163, 175))
+        self.screen.blit(spin_surf, (SCREEN_WIDTH - 220, 120))
+
         # --- Bottom-Right Boost Meter Gauge ---
         bar_w = 200
         bar_h = 22

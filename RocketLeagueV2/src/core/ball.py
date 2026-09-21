@@ -14,13 +14,14 @@ from src.config import (
 class Ball:
     """Physics representation of the 2D Rocket League ball."""
 
-    def __init__(self, space: pymunk.Space, x: float, y: float):
+    def __init__(self, space: pymunk.Space, x: float, y: float, angular_velocity: float = 0.0):
         self.space = space
         self.radius = BALL_RADIUS
 
         moment = pymunk.moment_for_circle(BALL_MASS, 0, self.radius)
         self.body = pymunk.Body(BALL_MASS, moment, pymunk.Body.DYNAMIC)
         self.body.position = (x, y)
+        self.body.angular_velocity = angular_velocity
 
         self.shape = pymunk.Circle(self.body, self.radius)
         self.shape.elasticity = BALL_RESTITUTION
@@ -60,11 +61,11 @@ class Ball:
         self.apply_aerodynamics(dt)
         self.record_trail()
 
-    def reset(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0):
-        """Reset ball to specified coordinates with optional initial velocity."""
+    def reset(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0, angular_velocity: float = 0.0):
+        """Reset ball to specified coordinates with optional initial velocity and spin."""
         self.body.position = (x, y)
         self.body.velocity = (vx, vy)
-        self.body.angular_velocity = 0.0
+        self.body.angular_velocity = angular_velocity
         self.body.angle = 0.0
         self.body.force = (0.0, 0.0)
         self.body.torque = 0.0
@@ -81,3 +82,7 @@ class Ball:
     @property
     def angle(self) -> float:
         return self.body.angle
+
+    @property
+    def angular_velocity(self) -> float:
+        return self.body.angular_velocity

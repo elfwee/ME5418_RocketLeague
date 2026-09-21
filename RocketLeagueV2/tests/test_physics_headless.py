@@ -349,6 +349,34 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertTrue(self.sim.car.both_wheels_grounded,
                         msg="Car inside goal must have both wheels grounded on the goal floor")
 
+    def test_ball_angular_velocity_defaults_to_zero_at_kickoff(self):
+        """Verify ball spawns with zero initial angular velocity at kickoff."""
+        self.assertEqual(self.sim.ball.body.angular_velocity, 0.0)
+        self.assertEqual(self.sim.ball.angular_velocity, 0.0)
+        state = self.sim.get_state()
+        self.assertEqual(state["ball"]["angular_velocity"], 0.0)
+
+    def test_ball_body_angular_velocity_retained_and_tracked(self):
+        """Verify self.ball.body.angular_velocity is retained, tracks physics, and reports in get_state()."""
+        # Set angular velocity directly on the physical body
+        self.sim.ball.body.angular_velocity = -25.0
+        self.assertAlmostEqual(self.sim.ball.body.angular_velocity, -25.0, places=2)
+        self.assertAlmostEqual(self.sim.ball.angular_velocity, -25.0, places=2)
+        self.assertAlmostEqual(self.sim.get_state()["ball"]["angular_velocity"], -25.0, places=2)
+
+        # Step simulation: spin drag and ground friction update angular velocity dynamically
+        self.sim.step(CarAction(), dt=1.0 / 60.0)
+        state_after = self.sim.get_state()
+        self.assertAlmostEqual(state_after["ball"]["angular_velocity"], self.sim.ball.body.angular_velocity, places=4)
+
+    def test_ball_reset_angular_velocity(self):
+        """Verify Ball.reset explicitly retains and supports angular_velocity parameter."""
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y, angular_velocity=20.0)
+        self.assertAlmostEqual(self.sim.ball.body.angular_velocity, 20.0, places=2)
+        # Default reset returns to 0.0
+        self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y)
+        self.assertEqual(self.sim.ball.body.angular_velocity, 0.0)
+
 
 if __name__ == '__main__':
     unittest.main()

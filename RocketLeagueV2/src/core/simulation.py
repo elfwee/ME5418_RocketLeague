@@ -255,6 +255,7 @@ class Simulation:
             "ball": {
                 "position": self.ball.position,
                 "velocity": self.ball.velocity,
+                "angular_velocity": self.ball.body.angular_velocity,
                 "angle": self.ball.angle
             },
             "car": {

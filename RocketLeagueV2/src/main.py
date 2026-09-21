@@ -121,7 +121,8 @@ def run_headless(steps: int = 300, enable_orange: bool = True):
             state = sim.get_state()
             line = (
                 f"Step {step:03d} | Blue Pos: ({state['car']['position'][0]:.2f}, {state['car']['position'][1]:.2f}) | "
-                f"Ball Pos: ({state['ball']['position'][0]:.2f}, {state['ball']['position'][1]:.2f})"
+                f"Ball Pos: ({state['ball']['position'][0]:.2f}, {state['ball']['position'][1]:.2f}) | "
+                f"Ball Spin: {state['ball']['angular_velocity']:+5.1f} rad/s"
             )
             if "car_orange" in state:
                 line += f" | Orange Pos: ({state['car_orange']['position'][0]:.2f}, {state['car_orange']['position'][1]:.2f}) [{state['car_orange']['bot_state']}]"
