@@ -288,6 +288,7 @@ The Pygame rendering pipeline runs at 40 pixels per meter ($\text{PPM} = 40.0$),
 | **Rocket Boost** | `Left/Right Shift`, `O`, `J` | Button B (Button 1) or Right Trigger (Button 5) | High-thrust directional aerial acceleration |
 | **Reset Field** | `R` | — | Resets car, ball, and kickoff positions |
 | **Toggle AI Bot** | `B` | — | Dynamically adds or removes Orange AI opponent |
+| **Toggle Boundary Raycasts** | `L` or Click HUD button | — | Shows/hides 8 egocentric 45° field raycasts |
 | **Exit** | `Escape` | — | Closes simulation window |
 
 ---
@@ -322,7 +323,19 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
         "boost": 94.2,                     # Remaining boost percentage (0.0 - 100.0)
         "is_boosting": False,
         "input_vector": (1.0, 0.0),        # Last commanded input vector
-        "facing_x": 1                      # Facing direction (+1: Right, -1: Left)
+        "facing_x": 1,                     # Facing direction (+1: Right, -1: Left)
+        "boundary_distances": [20.9, 20.4, 14.4, 10.8, 2.9, 0.64, 0.45, 0.64],  # 8 rays at 45° intervals
+        "boundary_raycasts": [             # Complete ray contact details (field only)
+            {
+                "angle_relative_deg": 0.0,
+                "angle_world_rad": 0.02,
+                "direction": (1.0, 0.0),
+                "distance": 20.9,
+                "hit_point": (29.4, 2.01),
+                "hit_normal": (-1.0, 0.0)
+            },
+            ...
+        ]
     },
     "relations": {
         "agent_to_ball": {"magnitude": 4.12, "direction": (0.92, 0.39)},

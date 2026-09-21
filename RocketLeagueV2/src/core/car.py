@@ -8,7 +8,7 @@ scripted downforce / pitch-cutoff hacks the physical model now makes unnecessary
 """
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 import pymunk
 
@@ -137,6 +137,9 @@ class Car:
         # Upside-down auto-righting state
         self.turtled_time: float = 0.0
         self._recovery_time: float = 0.0
+
+        # Boundary raycast cache for 45-degree field awareness sensors
+        self._boundary_raycasts: Optional[List[Dict[str, Any]]] = None
 
     # ------------------------------------------------------------------ #
     # Geometry / state queries
@@ -671,6 +674,7 @@ class Car:
             wheel.normal_force = 0.0
         self._set_facing(facing_x, snap=False)
         self.space.reindex_shapes_for_body(self.body)
+        self._boundary_raycasts = None
 
     @property
     def position(self) -> Tuple[float, float]:
@@ -683,3 +687,64 @@ class Car:
     @property
     def angle(self) -> float:
         return self.body.angle
+
+    def compute_boundary_raycasts(self, max_distance: float = 60.0, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Compute 8 raycasts at 45-degree intervals from car center to field boundaries.
+
+        Provides awareness of distance from the center of the car to the arena field surfaces
+        (floor, ceiling, walls, corner fillets), ignoring dynamic entities (ball, other car).
+        Rays are body-relative: rotating with the car's body angle.
+
+        Returns:
+            List of 8 dictionaries (0 deg to 315 deg at 45 deg increments), each containing:
+                - angle_relative_deg: float (0.0, 45.0, ..., 315.0)
+                - angle_world_rad: float (world space angle in radians)
+                - direction: Tuple[float, float] (normalized 2D unit vector)
+                - distance: float (Euclidean distance to field in meters)
+                - hit_point: Tuple[float, float] (world coordinates of contact point)
+                - hit_normal: Tuple[float, float] (surface normal at contact point)
+        """
+        if self._boundary_raycasts is not None and not force_refresh:
+            return self._boundary_raycasts
+
+        raycasts = []
+        car_pos = (self.body.position.x, self.body.position.y)
+        theta = self.body.angle
+        filter_all = pymunk.ShapeFilter()
+
+        for i in range(8):
+            rel_deg = i * 45.0
+            rel_rad = i * (math.pi / 4.0)
+            world_rad = theta + rel_rad
+            dx = math.cos(world_rad)
+            dy = math.sin(world_rad)
+            end = (car_pos[0] + dx * max_distance, car_pos[1] + dy * max_distance)
+
+            queries = self.space.segment_query(car_pos, end, 0.0, filter_all)
+            arena_hits = [q for q in queries if q.shape.collision_type == COLLISION_ARENA]
+            closest = min(arena_hits, key=lambda q: q.alpha) if arena_hits else None
+
+            if closest:
+                hit_pt = (closest.point.x, closest.point.y)
+                dist = math.hypot(hit_pt[0] - car_pos[0], hit_pt[1] - car_pos[1])
+                normal = (closest.normal.x, closest.normal.y)
+            else:
+                hit_pt = end
+                dist = max_distance
+                normal = (0.0, 0.0)
+
+            raycasts.append({
+                "angle_relative_deg": rel_deg,
+                "angle_world_rad": world_rad,
+                "direction": (dx, dy),
+                "distance": dist,
+                "hit_point": hit_pt,
+                "hit_normal": normal
+            })
+
+        self._boundary_raycasts = raycasts
+        return raycasts
+
+    def clear_raycast_cache(self):
+        """Clear cached raycast calculations for the next simulation frame."""
+        self._boundary_raycasts = None

@@ -14,6 +14,7 @@ from src.config import (
     COLOR_HEADLIGHT, COLOR_TAILLIGHT, COLOR_BOOST_FLAME,
     COLOR_BALL, COLOR_BALL_ACCENT,
     COLOR_INPUT_VECTOR, COLOR_VELOCITY_VECTOR,
+    COLOR_RAYCAST_BLUE, COLOR_RAYCAST_ORANGE, COLOR_RAYCAST_HIT,
     COLOR_TEXT, COLOR_UI_BAR_BG, COLOR_BOOST_BAR
 )
 from src.core.car import Car
@@ -31,6 +32,8 @@ class Renderer:
         # segment costs ~25 full-screen surfaces every frame.
         self._alpha_layer = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         self._cached_goal_surfaces = {}
+        self.show_raycasts: bool = True
+        self.raycast_button_rect = pygame.Rect(0, 0, 0, 0)
 
     def world_to_screen(self, x: float, y: float) -> Tuple[int, int]:
         """Convert SI coordinates (meters, +Y up) to screen pixels (+Y down)."""
@@ -39,16 +42,44 @@ class Renderer:
         return (sx, sy)
 
     def render(self, sim: Simulation):
-        """Render complete simulation frame: arena, vectors, ball, cars, and HUD."""
+        """Render complete simulation frame: arena, raycasts, vectors, ball, cars, and HUD."""
         self.screen.fill(COLOR_BG)
 
         self._draw_arena(sim)
+        self._draw_boundary_raycasts(sim)
         self._draw_ball(sim)
         self._draw_car(sim.car)
         if sim.car_orange is not None:
             self._draw_car(sim.car_orange)
         self._draw_vector_indicators(sim)
         self._draw_hud(sim)
+
+    def _draw_boundary_raycasts(self, sim: Simulation):
+        """Draw 45-degree interval boundary raycasts from car center to field boundaries."""
+        if not self.show_raycasts:
+            return
+
+        cars = [(sim.car, COLOR_RAYCAST_BLUE)]
+        if sim.enable_orange and sim.car_orange is not None:
+            cars.append((sim.car_orange, COLOR_RAYCAST_ORANGE))
+
+        for car, color in cars:
+            raycasts = car.compute_boundary_raycasts()
+            sp_start = self.world_to_screen(car.position[0], car.position[1])
+
+            # Subtle origin circle at car center
+            pygame.draw.circle(self.screen, color, sp_start, 4, width=1)
+
+            for r in raycasts:
+                hx, hy = r["hit_point"]
+                sp_hit = self.world_to_screen(hx, hy)
+
+                # Draw ray line from car center to field collision boundary
+                pygame.draw.line(self.screen, color, sp_start, sp_hit, 1)
+
+                # Draw hit point contact marker (white dot with colored halo)
+                pygame.draw.circle(self.screen, COLOR_RAYCAST_HIT, sp_hit, 3)
+                pygame.draw.circle(self.screen, color, sp_hit, 5, width=1)
 
     def _draw_arena(self, sim: Simulation):
         """Draw boundary segments, corner curves, center field marking, and elevated goal pockets."""
@@ -352,7 +383,8 @@ class Renderer:
             "[Space] Jump / Flip (or Turtle Recovery)",
             "[Shift / O] Rocket Boost",
             "[R] Reset Ball & Car",
-            "[B] Toggle Orange Bot (ON/OFF)"
+            "[B] Toggle Orange Bot (ON/OFF)",
+            "[L] Toggle Boundary Raycasts (ON/OFF)"
         ]
         y_offset = 15
         for line in help_lines:
@@ -364,8 +396,10 @@ class Renderer:
         y_offset += 6
         p_txt = self.font.render("--- Purple Vector: Commanded Input (Target Hand)", True, COLOR_INPUT_VECTOR)
         b_txt = self.font.render("--> Blue Vector: Car Heading & Speed (Minute Hand)", True, COLOR_VELOCITY_VECTOR)
+        r_txt = self.font.render("--- Cyan Lines: 45° Boundary Raycasts (Field Only)", True, COLOR_RAYCAST_BLUE)
         self.screen.blit(p_txt, (20, y_offset))
         self.screen.blit(b_txt, (20, y_offset + 20))
+        self.screen.blit(r_txt, (20, y_offset + 40))
 
         # --- Top-Right Car Telemetry ---
         car = sim.car
@@ -418,6 +452,35 @@ class Renderer:
             spin_surf = self.font.render("Ball: NO SPIN (0.0)", True, (156, 163, 175))
         self.screen.blit(spin_surf, (SCREEN_WIDTH - 220, 120))
 
+        # --- Top-Right Raycast Toggle Button (under telemetry) ---
+        btn_x = SCREEN_WIDTH - 220
+        btn_y = 146
+        btn_w = 200
+        btn_h = 26
+        self.raycast_button_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+
+        mouse_pos = pygame.mouse.get_pos()
+        is_hovered = self.raycast_button_rect.collidepoint(mouse_pos)
+
+        if self.show_raycasts:
+            btn_bg = (18, 48, 52) if is_hovered else (15, 38, 42)
+            border_col = (45, 226, 230) if is_hovered else COLOR_RAYCAST_BLUE
+            text_col = (200, 250, 255) if is_hovered else COLOR_RAYCAST_BLUE
+            btn_text = "[L] RAYCASTS: ON"
+            border_w = 2
+        else:
+            btn_bg = (35, 42, 54) if is_hovered else (22, 27, 38)
+            border_col = (148, 163, 184) if is_hovered else (75, 85, 99)
+            text_col = (203, 213, 225) if is_hovered else (156, 163, 175)
+            btn_text = "[L] RAYCASTS: OFF"
+            border_w = 1
+
+        pygame.draw.rect(self.screen, btn_bg, self.raycast_button_rect, border_radius=5)
+        pygame.draw.rect(self.screen, border_col, self.raycast_button_rect, width=border_w, border_radius=5)
+        btn_surf = self.font.render(btn_text, True, text_col)
+        btn_rect = btn_surf.get_rect(center=self.raycast_button_rect.center)
+        self.screen.blit(btn_surf, btn_rect)
+
         # --- Bottom-Right Boost Meter Gauge ---
         bar_w = 200
         bar_h = 22
@@ -436,3 +499,10 @@ class Renderer:
         # Label
         boost_txt = self.font.render(f"BOOST: {int(car.boost_amount):3d}%", True, (0, 0, 0) if fill_ratio > 0.4 else COLOR_TEXT)
         self.screen.blit(boost_txt, (bar_x + 10, bar_y + 3))
+
+    def handle_click(self, pos: Tuple[int, int]) -> bool:
+        """Handle mouse click events on UI elements. Returns True if a button was clicked."""
+        if hasattr(self, "raycast_button_rect") and self.raycast_button_rect.collidepoint(pos):
+            self.show_raycasts = not self.show_raycasts
+            return True
+        return False

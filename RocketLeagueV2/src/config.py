@@ -165,6 +165,11 @@ COLOR_BOOST_BAR = (236, 201, 75)
 COLOR_INPUT_VECTOR = (168, 85, 247)      # Purple arrow for direction input vector
 COLOR_VELOCITY_VECTOR = (59, 130, 246)   # Blue arrow for car velocity vector
 
+# --- Boundary Raycast Colors ---
+COLOR_RAYCAST_BLUE = (34, 211, 238)      # Cyan/teal ray lines for Blue car
+COLOR_RAYCAST_ORANGE = (251, 146, 60)    # Neon orange/amber ray lines for Orange car
+COLOR_RAYCAST_HIT = (255, 255, 255)      # White hit point marker
+
 # --- Opponent Car & Bot Settings ---
 ENABLE_ORANGE_CAR = False                # Default flag: whether Orange car is present (enabled by default in main.py)
 ORANGE_IS_BOT = True                     # Default flag: whether Orange car is AI-controlled

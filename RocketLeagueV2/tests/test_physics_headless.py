@@ -458,6 +458,107 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertAlmostEqual(rel_b2own["direction"][0], dx_b2own / dist_b2own, places=4)
         self.assertAlmostEqual(rel_b2own["direction"][1], dy_b2own / dist_b2own, places=4)
 
+    def test_boundary_raycasts_count_and_intervals(self):
+        """Verify 8 boundary raycasts at exact 45-degree intervals from car center to field."""
+        sim = Simulation(enable_orange=False)
+        raycasts = sim.car.compute_boundary_raycasts()
+
+        self.assertEqual(len(raycasts), 8)
+        expected_angles = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
+
+        for i, ray in enumerate(raycasts):
+            self.assertAlmostEqual(ray["angle_relative_deg"], expected_angles[i], places=2)
+            rel_rad = math.radians(expected_angles[i])
+            expected_world_rad = sim.car.body.angle + rel_rad
+            self.assertAlmostEqual(ray["angle_world_rad"], expected_world_rad, places=4)
+
+            dx, dy = ray["direction"]
+            self.assertAlmostEqual(math.hypot(dx, dy), 1.0, places=4)
+            self.assertGreater(ray["distance"], 0.0)
+
+            # Hit point must match car center + direction * distance
+            cx, cy = sim.car.position
+            hx, hy = ray["hit_point"]
+            self.assertAlmostEqual(math.hypot(hx - cx, hy - cy), ray["distance"], places=4)
+
+    def test_boundary_raycasts_field_only_ignores_ball_and_cars(self):
+        """Verify raycasts sense field geometry only, passing through ball and other cars."""
+        sim = Simulation(enable_orange=True)
+        car = sim.car
+        cx, cy = car.position
+
+        # Position ball and orange car directly between blue car and the right wall along 0 deg (Ray 0)
+        sim.ball.body.position = (cx + 3.0, cy)
+        sim.car_orange.body.position = (cx + 6.0, cy)
+
+        raycasts = car.compute_boundary_raycasts(force_refresh=True)
+        ray0 = raycasts[0]  # 0 degrees relative (facing right when angle=0)
+
+        # Ray 0 distance must be well past 3.0m and 6.0m, hitting the actual arena right wall (~20.9m)
+        self.assertGreater(ray0["distance"], 15.0,
+                           msg="Raycast must ignore ball (3m) and opponent car (6m) and hit the field wall")
+        self.assertAlmostEqual(ray0["hit_point"][1], cy, places=2)
+
+    def test_boundary_raycasts_body_relative_rotation(self):
+        """Verify raycasts rotate egocentrically with the car's orientation."""
+        sim = Simulation(enable_orange=False)
+        sim.car.body.angle = math.radians(30.0)
+
+        raycasts = sim.car.compute_boundary_raycasts(force_refresh=True)
+        # Ray 0 is relative 0 deg, so world angle must be 30 deg
+        self.assertAlmostEqual(math.degrees(raycasts[0]["angle_world_rad"]), 30.0, places=2)
+        # Ray 2 is relative 90 deg, so world angle must be 120 deg
+        self.assertAlmostEqual(math.degrees(raycasts[2]["angle_world_rad"]), 120.0, places=2)
+
+    def test_boundary_raycasts_in_get_state(self):
+        """Verify boundary_raycasts and boundary_distances are present in get_state()."""
+        sim = Simulation(enable_orange=True)
+        state = sim.get_state()
+
+        self.assertIn("boundary_raycasts", state["car"])
+        self.assertIn("boundary_distances", state["car"])
+        self.assertEqual(len(state["car"]["boundary_raycasts"]), 8)
+        self.assertEqual(len(state["car"]["boundary_distances"]), 8)
+
+        # Distances list matches raycast distances
+        for i in range(8):
+            self.assertEqual(state["car"]["boundary_distances"][i],
+                             state["car"]["boundary_raycasts"][i]["distance"])
+
+        # Orange car also has raycast telemetry
+        self.assertIn("boundary_raycasts", state["car_orange"])
+        self.assertIn("boundary_distances", state["car_orange"])
+        self.assertEqual(len(state["car_orange"]["boundary_raycasts"]), 8)
+
+    def test_renderer_raycast_toggle(self):
+        """Verify renderer show_raycasts state and interactive click handler."""
+        import pygame
+        from src.visualization.renderer import Renderer
+        pygame.init()
+        screen = pygame.Surface((100, 100))
+        sim = Simulation(enable_orange=False)
+        renderer = Renderer(screen)
+
+        self.assertTrue(renderer.show_raycasts)
+        renderer._draw_hud(sim)
+
+        # Click inside the raycast button rect toggles show_raycasts to False
+        btn_center = renderer.raycast_button_rect.center
+        clicked = renderer.handle_click(btn_center)
+        self.assertTrue(clicked)
+        self.assertFalse(renderer.show_raycasts)
+
+        # Click again toggles back to True
+        clicked = renderer.handle_click(btn_center)
+        self.assertTrue(clicked)
+        self.assertTrue(renderer.show_raycasts)
+
+        # Click outside does not toggle
+        clicked = renderer.handle_click((0, 0))
+        self.assertFalse(clicked)
+        self.assertTrue(renderer.show_raycasts)
+
 
 if __name__ == '__main__':
     unittest.main()
+

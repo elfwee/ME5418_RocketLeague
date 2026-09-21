@@ -209,6 +209,11 @@ class Simulation:
         self.time_elapsed += dt
         self.match_time += dt
 
+        # Clear boundary raycast cache for the new frame
+        self.car.clear_raycast_cache()
+        if self.car_orange is not None:
+            self.car_orange.clear_raycast_cache()
+
         # Score logic: goal only counts when ball is 100% inside the goal pocket
         scoring_team = self._check_goal()
         if scoring_team is not None:
@@ -322,7 +327,9 @@ class Simulation:
                 "boost": self.car.boost_amount,
                 "is_boosting": self.car.is_boosting,
                 "input_vector": self.car.last_input_vector,
-                "facing_x": self.car.facing_x
+                "facing_x": self.car.facing_x,
+                "boundary_raycasts": self.car.compute_boundary_raycasts(),
+                "boundary_distances": [r["distance"] for r in self.car.compute_boundary_raycasts()]
             },
             "relations": relations,
             "score": {
@@ -350,7 +357,9 @@ class Simulation:
                 "is_boosting": self.car_orange.is_boosting,
                 "input_vector": self.car_orange.last_input_vector,
                 "facing_x": self.car_orange.facing_x,
-                "bot_state": self.orange_bot.current_state if self.orange_bot else None
+                "bot_state": self.orange_bot.current_state if self.orange_bot else None,
+                "boundary_raycasts": self.car_orange.compute_boundary_raycasts(),
+                "boundary_distances": [r["distance"] for r in self.car_orange.compute_boundary_raycasts()]
             }
 
         return state
