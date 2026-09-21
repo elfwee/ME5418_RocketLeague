@@ -1,9 +1,13 @@
 """Headless simulation manager orchestrating Pymunk space, entities, and collisions."""
 import math
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List, Union
 import pymunk
 from src.config import (
     FIELD_WIDTH, FIELD_HEIGHT, MARGIN_X, MARGIN_Y,
+    TOTAL_WIDTH, TOTAL_HEIGHT, ARENA_DIAGONAL,
+    CENTER_X, CENTER_Y, HALF_WIDTH, HALF_HEIGHT,
+    BALL_MAX_SPEED, BALL_MAX_SPIN,
+    CAR_MAX_SPEED, CAR_MAX_ANGULAR_SPEED, CAR_MAX_BOOST,
     GRAVITY, SIM_HZ, PHYSICS_SUBSTEPS, SOLVER_ITERATIONS,
     ARENA_SEGMENT_RADIUS, CAR_RIDE_HEIGHT,
     BALL_RADIUS, CAR_SPAWN_X_DEFENSIVE, CAR_SPAWN_X_ATTACK,
@@ -16,6 +20,18 @@ from src.core.arena import Arena
 from src.core.ball import Ball
 from src.core.car import Car
 from src.ai.heuristic_bot import HeuristicBot
+
+
+def _clamp(val: float, low: float, high: float) -> float:
+    """Clamp scalar value into [low, high]."""
+    return low if val < low else (high if val > high else val)
+
+
+def _normalize_pos(p: Tuple[float, float]) -> Tuple[float, float]:
+    """Map world coordinates (x, y) symmetrically around arena center to [-1, 1]."""
+    nx = _clamp((p[0] - CENTER_X) / HALF_WIDTH, -1.0, 1.0)
+    ny = _clamp((p[1] - CENTER_Y) / HALF_HEIGHT, -1.0, 1.0)
+    return (nx, ny)
 
 
 def _vector_relation(p_from: Tuple[float, float], p_to: Tuple[float, float]) -> Dict[str, Any]:
@@ -363,3 +379,183 @@ class Simulation:
             }
 
         return state
+
+    def get_state_norm(self, as_flat_array: bool = False) -> Any:
+        """Query normalized simulation state representation for RL observations or neural policies.
+
+        Normalizations applied:
+        - (x, y) positions: mapped symmetrically around arena center to [-1, 1]
+        - (vx, vy) velocities: divided by known/max expected speed -> [-1, 1]
+        - orientation: (sin(theta), cos(theta)) continuous circular embedding -> [-1, 1] x [-1, 1]
+        - angular velocity: divided by max expected angular velocity -> [-1, 1]
+        - relative distance: divided by arena diagonal (ARENA_DIAGONAL) -> [0, 1]
+        - relative direction: normalized unit vector (dx, dy) in [-1, 1] x [-1, 1]
+        - 8 wall raycasts: d / ARENA_DIAGONAL -> [0, 1]
+        - boost amount: boost / CAR_MAX_BOOST -> [0, 1]
+        - grounded: 1.0 (grounded) or 0.0 (airborne)
+        - second-jump available: 1.0 (available) or 0.0 (spent)
+
+        Args:
+            as_flat_array: If True, returns a flat 1D list of float features suitable for Box space.
+                           If False (default), returns structured Dict[str, Any].
+        """
+        # 1. Normalized Relational State
+        opp_team = "orange" if self.car.team == "blue" else "blue"
+        opp_goal_center = self.get_goal_center(opp_team)
+        own_goal_center = self.get_goal_center(self.car.team)
+
+        agent_to_ball = _vector_relation(self.car.position, self.ball.position)
+        opp_to_ball = (
+            _vector_relation(self.car_orange.position, self.ball.position)
+            if self.car_orange is not None else None
+        )
+        ball_to_opp_goal = _vector_relation(self.ball.position, opp_goal_center)
+        ball_to_own_goal = _vector_relation(self.ball.position, own_goal_center)
+
+        relations_norm = {
+            "agent_to_ball": {
+                "magnitude": min(1.0, agent_to_ball["magnitude"] / ARENA_DIAGONAL),
+                "direction": agent_to_ball["direction"]
+            },
+            "opponent_to_ball": (
+                {
+                    "magnitude": min(1.0, opp_to_ball["magnitude"] / ARENA_DIAGONAL),
+                    "direction": opp_to_ball["direction"]
+                }
+                if opp_to_ball is not None else None
+            ),
+            "ball_to_opponent_goal": {
+                "magnitude": min(1.0, ball_to_opp_goal["magnitude"] / ARENA_DIAGONAL),
+                "direction": ball_to_opp_goal["direction"]
+            },
+            "ball_to_own_goal": {
+                "magnitude": min(1.0, ball_to_own_goal["magnitude"] / ARENA_DIAGONAL),
+                "direction": ball_to_own_goal["direction"]
+            }
+        }
+
+        # 2. Normalized Ball State
+        bx, by = self.ball.position
+        bvx, bvy = self.ball.velocity
+        b_ang = self.ball.angle
+        b_spin = self.ball.body.angular_velocity
+
+        ball_norm = {
+            "position": _normalize_pos((bx, by)),
+            "velocity": (
+                _clamp(bvx / BALL_MAX_SPEED, -1.0, 1.0),
+                _clamp(bvy / BALL_MAX_SPEED, -1.0, 1.0)
+            ),
+            "orientation": (math.sin(b_ang), math.cos(b_ang)),
+            "angular_velocity": _clamp(b_spin / BALL_MAX_SPIN, -1.0, 1.0)
+        }
+
+        # 3. Helper for normalizing a car
+        def _normalize_car(c: Car) -> Dict[str, Any]:
+            cx, cy = c.position
+            nx, ny = c.nose_position
+            cvx, cvy = c.velocity
+            c_ang = c.angle
+            c_spin = c.body.angular_velocity
+            raycasts = c.compute_boundary_raycasts()
+
+            norm_rays = []
+            for r in raycasts:
+                norm_rays.append({
+                    "angle_relative_deg": r["angle_relative_deg"],
+                    "angle_world_rad": r["angle_world_rad"],
+                    "direction": r["direction"],
+                    "distance": min(1.0, max(0.0, r["distance"] / ARENA_DIAGONAL)),
+                    "hit_point": _normalize_pos(r["hit_point"]),
+                    "hit_normal": r["hit_normal"]
+                })
+
+            return {
+                "position": _normalize_pos((cx, cy)),
+                "nose_position": _normalize_pos((nx, ny)),
+                "velocity": (
+                    _clamp(cvx / CAR_MAX_SPEED, -1.0, 1.0),
+                    _clamp(cvy / CAR_MAX_SPEED, -1.0, 1.0)
+                ),
+                "orientation": (math.sin(c_ang), math.cos(c_ang)),
+                "angular_velocity": _clamp(c_spin / CAR_MAX_ANGULAR_SPEED, -1.0, 1.0),
+                "is_grounded": 1.0 if c.is_grounded else 0.0,
+                "ground_normal": c.ground_normal,
+                "wheel_contacts": c.wheel_contact_count / 2.0,
+                "both_wheels_grounded": 1.0 if c.both_wheels_grounded else 0.0,
+                "has_jump2": 1.0 if c.has_jump2 else 0.0,
+                "is_flipping": 1.0 if c._flip_active else 0.0,
+                "boost": _clamp(c.boost_amount / CAR_MAX_BOOST, 0.0, 1.0),
+                "is_boosting": 1.0 if c.is_boosting else 0.0,
+                "input_vector": c.last_input_vector,
+                "facing_x": float(c.facing_x),
+                "boundary_raycasts": norm_rays,
+                "boundary_distances": [r["distance"] for r in norm_rays]
+            }
+
+        state_norm = {
+            "time": self.time_elapsed,
+            "match_time": self.match_time,
+            "goal_scored_step": self.goal_scored_this_step,
+            "ball": ball_norm,
+            "car": _normalize_car(self.car),
+            "relations": relations_norm,
+            "score": {
+                "blue": self.score_blue,
+                "orange": self.score_orange
+            },
+            "last_goal": self.last_goal_team,
+            "orange_enabled": self.enable_orange
+        }
+
+        if self.car_orange is not None:
+            orange_car_norm = _normalize_car(self.car_orange)
+            orange_car_norm["bot_state"] = self.orange_bot.current_state if self.orange_bot else None
+            state_norm["car_orange"] = orange_car_norm
+
+        if not as_flat_array:
+            return state_norm
+
+        car = state_norm["car"]
+        ball = state_norm["ball"]
+        rel = state_norm["relations"]
+        vec = [
+            car["position"][0], car["position"][1],
+            car["velocity"][0], car["velocity"][1],
+            car["orientation"][0], car["orientation"][1],
+            car["angular_velocity"],
+            car["boost"],
+            car["is_grounded"],
+            car["has_jump2"],
+            *car["boundary_distances"],
+            ball["position"][0], ball["position"][1],
+            ball["velocity"][0], ball["velocity"][1],
+            ball["angular_velocity"],
+            rel["agent_to_ball"]["magnitude"],
+            rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
+            rel["ball_to_opponent_goal"]["magnitude"],
+            rel["ball_to_opponent_goal"]["direction"][0], rel["ball_to_opponent_goal"]["direction"][1],
+            rel["ball_to_own_goal"]["magnitude"],
+            rel["ball_to_own_goal"]["direction"][0], rel["ball_to_own_goal"]["direction"][1]
+        ]
+        if state_norm.get("car_orange") is not None:
+            co = state_norm["car_orange"]
+            vec.extend([
+                co["position"][0], co["position"][1],
+                co["velocity"][0], co["velocity"][1],
+                co["orientation"][0], co["orientation"][1],
+                co["angular_velocity"],
+                co["boost"],
+                co["is_grounded"],
+                co["has_jump2"],
+                *co["boundary_distances"]
+            ])
+            if rel.get("opponent_to_ball") is not None:
+                vec.extend([
+                    rel["opponent_to_ball"]["magnitude"],
+                    rel["opponent_to_ball"]["direction"][0],
+                    rel["opponent_to_ball"]["direction"][1]
+                ])
+
+        return vec
+

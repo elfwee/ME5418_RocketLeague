@@ -350,6 +350,28 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
 }
 ```
 
+### Normalized State API (`sim.get_state_norm()`)
+
+Calling `sim.get_state_norm()` provides fully scaled observations optimized for Reinforcement Learning (Gymnasium wrappers) and neural network policies:
+
+| Observation | Normalization Method | Bounded Range |
+| :--- | :--- | :--- |
+| **$(x, y)$ positions** | $((x - x_{center}) / w_{half}, (y - y_{center}) / h_{half})$ around arena center $(17.5, 9.0)$ | $[-1, 1] \times [-1, 1]$ |
+| **$(v_x, v_y)$ linear velocity** | $(v_x / v_{max}, v_y / v_{max})$ with $v_{max,car}=28.0, v_{max,ball}=38.0$ | $[-1, 1] \times [-1, 1]$ |
+| **Orientation angle** | Continuous circular embedding $(\sin\theta, \cos\theta)$ | $[-1, 1] \times [-1, 1]$ |
+| **Angular velocity** | $\omega / \omega_{max}$ with $\omega_{max,car}=25.0, \omega_{max,ball}=30.0$ | $[-1, 1]$ |
+| **Relative distances** | $d / \text{ARENA\_DIAGONAL}$ where $\text{ARENA\_DIAGONAL}\approx 39.357\text{ m}$ | $[0, 1]$ |
+| **Relative directions** | Normalized 2D unit vector $(d_x, d_y)$ | $[-1, 1] \times [-1, 1]$ |
+| **8 Boundary raycasts** | $d / \text{ARENA\_DIAGONAL}$ (field boundary distance only) | $[0, 1]$ |
+| **Boost amount** | $\text{boost} / \text{CAR\_MAX\_BOOST}$ | $[0, 1]$ |
+| **Grounded status** | $1.0$ if grounded else $0.0$ | $\{0.0, 1.0\}$ |
+| **Second-jump ready** | $1.0$ if Jump 2 available else $0.0$ | $\{0.0, 1.0\}$ |
+
+Optional 1D flat feature vector:
+```python
+obs_vector = sim.get_state_norm(as_flat_array=True)  # List of floats for Gym Box space
+```
+
 ---
 
 ## 9. Verification & Automated Test Suite

@@ -21,6 +21,11 @@ MARGIN_X = 4.5             # Margin to encompass expanded goal pockets on screen
 MARGIN_Y = 1.5             # Margin to pad top and bottom
 TOTAL_WIDTH = FIELD_WIDTH + 2.0 * MARGIN_X    # 35.0 m
 TOTAL_HEIGHT = FIELD_HEIGHT + 2.0 * MARGIN_Y  # 18.0 m
+CENTER_X = TOTAL_WIDTH * 0.5                  # Arena horizontal center (17.5 m)
+CENTER_Y = TOTAL_HEIGHT * 0.5                 # Arena vertical center (9.0 m)
+HALF_WIDTH = TOTAL_WIDTH * 0.5                # Half-width for [-1, 1] normalization (17.5 m)
+HALF_HEIGHT = TOTAL_HEIGHT * 0.5              # Half-height for [-1, 1] normalization (9.0 m)
+ARENA_DIAGONAL = math.hypot(TOTAL_WIDTH, TOTAL_HEIGHT)  # ~39.357 m
 
 PPM = 40.0                 # 40 pixels per meter
 SCREEN_WIDTH = int(TOTAL_WIDTH * PPM)         # 1400 px
@@ -103,6 +108,8 @@ CAR_DODGE_DURATION = 0.42      # Seconds to complete the 360-degree rotation dur
 CAR_BOOST_ACCEL = 42.0         # Boost acceleration (m/s^2) - net upward thrust is (42 - 28 = 14 m/s^2)
 CAR_MAX_AIR_SPEED = 25.0   # Top aerial speed along the heading (m/s)
 CAR_BOOST_SPEED_FADE = 3.0 # Thrust fades out over this speed band instead of clamping velocity
+CAR_MAX_SPEED = CAR_MAX_AIR_SPEED + CAR_BOOST_SPEED_FADE  # 28.0 m/s (max expected linear speed)
+CAR_MAX_ANGULAR_SPEED = 25.0                              # rad/s (max expected vehicle spin)
 CAR_MAX_BOOST = 100.0      # Boost capacity (%)
 CAR_BOOST_DRAIN = 30.0     # Boost consumption per second (%/s)
 CAR_BOOST_REFILL = 80.0    # Boost recharge per second on surface (%/s)

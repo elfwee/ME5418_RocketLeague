@@ -558,7 +558,93 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.assertFalse(clicked)
         self.assertTrue(renderer.show_raycasts)
 
+    def test_get_state_norm_bounds_and_structure(self):
+        """Verify all fields in get_state_norm() satisfy exact normalization ranges and representations."""
+        sim = Simulation(enable_orange=True)
+        sn = sim.get_state_norm()
+
+        # 1. Ball normalization (positions mapped to [-1, 1] around arena center)
+        b_pos = sn["ball"]["position"]
+        self.assertTrue(-1.0 <= b_pos[0] <= 1.0, f"Ball X position out of bounds: {b_pos[0]}")
+        self.assertTrue(-1.0 <= b_pos[1] <= 1.0, f"Ball Y position out of bounds: {b_pos[1]}")
+        # Ball spawns at horizontal center (X = 0 in normalized frame)
+        self.assertAlmostEqual(b_pos[0], 0.0, places=3, msg="Ball X must be centered at 0.0 on kickoff")
+
+        b_vel = sn["ball"]["velocity"]
+        self.assertTrue(-1.0 <= b_vel[0] <= 1.0, f"Ball Vx out of bounds: {b_vel[0]}")
+        self.assertTrue(-1.0 <= b_vel[1] <= 1.0, f"Ball Vy out of bounds: {b_vel[1]}")
+
+        b_ori = sn["ball"]["orientation"]
+        self.assertAlmostEqual(b_ori[0]**2 + b_ori[1]**2, 1.0, places=4, msg="Ball orientation not on unit circle")
+        self.assertTrue(-1.0 <= sn["ball"]["angular_velocity"] <= 1.0)
+
+        # 2. Car normalization
+        for car_key in ["car", "car_orange"]:
+            car = sn[car_key]
+            c_pos = car["position"]
+            self.assertTrue(-1.0 <= c_pos[0] <= 1.0, f"{car_key} X pos out of bounds: {c_pos[0]}")
+            self.assertTrue(-1.0 <= c_pos[1] <= 1.0, f"{car_key} Y pos out of bounds: {c_pos[1]}")
+
+            c_nose = car["nose_position"]
+            self.assertTrue(-1.0 <= c_nose[0] <= 1.0, f"{car_key} nose X out of bounds: {c_nose[0]}")
+            self.assertTrue(-1.0 <= c_nose[1] <= 1.0, f"{car_key} nose Y out of bounds: {c_nose[1]}")
+
+            c_vel = car["velocity"]
+            self.assertTrue(-1.0 <= c_vel[0] <= 1.0, f"{car_key} Vx out of bounds: {c_vel[0]}")
+            self.assertTrue(-1.0 <= c_vel[1] <= 1.0, f"{car_key} Vy out of bounds: {c_vel[1]}")
+
+            c_ori = car["orientation"]
+            self.assertAlmostEqual(c_ori[0]**2 + c_ori[1]**2, 1.0, places=4, msg=f"{car_key} orientation not unit circle")
+            self.assertTrue(-1.0 <= car["angular_velocity"] <= 1.0)
+
+            # Boost amount in [0, 1]
+            self.assertTrue(0.0 <= car["boost"] <= 1.0)
+
+            # Grounded & Jump2 in {0.0, 1.0}
+            self.assertIn(car["is_grounded"], [0.0, 1.0])
+            self.assertIn(car["has_jump2"], [0.0, 1.0])
+
+            # 8 Wall raycasts normalized d/d_max in [0, 1]
+            self.assertEqual(len(car["boundary_distances"]), 8)
+            for d in car["boundary_distances"]:
+                self.assertTrue(0.0 <= d <= 1.0, f"Raycast distance out of bounds: {d}")
+
+            # Raycast hit points in [-1, 1] x [-1, 1]
+            for r in car["boundary_raycasts"]:
+                hx, hy = r["hit_point"]
+                self.assertTrue(-1.0 <= hx <= 1.0, f"Hit X out of bounds: {hx}")
+                self.assertTrue(-1.0 <= hy <= 1.0, f"Hit Y out of bounds: {hy}")
+
+        # Symmetry: Blue car is at -X, Orange car is at +X, perfectly mirrored around 0
+        blue_x = sn["car"]["position"][0]
+        orange_x = sn["car_orange"]["position"][0]
+        self.assertLess(blue_x, 0.0, "Blue car must be in left half (-X)")
+        self.assertGreater(orange_x, 0.0, "Orange car must be in right half (+X)")
+        self.assertAlmostEqual(blue_x, -orange_x, places=4, msg="Kickoff car positions must be symmetric around 0.0")
+
+        # 3. Relations normalization
+        for rel_key, rel in sn["relations"].items():
+            if rel is not None:
+                mag = rel["magnitude"]
+                self.assertTrue(0.0 <= mag <= 1.0, f"Relation {rel_key} magnitude out of bounds: {mag}")
+                dx, dy = rel["direction"]
+                self.assertAlmostEqual(math.hypot(dx, dy), 1.0, places=4,
+                                       msg=f"Relation {rel_key} direction not normalized unit vector")
+
+    def test_get_state_norm_flat_array(self):
+        """Verify get_state_norm(as_flat_array=True) returns 1D list of finite normalized floats."""
+        sim = Simulation(enable_orange=True)
+        vec = sim.get_state_norm(as_flat_array=True)
+
+        self.assertIsInstance(vec, list)
+        self.assertGreater(len(vec), 30)
+        for val in vec:
+            self.assertIsInstance(val, float)
+            self.assertFalse(math.isnan(val), "Flat vector contains NaN")
+            self.assertFalse(math.isinf(val), "Flat vector contains Inf")
+
 
 if __name__ == '__main__':
     unittest.main()
+
 
