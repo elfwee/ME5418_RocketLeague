@@ -29,6 +29,21 @@ class Arena:
 
         self._build_arena()
 
+    @property
+    def goal_y_center(self) -> float:
+        """Elevation of the center of both goal openings."""
+        return (self.goal_y_bot + self.goal_y_top) * 0.5
+
+    @property
+    def goal_left_center(self) -> Tuple[float, float]:
+        """(x, y) coordinates of the center of the Left Goal (Blue net) opening."""
+        return (self.x_left, self.goal_y_center)
+
+    @property
+    def goal_right_center(self) -> Tuple[float, float]:
+        """(x, y) coordinates of the center of the Right Goal (Orange net) opening."""
+        return (self.x_right, self.goal_y_center)
+
     def _add_segment(self, p1: Tuple[float, float], p2: Tuple[float, float],
                      elasticity: float = 0.8, friction: float = 0.6,
                      radius: float = ARENA_SEGMENT_RADIUS) -> pymunk.Segment:

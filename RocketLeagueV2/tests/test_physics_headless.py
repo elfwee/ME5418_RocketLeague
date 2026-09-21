@@ -377,6 +377,87 @@ class TestPhysicsHeadless(unittest.TestCase):
         self.sim.ball.reset(self.sim.center_x, self.sim.ball_spawn_y)
         self.assertEqual(self.sim.ball.body.angular_velocity, 0.0)
 
+    def test_relational_states_in_get_state(self):
+        """Verify the 4 relational states (magnitude and direction) in get_state()."""
+        sim = Simulation(enable_orange=True)
+        state = sim.get_state()
+
+        # Check that relations container exists with the 4 concise keys
+        self.assertIn("relations", state)
+        expected_keys = [
+            "agent_to_ball",
+            "opponent_to_ball",
+            "ball_to_opponent_goal",
+            "ball_to_own_goal"
+        ]
+        for key in expected_keys:
+            self.assertIn(key, state["relations"])
+            rel = state["relations"][key]
+            self.assertIn("magnitude", rel)
+            self.assertIn("direction", rel)
+            self.assertGreater(rel["magnitude"], 0.0)
+            dir_x, dir_y = rel["direction"]
+            self.assertAlmostEqual(math.hypot(dir_x, dir_y), 1.0, places=4,
+                                   msg=f"Direction vector must be normalized unit vector for {key}")
+
+        # Ensure redundant keys are NOT present in relations or top level
+        redundant_keys = [
+            "agent_center_to_ball_center",
+            "opponent_center_to_ball_center",
+            "ball_center_to_opponent_goal_center",
+            "ball_center_to_own_goal_center"
+        ]
+        for key in redundant_keys:
+            self.assertNotIn(key, state["relations"])
+            self.assertNotIn(key, state)
+
+        ball_diameter = 2.0 * sim.ball.radius
+
+        # 1. Agent to Ball
+        ax, ay = sim.car.position
+        bx, by = sim.ball.position
+        dx = bx - ax
+        dy = by - ay
+        dist = math.hypot(dx, dy)
+        rel_a2b = state["relations"]["agent_to_ball"]
+        self.assertAlmostEqual(rel_a2b["magnitude"], dist, places=4)
+        self.assertAlmostEqual(rel_a2b["direction"][0], dx / dist, places=4)
+        self.assertAlmostEqual(rel_a2b["direction"][1], dy / dist, places=4)
+
+        # 2. Opponent to Ball
+        ox, oy = sim.car_orange.position
+        dx_opp = bx - ox
+        dy_opp = by - oy
+        dist_opp = math.hypot(dx_opp, dy_opp)
+        rel_o2b = state["relations"]["opponent_to_ball"]
+        self.assertAlmostEqual(rel_o2b["magnitude"], dist_opp, places=4)
+        self.assertAlmostEqual(rel_o2b["direction"][0], dx_opp / dist_opp, places=4)
+        self.assertAlmostEqual(rel_o2b["direction"][1], dy_opp / dist_opp, places=4)
+
+        # 3. Ball to Opponent Goal (Right Goal / Orange net for Blue: arena.x_right + ball_diameter)
+        gx_opp, gy_opp = sim.get_goal_center("orange")
+        self.assertAlmostEqual(gx_opp, sim.arena.x_right + ball_diameter, places=4)
+        self.assertAlmostEqual(gy_opp, sim.arena.goal_y_center, places=4)
+        dx_b2og = gx_opp - bx
+        dy_b2og = gy_opp - by
+        dist_b2og = math.hypot(dx_b2og, dy_b2og)
+        rel_b2og = state["relations"]["ball_to_opponent_goal"]
+        self.assertAlmostEqual(rel_b2og["magnitude"], dist_b2og, places=4)
+        self.assertAlmostEqual(rel_b2og["direction"][0], dx_b2og / dist_b2og, places=4)
+        self.assertAlmostEqual(rel_b2og["direction"][1], dy_b2og / dist_b2og, places=4)
+
+        # 4. Ball to Own Goal (Left Goal / Blue net for Blue: arena.x_left - ball_diameter)
+        gx_own, gy_own = sim.get_goal_center("blue")
+        self.assertAlmostEqual(gx_own, sim.arena.x_left - ball_diameter, places=4)
+        self.assertAlmostEqual(gy_own, sim.arena.goal_y_center, places=4)
+        dx_b2own = gx_own - bx
+        dy_b2own = gy_own - by
+        dist_b2own = math.hypot(dx_b2own, dy_b2own)
+        rel_b2own = state["relations"]["ball_to_own_goal"]
+        self.assertAlmostEqual(rel_b2own["magnitude"], dist_b2own, places=4)
+        self.assertAlmostEqual(rel_b2own["direction"][0], dx_b2own / dist_b2own, places=4)
+        self.assertAlmostEqual(rel_b2own["direction"][1], dy_b2own / dist_b2own, places=4)
+
 
 if __name__ == '__main__':
     unittest.main()

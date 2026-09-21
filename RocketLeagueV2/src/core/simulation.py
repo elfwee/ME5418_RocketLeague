@@ -18,6 +18,21 @@ from src.core.car import Car
 from src.ai.heuristic_bot import HeuristicBot
 
 
+def _vector_relation(p_from: Tuple[float, float], p_to: Tuple[float, float]) -> Dict[str, Any]:
+    """Compute Euclidean magnitude and normalized direction vector from p_from to p_to."""
+    dx = p_to[0] - p_from[0]
+    dy = p_to[1] - p_from[1]
+    magnitude = math.hypot(dx, dy)
+    if magnitude > 1e-9:
+        direction = (dx / magnitude, dy / magnitude)
+    else:
+        direction = (0.0, 0.0)
+    return {
+        "magnitude": magnitude,
+        "direction": direction
+    }
+
+
 class Simulation:
     """Headless 2D physics simulation environment for Rocket League."""
 
@@ -246,8 +261,42 @@ class Simulation:
 
         self.time_elapsed = 0.0
 
+    def get_goal_center(self, team: str) -> Tuple[float, float]:
+        """Get (x, y) coordinates of the center of a team's goal opening, shifted into the pocket by the ball diameter."""
+        ball_diameter = 2.0 * self.ball.radius
+        gy = self.arena.goal_y_center
+        if team == "blue":
+            return (self.arena.x_left - ball_diameter, gy)
+        return (self.arena.x_right + ball_diameter, gy)
+
     def get_state(self) -> Dict[str, Any]:
         """Query complete simulation state for headless evaluation or RL."""
+        # Relational state vectors (from point A pointing to point B)
+        # 1. agent-center-to-ball-center
+        agent_to_ball = _vector_relation(self.car.position, self.ball.position)
+
+        # 2. opponent-center-to-ball-center
+        opp_to_ball = (
+            _vector_relation(self.car_orange.position, self.ball.position)
+            if self.car_orange is not None else None
+        )
+
+        # 3. ball-center-to-opponent's goal-center
+        opp_team = "orange" if self.car.team == "blue" else "blue"
+        opp_goal_center = self.get_goal_center(opp_team)
+        ball_to_opp_goal = _vector_relation(self.ball.position, opp_goal_center)
+
+        # 4. ball-center-to-own goal-center
+        own_goal_center = self.get_goal_center(self.car.team)
+        ball_to_own_goal = _vector_relation(self.ball.position, own_goal_center)
+
+        relations = {
+            "agent_to_ball": agent_to_ball,
+            "opponent_to_ball": opp_to_ball,
+            "ball_to_opponent_goal": ball_to_opp_goal,
+            "ball_to_own_goal": ball_to_own_goal
+        }
+
         state = {
             "time": self.time_elapsed,
             "match_time": self.match_time,
@@ -275,6 +324,7 @@ class Simulation:
                 "input_vector": self.car.last_input_vector,
                 "facing_x": self.car.facing_x
             },
+            "relations": relations,
             "score": {
                 "blue": self.score_blue,
                 "orange": self.score_orange

@@ -304,7 +304,8 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
     "ball": {
         "position": (13.0, 2.75),          # (x, y) coordinates in meters
         "velocity": (4.2, -1.1),           # (vx, vy) velocity in m/s
-        "angle": 0.34                      # Rotation in radians
+        "angle": 0.34,                     # Rotation in radians
+        "angular_velocity": 0.0
     },
     "car": {
         "position": (9.2, 1.84),
@@ -322,6 +323,12 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
         "is_boosting": False,
         "input_vector": (1.0, 0.0),        # Last commanded input vector
         "facing_x": 1                      # Facing direction (+1: Right, -1: Left)
+    },
+    "relations": {
+        "agent_to_ball": {"magnitude": 4.12, "direction": (0.92, 0.39)},
+        "opponent_to_ball": {"magnitude": 5.84, "direction": (-0.85, 0.52)},
+        "ball_to_opponent_goal": {"magnitude": 19.38, "direction": (1.0, 0.0)},
+        "ball_to_own_goal": {"magnitude": 10.38, "direction": (-1.0, 0.0)}
     },
     "score": {"blue": 1, "orange": 0},
     "last_goal": "blue",
