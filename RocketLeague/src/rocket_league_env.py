@@ -19,6 +19,7 @@ if "rocket-league-v0" not in gym.envs.registry:
     gym.register(
         id="rocket-league-v0",
         entry_point="src.rocket_league_env:RocketLeagueEnv",
+        max_episode_steps=6000,
     )
 
 # Define the wrapper to swap 'truncated' for 'terminated'
@@ -26,7 +27,7 @@ class TerminateOnTimeout(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         
-        # If the 3600 step limit is hit, force terminated to True
+        # If the 6000 step limit is hit, force terminated to True
         if truncated:
             terminated = True
             
@@ -127,9 +128,9 @@ class RocketLeagueEnv(gym.Env):
             return self.state, 0.0, False, True, {}
 
         self.sim.step(action, 1.0 / self.render_fps)
+        reward = self._calculate_reward()
         if self.render_mode == 'human':
             self.render()
-        reward = self._calculate_reward()
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
         truncated = not self.isopen
 
@@ -185,13 +186,16 @@ class RocketLeagueEnv(gym.Env):
 
     def _calculate_reward(self):
         reward = 0.0
-        k_factor = 10.0  # Scaling factor for reward calculation
+        k_factor = 5.0  # Scaling factor for reward calculation
         state = self.sim.get_state_norm() # Get the current state of the simulation
-
-        if state['goal_scored_step'] is not None:
-            goal_scored_step = state['goal_scored_step']
+        last_touch = state['last_touch']
+        goal_scored_step = state['goal_scored_step']
+        if goal_scored_step is not None:
             if goal_scored_step == 'blue':  # Blue team scored
-                reward = 20.0  # Reward for scoring a goal
+                if last_touch == 'orange':
+                    reward = 0.0
+                else:
+                    reward = 20.0  # Reward for scoring a goal
             elif goal_scored_step == 'orange':  # Orange team scored
                 reward = -20.0  # Penalty for conceding a goal
             self.ball_prev = None
@@ -201,8 +205,13 @@ class RocketLeagueEnv(gym.Env):
                 self.ball_prev = ball_current
             delta_ball = ball_current - self.ball_prev
             if abs(delta_ball) > 0.0001:
-                reward = delta_ball * abs(ball_current) * k_factor  # Update cumulative value based on ball movement
+                step_reward = delta_ball * abs(ball_current) * k_factor
+                if (step_reward >= 0.0 and last_touch == 'blue') or (step_reward < 0.0 and last_touch == 'orange'):
+                    reward += step_reward
             self.ball_prev = ball_current
+
+            ball_proximity = state['relations']['agent_to_ball']['magnitude']
+            reward += -abs(ball_proximity) * 0.1
 
         return reward
 
@@ -219,7 +228,7 @@ if __name__ == "__main__":
     else:
         _bot_type = 'none'
 
-    env = gym.make('rocket-league-v0', render_mode='terminal', render_fps=SIM_HZ, bot_type=_bot_type, max_episode_steps=36000)
+    env = gym.make('rocket-league-v0', render_mode='human', render_fps=SIM_HZ, bot_type=_bot_type, max_episode_steps=6000)
     # env = TerminateOnTimeout(env) # Truncated == Terminated
 
     obs, info = env.reset()

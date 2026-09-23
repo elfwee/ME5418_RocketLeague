@@ -65,6 +65,7 @@ class Simulation:
         self.score_orange: int = 0
         self.last_goal_team: Optional[str] = None
         self.goal_scored_this_step: Optional[str] = None
+        self.last_touch: Optional[str] = None
         self._spawn_index: int = 0
         self.time_elapsed: float = 0.0
         self.match_time: float = 0.0
@@ -152,6 +153,14 @@ class Simulation:
         """
         def _car_ball_pre_solve(arbiter, space, data=None):
             arbiter.restitution = CAR_BALL_RESTITUTION
+            shape_a, shape_b = arbiter.shapes
+            car_shape = shape_a if shape_a.collision_type == COLLISION_CAR_BODY else shape_b
+            car_obj = getattr(car_shape, "car", None)
+            if car_obj is not None:
+                car_x = car_obj.position[0]
+                # Only update last touch if the car is on the playable field, not inside either goal
+                if self.arena.x_left <= car_x <= self.arena.x_right:
+                    self.last_touch = car_obj.team
             return True
 
         def _car_car_pre_solve(arbiter, space, data=None):
@@ -208,6 +217,10 @@ class Simulation:
 
     def step(self, action: CarAction, dt: float = 1.0 / SIM_HZ, action_orange: Optional[CarAction] = None):
         """Advance the physics simulation by dt using sub-stepping for stability."""
+        if self.goal_scored_this_step is not None:
+            # Previous frame was a goal: reset touch tracking for the new kickoff round
+            self.last_touch = None
+
         self.goal_scored_this_step = None
 
         if self.car_orange is not None and action_orange is None and self.orange_bot is not None:
@@ -249,6 +262,7 @@ class Simulation:
             self.score_orange = 0
             self.last_goal_team = None
             self.goal_scored_this_step = None
+            self.last_touch = None
             self.match_time = 0.0
             self._spawn_index = 0
 
@@ -358,6 +372,7 @@ class Simulation:
                 "orange": self.score_orange
             },
             "last_goal": self.last_goal_team,
+            "last_touch": self.last_touch,
             "orange_enabled": self.enable_orange
         }
 
@@ -528,6 +543,7 @@ class Simulation:
                 "orange": self.score_orange
             },
             "last_goal": self.last_goal_team,
+            "last_touch": self.last_touch,
             "orange_enabled": self.enable_orange,
             "opponent_present": 1.0 if has_opp else 0.0
         }
