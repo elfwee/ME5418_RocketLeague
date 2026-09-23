@@ -65,9 +65,14 @@ class HeuristicBot:
 
         # 1. KICKOFF: Only during actual kickoff phase AND when car is on its own side of the ball
         if self._is_kickoff:
-            on_kickoff_side = (cx > bx + 0.5) if self.team == "orange" else (cx < bx - 0.5)
-            if on_kickoff_side:
-                return "KICKOFF"
+            b_spd = math.hypot(*sim.ball.velocity)
+            if b_spd < 0.1 and abs(bx - sim.center_x) < 0.5:
+                if self.team == "orange" and cx < bx:
+                    self._is_kickoff = False
+                elif self.team == "blue" and cx > bx:
+                    self._is_kickoff = False
+                else:
+                    return "KICKOFF"
             else:
                 self._is_kickoff = False
 
@@ -75,10 +80,10 @@ class HeuristicBot:
         att_zone_depth = 7.5
         aerial_def_depth = 6.5
 
-        # 2. AERIAL Persistence: If already airborne and committed to an aerial, stay in AERIAL
+        # 2. AERIAL Persistence: only persist if ball is genuinely airborne (> 3.5m) and in front of car
         if self.current_state == "AERIAL" and not car.both_wheels_grounded:
-            if car.boost_amount > 5.0 and by > 2.5:
-                # If ball drops behind defense in own half, swap to DEFEND
+            ball_in_front = (cx > bx) if self.team == "orange" else (cx < bx)
+            if car.boost_amount > 5.0 and by > 3.5 and ball_in_front:
                 if self.team == "orange" and bx > (sim.arena.x_right - aerial_def_depth):
                     return "DEFEND"
                 elif self.team == "blue" and bx < (sim.arena.x_left + aerial_def_depth):
@@ -89,9 +94,11 @@ class HeuristicBot:
             # 1. In defensive half, DEFEND takes top priority!
             if bx > (sim.arena.x_right - def_zone_depth):
                 return "DEFEND"
-            # 2. In opponent half (attacking third), never rotate back; stay on attack to score
+            # 2. In opponent half (attacking third), stay on attack if behind ball
             if bx < (sim.arena.x_left + att_zone_depth):
-                if by > 4.0 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+                if cx <= bx - 1.5:
+                    return "ROTATE_BACK"
+                if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
                     return "AERIAL"
                 return "ATTACK"
             # 3. In midfield, rotate back if caught on wrong side
@@ -102,14 +109,16 @@ class HeuristicBot:
             if bx < (sim.arena.x_left + def_zone_depth):
                 return "DEFEND"
             if bx > (sim.arena.x_right - att_zone_depth):
-                if by > 4.0 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+                if cx >= bx + 1.5:
+                    return "ROTATE_BACK"
+                if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
                     return "AERIAL"
                 return "ATTACK"
             if cx >= bx + 0.2:
                 return "ROTATE_BACK"
 
         # 4. AERIAL vs ATTACK:
-        if by > 4.0 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+        if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
             return "AERIAL"
 
         return "ATTACK"
@@ -206,12 +215,12 @@ class HeuristicBot:
                 else:
                     action.dir_x = -1.0
 
-                # Anti-Own-Goal: If caught on wrong side and approaching ball, jump cleanly OVER it
+                # Anti-Own-Goal: If caught on wrong side and approaching ball, jump cleanly OVER it without boosting into own net
                 if cx < bx and (bx - cx) < 3.5 and by < 4.0:
                     action.dir_x = 1.0
                     action.dir_y = 0.8
                     action.jump = True
-                    action.boost = True
+                    action.boost = False
                     return action
             else:
                 safe_target_x = max(sim.arena.x_left + 2.0, min(bx - 3.0, own_goal_x + 3.5))
@@ -221,12 +230,12 @@ class HeuristicBot:
                 else:
                     action.dir_x = 1.0
 
-                # Anti-Own-Goal: If Blue caught on wrong side and approaching ball, jump OVER it
+                # Anti-Own-Goal: If Blue caught on wrong side and approaching ball, jump OVER it without boosting into own net
                 if cx > bx and (cx - bx) < 3.5 and by < 4.0:
                     action.dir_x = -1.0
                     action.dir_y = 0.8
                     action.jump = True
-                    action.boost = True
+                    action.boost = False
                     return action
 
             action.dir_y = 0.0
@@ -328,13 +337,20 @@ class HeuristicBot:
             action.dir_x = math.cos(angle_to_ball)
             action.dir_y = math.sin(angle_to_ball)
 
-            if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
-                action.jump = True
-                self._jump_cooldown = 0.6
+            if self.team == "orange" and action.dir_x > 0:
+                action.dir_x = -1.0
+                action.boost = False
+            elif self.team == "blue" and action.dir_x < 0:
+                action.dir_x = 1.0
+                action.boost = False
             else:
-                action.boost = True
-                if math.hypot(dx, dy) < 2.0 and car.has_jump2:
-                    action.jump = True  # Dodge strike
+                if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                    action.jump = True
+                    self._jump_cooldown = 0.6
+                else:
+                    action.boost = True
+                    if math.hypot(dx, dy) < 2.5 and car.has_jump2:
+                        action.jump = True  # Dodge strike
 
             return action
 
@@ -348,7 +364,8 @@ class HeuristicBot:
 
         if self.team == "orange":
             # Orange shoots toward Blue net (Left, -X)
-            if cx >= pred_bx - 0.25:
+            # In deep attacking pocket near Blue goal mouth, always push toward net
+            if cx < (sim.arena.x_left + 3.0) or cx >= pred_bx - 0.5:
                 action.dir_x = -1.0
             else:
                 action.dir_x = 1.0
@@ -357,7 +374,8 @@ class HeuristicBot:
                     action.dir_y = 0.8
         else:
             # Blue shoots toward Orange net (Right, +X)
-            if cx <= pred_bx + 0.25:
+            # In deep attacking pocket near Orange goal mouth, always push toward net
+            if cx > (sim.arena.x_right - 3.0) or cx <= pred_bx + 0.5:
                 action.dir_x = 1.0
             else:
                 action.dir_x = -1.0
@@ -367,14 +385,29 @@ class HeuristicBot:
 
         action.dir_y = 0.0
 
-        # Elevated ball jump strike or fast power dodge
-        if pred_by > 2.8 and dist_to_ball < 2.2 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
-            action.dir_y = 0.3
+        # Jump strike in attack
+        in_att_zone = (bx < sim.arena.x_left + 7.5) if self.team == "orange" else (bx > sim.arena.x_right - 7.5)
+        closing = (b_vx > 1.0) if self.team == "orange" else (b_vx < -1.0)
+        attack_dist_thresh = 3.5 if closing else 2.2
+
+        if in_att_zone and dist_to_ball < attack_dist_thresh:
+            if car.can_ground_jump and self._jump_cooldown <= 0.0:
+                action.dir_y = 0.80
+                action.jump = True
+                self._jump_cooldown = 0.5
+            elif not car.can_ground_jump and car.has_jump2:
+                action.dir_x = -1.0 if self.team == "orange" else 1.0
+                action.dir_y = 0.50
+                action.jump = True
+                action.boost = True
+        elif pred_by > 2.8 and dist_to_ball < 2.2 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+            action.dir_y = 0.40
             action.jump = True
-            self._jump_cooldown = 0.8
+            self._jump_cooldown = 0.6
         elif dist_to_ball < 1.4 and abs(car.velocity[0]) > 6.0 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
             action.jump = True
-            self._jump_cooldown = 0.8
+            action.dir_y = 0.50
+            self._jump_cooldown = 0.6
 
         # Boost when closing in from distance
         if dist_to_ball > 4.0 and abs(cx - pred_bx) > 3.0 and car.boost_amount > 40.0:

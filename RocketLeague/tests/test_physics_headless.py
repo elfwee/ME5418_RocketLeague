@@ -637,7 +637,7 @@ class TestPhysicsHeadless(unittest.TestCase):
         vec = sim.get_state_norm(as_flat_array=True)
 
         self.assertIsInstance(vec, list)
-        self.assertEqual(len(vec), 58, "Flat vector must have invariant length of 58 floats with opponent")
+        self.assertEqual(len(vec), 60, "Flat vector must have invariant length of 60 floats with opponent (including is_turtling)")
         for val in vec:
             self.assertIsInstance(val, float)
             self.assertFalse(math.isnan(val), "Flat vector contains NaN")
