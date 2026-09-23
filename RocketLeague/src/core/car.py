@@ -26,6 +26,9 @@ from src.config import (
     CAR_AIR_ANGULAR_SPEED, CAR_AIR_ANGULAR_ACCEL, CAR_AIR_SPIN_DECAY_TAU,
     CAR_PITCH_INPUT_THRESHOLD, INPUT_DEADZONE, THROTTLE_DEADZONE,
     FACING_FLIP_THRESHOLD,
+    BOUNDARY_ALIGN_DIST, BOUNDARY_PITCH_THRESHOLD,
+    CAR_ALIGN_ANGULAR_SPEED, CAR_ALIGN_ANGULAR_ACCEL,
+    CENTER_X, CENTER_Y,
     CAR_JUMP_SPEED, CAR_DOUBLE_JUMP_SPEED, CAR_DODGE_SPEED, CAR_DODGE_DURATION,
     CAR_BOOST_ACCEL, CAR_MAX_AIR_SPEED, CAR_BOOST_SPEED_FADE,
     CAR_MAX_BOOST, CAR_BOOST_DRAIN, CAR_BOOST_REFILL,
@@ -160,6 +163,21 @@ class Car:
     def is_flipping(self) -> bool:
         """True if dodge / flip maneuver is currently active."""
         return self._flip_active
+
+    @property
+    def is_turtled(self) -> bool:
+        """True when resting inverted on a surface with wheels off the ground."""
+        return self._is_turtled()
+
+    @property
+    def is_turtling_recovery(self) -> bool:
+        """True when actively executing the turtle recovery hop-and-flip maneuver."""
+        return self._recovery_time > 0.0
+
+    @property
+    def is_turtling(self) -> bool:
+        """True when the car is either resting turtled or actively recovering with a flip."""
+        return self._is_turtled() or (self._recovery_time > 0.0)
 
     @property
     def wheel_contact_count(self) -> int:
@@ -352,23 +370,122 @@ class Car:
         alpha = _clamp((omega_target - self.body.angular_velocity) / dt, -alpha_max, alpha_max)
         self.body.torque += self.body.moment * alpha
 
-    def _surface_align_angle(self) -> Optional[float]:
-        """Body angle that puts the car's roof along the ground normal, if drivable."""
-        nx, ny = self._ground_normal
-        if ny < SURFACE_ALIGN_MIN_DOT:
-            return None
+    def _detect_nearby_boundary(self) -> Optional[Tuple[float, Tuple[float, float]]]:
+        """Detect the closest arena boundary within BOUNDARY_ALIGN_DIST of the car's body geometry.
+
+        Returns:
+            (min_distance, inward_normal) or None if no boundary is within range.
+        """
+        p_rear = self.body.local_to_world(self.rear_wheel_local)
+        p_front = self.body.local_to_world(self.front_wheel_local)
+        probe_points = [
+            self.body.position,
+            self.nose_position,
+            self.tail_position,
+            (p_rear.x, p_rear.y),
+            (p_front.x, p_front.y),
+        ]
+
+        min_dist = float("inf")
+        best_normal: Optional[Tuple[float, float]] = None
+
+        for pt in probe_points:
+            queries = self.space.point_query(pt, BOUNDARY_ALIGN_DIST, pymunk.ShapeFilter())
+            for q in queries:
+                if q.shape.collision_type != COLLISION_ARENA:
+                    continue
+                d = q.distance
+                if d < min_dist:
+                    min_dist = d
+                    gx = q.gradient.x
+                    gy = q.gradient.y
+                    g_len = math.hypot(gx, gy)
+                    if g_len > 1e-6:
+                        nx, ny = gx / g_len, gy / g_len
+                    else:
+                        to_cx = CENTER_X - q.point.x
+                        to_cy = CENTER_Y - q.point.y
+                        c_len = math.hypot(to_cx, to_cy)
+                        nx, ny = (to_cx / c_len, to_cy / c_len) if c_len > 1e-6 else (0.0, 1.0)
+
+                    # Ensure normal points inward toward the playable arena
+                    if nx * (CENTER_X - q.point.x) + ny * (CENTER_Y - q.point.y) < 0.0:
+                        nx, ny = -nx, -ny
+
+                    best_normal = (nx, ny)
+
+        if best_normal is not None and min_dist <= BOUNDARY_ALIGN_DIST:
+            return min_dist, best_normal
+        return None
+
+    def _surface_align_angle(self, normal: Optional[Tuple[float, float]] = None) -> float:
+        """Body angle that puts the car's wheels along the surface normal (roof along +normal)."""
+        nx, ny = normal if normal is not None else self._ground_normal
         return math.atan2(-self.facing_x * nx, self.facing_x * ny)
 
     def _target_angle(self, action: CarAction) -> Optional[float]:
-        """Resolve the commanded body angle from the 2D input vector and ground contour."""
-        if action.magnitude > INPUT_DEADZONE:
-            # A meaningful vertical component means the player is aiming a heading
-            # (wheelie, aerial launch), so the world-space input vector wins.
-            if not self._wheels_grounded or abs(action.dir_y) >= CAR_PITCH_INPUT_THRESHOLD:
-                return math.atan2(action.dir_y, action.dir_x)
-            return self._surface_align_angle()
+        """Resolve the commanded body angle from the 2D input vector and boundary surface orientation."""
+        # 0. If turtled on the ground or actively recovering, do not apply boundary alignment targets
+        if self._is_turtled() or self._recovery_time > 0.0:
+            return None
 
-        return self._surface_align_angle() if self._wheels_grounded else None
+        # 1. Detect if car is in contact with or close to any arena boundary
+        boundary = self._detect_nearby_boundary()
+        near_surface = self._grounded or (boundary is not None)
+        surface_normal = boundary[1] if boundary is not None else self._ground_normal
+        nx, ny = surface_normal
+
+        # Car's actual orientation relative to surface
+        fwd_x, fwd_y = self.forward_vector
+        actual_nose_dot = fwd_x * nx + fwd_y * ny
+
+        # 2. Check player directional input
+        if action.magnitude > INPUT_DEADZONE:
+            cmd_angle = math.atan2(action.dir_y, action.dir_x)
+
+            if near_surface:
+                # Commanded nose vector in world space
+                cmd_nose_x = math.cos(cmd_angle)
+                cmd_nose_y = math.sin(cmd_angle)
+
+                # Check if player is attempting to pitch the vehicle into the boundary.
+                # Since surface_normal points inward into the arena,
+                # dot(cmd_nose, normal) < BOUNDARY_PITCH_THRESHOLD means the nose points into the surface.
+                cmd_pitch_dot = cmd_nose_x * nx + cmd_nose_y * ny
+
+                if cmd_pitch_dot < BOUNDARY_PITCH_THRESHOLD:
+                    # Player attempts to pitch nose into the boundary:
+                    # Prevent nose-first penetration; redirect to wheel alignment.
+                    return self._surface_align_angle(surface_normal)
+
+                # If wheels are grounded and input perpendicular to surface is small (driving along surface),
+                # keep following surface contour instead of pitching off.
+                perp_input = abs(action.dir_x * nx + action.dir_y * ny)
+                if self._wheels_grounded and perp_input < CAR_PITCH_INPUT_THRESHOLD:
+                    return self._surface_align_angle(surface_normal)
+
+                # If the car's actual nose is currently pointing into the boundary,
+                # unless the player is actively commanding away from the surface (cmd_pitch_dot > CAR_PITCH_INPUT_THRESHOLD),
+                # redirect to surface wheel alignment to prevent diving nose-down into surface.
+                if actual_nose_dot < BOUNDARY_PITCH_THRESHOLD and cmd_pitch_dot <= CAR_PITCH_INPUT_THRESHOLD:
+                    return self._surface_align_angle(surface_normal)
+
+                # Otherwise, player is intentionally aiming away from the surface (e.g. wheelie, takeoff)
+                return cmd_angle
+
+            # In mid-air far from boundaries: unrestricted aerial rotation
+            return cmd_angle
+
+        # 3. Idle input (no directional input)
+        # If resting on surface (grounded), maintain surface wheel alignment
+        if self._grounded:
+            return self._surface_align_angle(surface_normal)
+
+        # In mid-air near boundary while pointing into the surface, auto-level wheels to surface
+        if near_surface and actual_nose_dot < BOUNDARY_PITCH_THRESHOLD:
+            return self._surface_align_angle(surface_normal)
+
+        return None
 
     def _apply_attitude(self, action: CarAction, dt: float):
         """Steer the chassis toward the commanded heading, or damp spin when idle."""
@@ -396,6 +513,8 @@ class Car:
 
         if self._grounded:
             self._drive_angle_to(target, dt, CAR_GROUND_ANGULAR_SPEED, CAR_GROUND_ANGULAR_ACCEL)
+        elif self._detect_nearby_boundary() is not None:
+            self._drive_angle_to(target, dt, CAR_ALIGN_ANGULAR_SPEED, CAR_ALIGN_ANGULAR_ACCEL)
         else:
             self._drive_angle_to(target, dt, CAR_AIR_ANGULAR_SPEED, CAR_AIR_ANGULAR_ACCEL)
 
@@ -588,21 +707,21 @@ class Car:
                 self.boost_amount = min(CAR_MAX_BOOST, self.boost_amount + CAR_BOOST_REFILL * dt)
 
     def _is_turtled(self) -> bool:
-        """True when resting inverted with a surface close beneath the centre of mass."""
+        """True when resting inverted with a surface close beneath or chassis touching ground."""
         if self._wheels_grounded or self.up_vector[1] > TURTLE_UP_THRESHOLD:
             return False
 
+        # Turtling recovery flip applies to the floor/ground (surface normal pointing up)
+        if self._grounded and self._ground_normal[1] > 0.5:
+            return True
+
         origin = self.body.position
         end = (origin.x, origin.y - TURTLE_PROBE_LEN)
-        return self.space.segment_query_first(origin, end, 0.0, self._query_filter) is not None
+        hit = self.space.segment_query_first(origin, end, 0.0, self._query_filter)
+        return hit is not None and hit.normal.y > 0.5
 
     def _update_recovery(self, action: CarAction, dt: float):
         """Detect a turtled car and recover with a physical hop-and-flip."""
-        # When boost is used while grounded, recovery should not happen
-        if action.boost and self.boost_amount > 0.0:
-            self.turtled_time = 0.0
-            return
-
         if self._recovery_time > 0.0:
             self._recovery_time = max(0.0, self._recovery_time - dt)
             return
@@ -612,7 +731,7 @@ class Car:
             return
 
         self.turtled_time += dt
-        if self.turtled_time <= TURTLE_TRIGGER_DELAY and not action.jump:
+        if self.turtled_time < TURTLE_TRIGGER_DELAY and not action.jump:
             return
 
         # Hop straight up in world space, then let the high-authority attitude
@@ -620,6 +739,11 @@ class Car:
         self.body.apply_impulse_at_world_point(
             (0.0, self.mass * TURTLE_HOP_SPEED), self.body.position
         )
+        self._grounded = False
+        for wheel in self.wheels:
+            wheel.hit = False
+            wheel.normal_force = 0.0
+            wheel.compression = 0.0
         self._recovery_time = TURTLE_FLIP_DURATION
         self.turtled_time = 0.0
 
@@ -639,13 +763,15 @@ class Car:
                 new_facing = 1 if action.dir_x > 0 else -1
                 if new_facing != self.facing_x:
                     self._set_facing(new_facing, snap=True)
-            else:
-                # When airborne, animation flips according to blue heading vector side
-                fwd_x = math.cos(self.body.angle)
-                if fwd_x > 0.05 and self.facing_x != 1:
-                    self._set_facing(1, snap=False)
-                elif fwd_x < -0.05 and self.facing_x != -1:
-                    self._set_facing(-1, snap=False)
+            elif not self._grounded and self._detect_nearby_boundary() is None:
+                # When airborne in open air, animation flips according to blue heading vector side
+                # only when right-side up to prevent inverting roof/wheels near boundaries or during aerial loops
+                if self.up_vector[1] > 0.0:
+                    fwd_x = math.cos(self.body.angle)
+                    if fwd_x > 0.05 and self.facing_x != 1:
+                        self._set_facing(1, snap=False)
+                    elif fwd_x < -0.05 and self.facing_x != -1:
+                        self._set_facing(-1, snap=False)
 
         self._sense_ground()
         self._update_recovery(action, dt)

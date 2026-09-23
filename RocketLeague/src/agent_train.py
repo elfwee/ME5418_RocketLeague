@@ -31,10 +31,10 @@ def train():
     }
 
     # Training environment (4 parallel environments via DummyVecEnv for fast in-memory stepping)
-    env = make_vec_env("rocket-league-v0", n_envs=4, env_kwargs=env_kwargs, vec_env_cls=DummyVecEnv)
+    env = make_vec_env("rocket-league-v1", n_envs=4, env_kwargs=env_kwargs, vec_env_cls=DummyVecEnv)
 
     # Separate evaluation environment (do not evaluate using the training environment)
-    eval_env = make_vec_env("rocket-league-v0", n_envs=1, env_kwargs=env_kwargs, vec_env_cls=DummyVecEnv)
+    eval_env = make_vec_env("rocket-league-v1", n_envs=1, env_kwargs=env_kwargs, vec_env_cls=DummyVecEnv)
 
     model = PPO(
         policy="MlpPolicy",

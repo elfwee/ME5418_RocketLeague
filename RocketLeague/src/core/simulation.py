@@ -358,6 +358,8 @@ class Simulation:
                 "both_wheels_grounded": self.car.both_wheels_grounded,
                 "has_jump2": self.car.has_jump2,
                 "is_flipping": self.car.is_flipping,
+                "is_turtling": self.car.is_turtling,
+                "is_turtling_recovery": self.car.is_turtling_recovery,
                 "boost": self.car.boost_amount,
                 "is_boosting": self.car.is_boosting,
                 "is_boost_recovery": self.car.is_boost_recovery,
@@ -389,6 +391,8 @@ class Simulation:
                 "both_wheels_grounded": self.car_orange.both_wheels_grounded,
                 "has_jump2": self.car_orange.has_jump2,
                 "is_flipping": self.car_orange.is_flipping,
+                "is_turtling": self.car_orange.is_turtling,
+                "is_turtling_recovery": self.car_orange.is_turtling_recovery,
                 "boost": self.car_orange.boost_amount,
                 "is_boosting": self.car_orange.is_boosting,
                 "is_boost_recovery": self.car_orange.is_boost_recovery,
@@ -521,6 +525,8 @@ class Simulation:
                 "both_wheels_grounded": 1.0 if c.both_wheels_grounded else 0.0,
                 "has_jump2": 1.0 if c.has_jump2 else 0.0,
                 "is_flipping": 1.0 if c.is_flipping else 0.0,
+                "is_turtling": 1.0 if c.is_turtling else 0.0,
+                "is_turtling_recovery": 1.0 if c.is_turtling_recovery else 0.0,
                 "boost": _clamp(c.boost_amount / CAR_MAX_BOOST, 0.0, 1.0),
                 "is_boosting": 1.0 if c.is_boosting else 0.0,
                 "is_boost_recovery": 1.0 if c.is_boost_recovery else 0.0,
@@ -570,6 +576,7 @@ class Simulation:
             car["wheel_contacts"],
             car["has_jump2"],
             car["is_flipping"],
+            car["is_turtling"],
             car["is_boost_recovery"],
             *car["boundary_distances"],
             # 2. Ball features (5 floats)
@@ -599,6 +606,7 @@ class Simulation:
                 co["wheel_contacts"],
                 co["has_jump2"],
                 co["is_flipping"],
+                co["is_turtling"],
                 co["is_boost_recovery"],
                 *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
             ])

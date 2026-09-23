@@ -100,6 +100,12 @@ INPUT_DEADZONE = 0.15           # Below this input magnitude no heading is comma
 THROTTLE_DEADZONE = 0.10        # Below this |dir_x| the car coasts instead of driving
 FACING_FLIP_THRESHOLD = 0.10    # |dir_x| needed to mirror the car left/right
 
+# --- Boundary Surface Alignment Mechanic ---
+BOUNDARY_ALIGN_DIST = 1.8       # Max distance (m) to boundary surface to activate alignment zone
+BOUNDARY_PITCH_THRESHOLD = -0.10# Dot product threshold detecting pitch into surface
+CAR_ALIGN_ANGULAR_SPEED = 12.0  # rad/s cap when aligning to boundary surfaces (faster response to prevent nose-dives)
+CAR_ALIGN_ANGULAR_ACCEL = 120.0 # rad/s^2 cap when aligning to boundary surfaces
+
 # --- Jump & Rocket Boost ---
 CAR_JUMP_SPEED = 11.76            # Instant jump velocity impulse for Jump 1 (m/s) (+20% jump height: 1.63m -> 1.96m)
 CAR_DOUBLE_JUMP_SPEED = 11.76   # Fresh launch velocity for neutral Jump 2 from press point (m/s)
@@ -117,9 +123,9 @@ CAR_BOOST_REFILL = 80.0    # Boost recharge per second on surface (%/s)
 # --- Turtle (upside-down) Recovery ---
 # Implemented as a real flip: a vertical hop impulse plus a high-authority attitude sweep,
 # instead of teleporting the rigid body.
-TURTLE_UP_THRESHOLD = -0.55# Roof normal Y below this counts as inverted
+TURTLE_UP_THRESHOLD = -0.10# Roof normal Y below this counts as inverted (triggers across all inverted angles)
 TURTLE_PROBE_LEN = 0.80    # Downward probe from the centre of mass to detect a surface below (1.05 * 0.75)
-TURTLE_TRIGGER_DELAY = 0.08# Seconds inverted before recovery fires
+TURTLE_TRIGGER_DELAY = 0.0 # Seconds inverted before recovery fires (instant flip recovery on contact)
 TURTLE_HOP_SPEED = 4.5     # Vertical hop velocity granted by the recovery flip (m/s)
 TURTLE_FLIP_DURATION = 0.45# Seconds of high-authority attitude control after the hop
 CAR_FLIP_ANGULAR_SPEED = 22.0   # rad/s cap during a recovery flip

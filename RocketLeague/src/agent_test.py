@@ -16,7 +16,7 @@ def test_sb3(model_timesteps=None, model_path=None, bot_type="bot_level_3", rend
         else:
             model_path = os.path.join(base_dir, "models", "PPO", "best_model.zip")
 
-    env = gym.make("rocket-league-v0",render_mode="human" if render else None, bot_type=bot_type)
+    env = gym.make("rocket-league-v1",render_mode="human" if render else None, bot_type=bot_type)
 
     model = PPO.load(model_path, env=env, device="cpu")
 

@@ -15,9 +15,9 @@ from src.config import (
 )
 
 # register env as gym environment
-if "rocket-league-v0" not in gym.envs.registry:
+if "rocket-league-v1" not in gym.envs.registry:
     gym.register(
-        id="rocket-league-v0",
+        id="rocket-league-v1",
         entry_point="src.rocket_league_env:RocketLeagueEnv",
         max_episode_steps=6000,
     )
@@ -217,7 +217,7 @@ class RocketLeagueEnv(gym.Env):
 
 def my_check_env():
     from gymnasium.utils.env_checker import check_env
-    env = gym.make('rocket-league-v0', render_mode=None, render_fps=SIM_HZ, bot_type='none', disable_env_checker=True)
+    env = gym.make('rocket-league-v1', render_mode=None, render_fps=SIM_HZ, bot_type='none', disable_env_checker=True)
     check_env(env.unwrapped)
     print("Environment check passed successfully!")
 
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     else:
         _bot_type = 'none'
 
-    env = gym.make('rocket-league-v0', render_mode='human', render_fps=SIM_HZ, bot_type=_bot_type, max_episode_steps=6000)
+    env = gym.make('rocket-league-v1', render_mode='human', render_fps=SIM_HZ, bot_type=_bot_type, max_episode_steps=6000)
     # env = TerminateOnTimeout(env) # Truncated == Terminated
 
     obs, info = env.reset()
