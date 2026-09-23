@@ -178,7 +178,7 @@ COLOR_RAYCAST_ORANGE = (251, 146, 60)    # Neon orange/amber ray lines for Orang
 COLOR_RAYCAST_HIT = (255, 255, 255)      # White hit point marker
 
 # --- Opponent Car & Bot Settings ---
-ENABLE_ORANGE_CAR = False                # Default flag: whether Orange car is present (enabled by default in main.py)
+ENABLE_ORANGE_CAR = True                # Default flag: whether Orange car is present (enabled by default in main.py)
 ORANGE_IS_BOT = True                     # Default flag: whether Orange car is AI-controlled
 BOT_DODGE_STRIKE_DIST = 2.2              # Distance to ball to trigger dodge flip strike (m)
 BOT_AERIAL_MIN_BOOST = 15.0              # Minimum boost required to commit to aerial launch

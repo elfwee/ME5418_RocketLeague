@@ -242,7 +242,7 @@ class Simulation:
             # Reset kickoff after goal
             self.reset(reset_scores=False)
 
-    def reset(self, reset_scores: bool = False, spawn_pos: Optional[Tuple[float, float, float, int]] = None):
+    def reset(self, reset_scores: bool = False, spawn_pos: Optional[Tuple[float, float, float, int]] = None, spawn_index: Optional[int] = None):
         """Reset the arena, ball, and car to initial kickoff conditions."""
         if reset_scores:
             self.score_blue = 0
@@ -250,6 +250,10 @@ class Simulation:
             self.last_goal_team = None
             self.goal_scored_this_step = None
             self.match_time = 0.0
+            self._spawn_index = 0
+
+        if spawn_index is not None:
+            self._spawn_index = spawn_index
 
         # 1. Ball spawns resting on the ground at center
         self.ball.reset(self.center_x, self.ball_spawn_y)
