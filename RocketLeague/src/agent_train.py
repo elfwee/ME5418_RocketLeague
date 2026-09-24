@@ -48,13 +48,13 @@ def train():
         eval_env,
         best_model_save_path=os.path.join(model_dir, "PPO"),
         log_path=log_dir,
-        eval_freq=4000,       # Evaluates every 2,500 calls * 4 envs = 10,000 timesteps
-        n_eval_episodes=3,    # Evaluate across 3 full episodes
+        eval_freq=4000,       # Evaluates every 4,000 calls * 4 envs = 10,000 timesteps
+        n_eval_episodes=5,    # Evaluate across 5 full episodes
         deterministic=True,   # Evaluates the agent using greedy/best actions
         verbose=1,
     )
 
-    TIMESTEPS = max_episode_steps * 1000  # 3,600,000 timesteps total
+    TIMESTEPS = max_episode_steps * 1000  # 6,000,000 timesteps total
 
     model.learn(total_timesteps=TIMESTEPS, callback=eval_callback)
 

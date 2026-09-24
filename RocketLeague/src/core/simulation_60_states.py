@@ -1,5 +1,6 @@
 """Headless simulation manager orchestrating Pymunk space, entities, and collisions."""
 import math
+import random
 from typing import Dict, Any, Optional, Tuple, List, Union
 import pymunk
 from src.config import (
@@ -88,6 +89,8 @@ class Simulation:
         self.orange_is_bot: bool = orange_is_bot
         self.car_orange: Optional[Car] = None
         self.orange_bot: Optional[HeuristicBot] = None
+        # self.deterministic_round: int = random.randint(0, 2)
+        # self.deterministic_round: int = 1
 
         if self.enable_orange:
             ox, oy, oang, ofac = self.get_spawn_position("orange")
@@ -225,6 +228,17 @@ class Simulation:
 
         if self.car_orange is not None and action_orange is None and self.orange_bot is not None:
             action_orange = self.orange_bot.compute_action(self)
+            if self.deterministic_round == 0:
+                action_orange = CarAction()
+            elif self.deterministic_round == 1:
+                action_orange = self.orange_bot.compute_action(self)
+            else:
+                rand_action = CarAction()
+                rand_action.dir_x = random.randint(-1, 1)
+                rand_action.dir_y = random.randint(-1, 1)
+                rand_action.jump = random.randint(0, 1)
+                rand_action.boost = random.randint(0, 1)
+                action_orange = rand_action                
 
         sub_dt = dt / PHYSICS_SUBSTEPS
         for _ in range(PHYSICS_SUBSTEPS):
@@ -257,6 +271,23 @@ class Simulation:
 
     def reset(self, reset_scores: bool = False, spawn_pos: Optional[Tuple[float, float, float, int]] = None, spawn_index: Optional[int] = None):
         """Reset the arena, ball, and car to initial kickoff conditions."""
+        # self.set_orange_enabled(True)
+        # rand_bot = random.random()
+        # if rand_bot < 0.05:
+        #     self.deterministic_round = 0 # not moving
+        # elif rand_bot >= 0.05 and rand_bot <= 0.45:
+        #     self.deterministic_round = 1 # very agile
+        # elif rand_bot >= 0.45 and rand_bot <= 0.50:
+        #     self.set_orange_enabled(False) # out of place
+        # else:
+        #     self.deterministic_round = 2 # random action
+
+        rand_bot = random.random()
+        if rand_bot < 0.5:
+            self.deterministic_round = 1 # very agile
+        else:
+            self.deterministic_round = 2 # random action
+
         if reset_scores:
             self.score_blue = 0
             self.score_orange = 0
@@ -584,8 +615,8 @@ class Simulation:
             ball["velocity"][0], ball["velocity"][1],
             ball["angular_velocity"],
             # 3. Agent relations (9 floats)
-            # rel["agent_to_ball"]["magnitude"],
-            # rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
+            rel["agent_to_ball"]["magnitude"],
+            rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
             rel["ball_to_opponent_goal"]["magnitude"],
             rel["ball_to_opponent_goal"]["direction"][0], rel["ball_to_opponent_goal"]["direction"][1],
             rel["ball_to_own_goal"]["magnitude"],
@@ -607,22 +638,21 @@ class Simulation:
                 co["has_jump2"],
                 co["is_flipping"],
                 co["is_turtling"],
-                co["is_boosting"],
-                # co["is_boost_recovery"],
-                # *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
+                co["is_boost_recovery"],
+                *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
             ])
-            # opp_rel = rel.get("opponent_to_ball")
-            # if opp_rel is not None:
-            #     vec.extend([
-            #         opp_rel["magnitude"],
-            #         opp_rel["direction"][0],
-            #         opp_rel["direction"][1]
-            #     ])
-            # else:
-            #     vec.extend([0.0, 0.0, 0.0])
+            opp_rel = rel.get("opponent_to_ball")
+            if opp_rel is not None:
+                vec.extend([
+                    opp_rel["magnitude"],
+                    opp_rel["direction"][0],
+                    opp_rel["direction"][1]
+                ])
+            else:
+                vec.extend([0.0, 0.0, 0.0])
         else:
             # Zero-fill when no opponent is present to preserve fixed observation size
-            vec.extend([0.0] * 13)
+            vec.extend([0.0] * 24)
 
         return vec
 

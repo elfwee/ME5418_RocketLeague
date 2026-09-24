@@ -30,6 +30,7 @@ def test_sb3(model_timesteps=None, model_path=None, bot_type="bot_level_3", rend
             obs, reward, terminated, truncated, _ = env.step(action)
             episode_reward += reward
             done = terminated or truncated
+            # print(f"Episode {episode} Finished | Total Reward: {episode_reward:.2f}")
 
             if hasattr(env.unwrapped, "isopen") and not env.unwrapped.isopen:
                 break

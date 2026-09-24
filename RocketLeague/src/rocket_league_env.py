@@ -186,7 +186,6 @@ class RocketLeagueEnv(gym.Env):
 
     def _calculate_reward(self):
         reward = 0.0
-        k_factor = 5.0  # Scaling factor for reward calculation
         state = self.sim.get_state_norm() # Get the current state of the simulation
         last_touch = state['last_touch']
         goal_scored_step = state['goal_scored_step']
@@ -200,19 +199,24 @@ class RocketLeagueEnv(gym.Env):
                 reward = -20.0  # Penalty for conceding a goal
             self.ball_prev = None
         else:
-            ball_current = state['ball']['position'][0] # ball's x-position
+            step_reward = 0.0
+            ball_x = state['ball']['position'][0] # ball's x-position
+            ball_y = state['ball']['position'][1] # ball's y-position
             if self.ball_prev is None:
-                self.ball_prev = ball_current
-            delta_ball = ball_current - self.ball_prev
-            if abs(delta_ball) > 0.0001:
-                step_reward = delta_ball * abs(ball_current) * k_factor
+                self.ball_prev = ball_x
+            delta_x = ball_x - self.ball_prev
+            if abs(delta_x) > 0.0001:
+                x_factor = ball_x**2 + 0.1
+                y_factor = (1 - abs(ball_y))**2
+                step_reward = delta_x * x_factor * y_factor * 5
                 if (step_reward >= 0.0 and last_touch == 'blue') or (step_reward < 0.0 and last_touch == 'orange'):
                     reward += step_reward
-            self.ball_prev = ball_current
+            self.ball_prev = ball_x
 
             ball_proximity = state['relations']['agent_to_ball']['magnitude']
-            reward += -abs(ball_proximity) * 0.1
-
+            step_reward2 = -abs(ball_proximity) * 0.01
+            reward += step_reward2
+            # print(f"step1: {step_reward:.4f}, step2: {step_reward2:.4f}")
         return reward
 
 def my_check_env():
