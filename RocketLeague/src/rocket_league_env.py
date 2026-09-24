@@ -78,10 +78,9 @@ class RocketLeagueEnv(gym.Env):
         super().reset(seed=seed)
         spawn_pos = options.get("spawn_pos") if options else None
         spawn_index = options.get("spawn_index") if options else None
-        if options and options.get("random_spawn"):
-            spawn_index = int(self.np_random.integers(0, 2))
+        random_spawn = options.get("random_spawn") if options else None
 
-        self.sim.reset(reset_scores=True, spawn_pos=spawn_pos, spawn_index=spawn_index)
+        self.sim.reset(reset_scores=True, spawn_pos=spawn_pos, spawn_index=spawn_index, random_spawn=random_spawn)
         self.ball_prev = None
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
         self.render()

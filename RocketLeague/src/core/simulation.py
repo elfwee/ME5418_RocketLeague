@@ -1,5 +1,6 @@
 """Headless simulation manager orchestrating Pymunk space, entities, and collisions."""
 import math
+import random
 from typing import Dict, Any, Optional, Tuple, List, Union
 import pymunk
 from src.config import (
@@ -9,7 +10,7 @@ from src.config import (
     BALL_MAX_SPEED, BALL_MAX_SPIN,
     CAR_MAX_SPEED, CAR_MAX_ANGULAR_SPEED, CAR_MAX_BOOST,
     GRAVITY, SIM_HZ, PHYSICS_SUBSTEPS, SOLVER_ITERATIONS,
-    ARENA_SEGMENT_RADIUS, CAR_RIDE_HEIGHT,
+    ARENA_SEGMENT_RADIUS, CAR_RIDE_HEIGHT, CORNER_RADIUS,
     BALL_RADIUS, CAR_SPAWN_X_DEFENSIVE, CAR_SPAWN_X_ATTACK,
     CAR_BALL_RESTITUTION,
     COLLISION_CAR_BODY, COLLISION_BALL, COLLISION_GOAL_SENSOR,
@@ -52,7 +53,7 @@ def _vector_relation(p_from: Tuple[float, float], p_to: Tuple[float, float]) -> 
 class Simulation:
     """Headless 2D physics simulation environment for Rocket League."""
 
-    def __init__(self, enable_orange: bool = ENABLE_ORANGE_CAR, orange_is_bot: bool = ORANGE_IS_BOT):
+    def __init__(self, enable_orange: bool = ENABLE_ORANGE_CAR, orange_is_bot: bool = ORANGE_IS_BOT, random_spawn: bool = True):
         self.space = pymunk.Space()
         self.space.gravity = GRAVITY
         # No global damping: drag belongs to the entities that model it, otherwise it
@@ -69,6 +70,7 @@ class Simulation:
         self._spawn_index: int = 0
         self.time_elapsed: float = 0.0
         self.match_time: float = 0.0
+        self.random_spawn: bool = random_spawn
 
         # Center coordinates
         self.center_x = MARGIN_X + FIELD_WIDTH / 2.0
@@ -98,6 +100,8 @@ class Simulation:
 
         self._spawn_index += 1
         self._setup_collision_handlers()
+        if self.random_spawn:
+            self.reset(reset_scores=True, random_spawn=True)
 
     def set_orange_enabled(self, enabled: bool, is_bot: bool = True):
         """Enable or disable the Orange opponent car and AI bot dynamically."""
@@ -143,6 +147,75 @@ class Simulation:
             return (x_orange, self.spawn_y, math.pi, -1)
         else:
             return (x_blue, self.spawn_y, 0.0, 1)
+
+    def sample_random_spawns(self) -> Tuple[Tuple[float, float, float, int], Optional[Tuple[float, float, float, int]], Tuple[float, float]]:
+        """Sample valid, non-overlapping random spawn positions for both cars and the ball.
+
+        Requirements:
+        1. Blue car: spawns on ground in left half of field (x in [7.8, 16.8], y = spawn_y, facing Right).
+        2. Orange car: spawns on ground in right half of field (x in [18.2, 27.2], y = spawn_y, facing Left).
+           Neither car spawns inside goal posts or clipping arena corner fillets.
+        3. Ball: spawns randomly across whole arena (random x and y), strictly outside goal posts and corner fillets.
+        4. Overlap prevention: ball and cars maintain at least 2.2m clearance (no physical overlap).
+
+        Returns:
+            (blue_spawn, orange_spawn, ball_pos)
+        """
+        # 1. Blue car on the ground in the left half of the field (x in [7.8, 16.8])
+        bx_car = random.uniform(7.8, 16.8)
+        by_car = self.spawn_y
+        blue_spawn = (bx_car, by_car, 0.0, 1)
+
+        # 2. Orange car on the ground in the right half of the field (x in [18.2, 27.2])
+        orange_spawn = None
+        if self.enable_orange:
+            ox_car = random.uniform(18.2, 27.2)
+            if ox_car - bx_car < 2.0:
+                ox_car = min(27.2, bx_car + 2.0)
+            oy_car = self.spawn_y
+            orange_spawn = (ox_car, oy_car, math.pi, -1)
+
+        # 3. Ball within playable arena bounds, avoiding corners, goal pockets, and car overlap
+        r_eff = BALL_RADIUS + ARENA_SEGMENT_RADIUS + 0.05
+        ball_x_min = self.arena.x_left + r_eff
+        ball_x_max = self.arena.x_right - r_eff
+        ball_y_min = self.arena.y_floor + r_eff
+        ball_y_max = self.arena.y_ceil - r_eff
+        max_corner_dist = CORNER_RADIUS - r_eff
+        min_ball_car_dist = 2.2
+
+        ball_pos = (self.center_x, self.ball_spawn_y + 3.0)
+        for _ in range(300):
+            bx = random.uniform(ball_x_min, ball_x_max)
+            by = random.uniform(ball_y_min, ball_y_max)
+
+            # Corner fillet clearance
+            # Bottom-Left: center (7.0, 4.0)
+            if bx < 7.0 and by < 4.0 and math.hypot(bx - 7.0, by - 4.0) > max_corner_dist:
+                continue
+            # Top-Left: center (7.0, 14.0)
+            if bx < 7.0 and by > 14.0 and math.hypot(bx - 7.0, by - 14.0) > max_corner_dist:
+                continue
+            # Bottom-Right: center (28.0, 4.0)
+            if bx > 28.0 and by < 4.0 and math.hypot(bx - 28.0, by - 4.0) > max_corner_dist:
+                continue
+            # Top-Right: center (28.0, 14.0)
+            if bx > 28.0 and by > 14.0 and math.hypot(bx - 28.0, by - 14.0) > max_corner_dist:
+                continue
+
+            # Check overlap with Blue car
+            if math.hypot(bx - bx_car, by - by_car) < min_ball_car_dist:
+                continue
+
+            # Check overlap with Orange car
+            if orange_spawn is not None:
+                if math.hypot(bx - orange_spawn[0], by - orange_spawn[1]) < min_ball_car_dist:
+                    continue
+
+            ball_pos = (bx, by)
+            break
+
+        return blue_spawn, orange_spawn, ball_pos
 
     def _setup_collision_handlers(self):
         """Configure contact listeners for car/ball strikes and goal detection.
@@ -255,8 +328,8 @@ class Simulation:
             # Reset kickoff after goal
             self.reset(reset_scores=False)
 
-    def reset(self, reset_scores: bool = False, spawn_pos: Optional[Tuple[float, float, float, int]] = None, spawn_index: Optional[int] = None):
-        """Reset the arena, ball, and car to initial kickoff conditions."""
+    def reset(self, reset_scores: bool = False, spawn_pos: Optional[Tuple[float, float, float, int]] = None, spawn_index: Optional[int] = None, random_spawn: Optional[bool] = None):
+        """Reset the arena, ball, and car to initial kickoff conditions or random spawn positions."""
         if reset_scores:
             self.score_blue = 0
             self.score_orange = 0
@@ -269,27 +342,43 @@ class Simulation:
         if spawn_index is not None:
             self._spawn_index = spawn_index
 
-        # 1. Ball spawns resting on the ground at center
-        self.ball.reset(self.center_x, self.ball_spawn_y)
+        use_random = self.random_spawn if random_spawn is None else random_spawn
+        if spawn_pos is not None or spawn_index is not None:
+            use_random = False
 
-        # 2. Blue Car spawns at kickoff position for current round
-        if spawn_pos is None:
-            x, y, angle, facing = self.get_spawn_position("blue")
+        if use_random:
+            blue_spawn, orange_spawn, ball_pos = self.sample_random_spawns()
+            # 1. Ball spawns randomly within whole field
+            self.ball.reset(ball_pos[0], ball_pos[1], vx=0.0, vy=0.0, angular_velocity=0.0)
+
+            # 2. Blue Car spawns randomly on ground in left half of field
+            self.car.reset(blue_spawn[0], blue_spawn[1], angle=blue_spawn[2], facing_x=blue_spawn[3])
+
+            # 3. Orange Car spawns randomly on ground in right half of field
+            if self.car_orange is not None and orange_spawn is not None:
+                self.car_orange.reset(orange_spawn[0], orange_spawn[1], angle=orange_spawn[2], facing_x=orange_spawn[3])
         else:
-            x, y, angle, facing = spawn_pos
+            # 1. Ball spawns resting on the ground at center
+            self.ball.reset(self.center_x, self.ball_spawn_y)
 
-        self.car.reset(x, y, angle=angle, facing_x=facing)
-
-        # 3. Orange Car spawns at kickoff position
-        if self.car_orange is not None:
+            # 2. Blue Car spawns at kickoff position for current round
             if spawn_pos is None:
-                ox, oy, oang, ofacing = self.get_spawn_position("orange")
+                x, y, angle, facing = self.get_spawn_position("blue")
             else:
-                ox = 2.0 * self.center_x - x
-                oy = y
-                oang = math.pi
-                ofacing = -1
-            self.car_orange.reset(ox, oy, angle=oang, facing_x=ofacing)
+                x, y, angle, facing = spawn_pos
+
+            self.car.reset(x, y, angle=angle, facing_x=facing)
+
+            # 3. Orange Car spawns at kickoff position
+            if self.car_orange is not None:
+                if spawn_pos is None:
+                    ox, oy, oang, ofacing = self.get_spawn_position("orange")
+                else:
+                    ox = 2.0 * self.center_x - x
+                    oy = y
+                    oang = math.pi
+                    ofacing = -1
+                self.car_orange.reset(ox, oy, angle=oang, facing_x=ofacing)
 
         # Reset bot if active
         if self.orange_bot is not None:

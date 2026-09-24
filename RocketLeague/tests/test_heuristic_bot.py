@@ -11,7 +11,7 @@ class TestHeuristicBot(unittest.TestCase):
     """Verify Orange car presence, AI state transitions, and defensive/offensive mechanics."""
 
     def setUp(self):
-        self.sim = Simulation(enable_orange=True, orange_is_bot=True)
+        self.sim = Simulation(enable_orange=True, orange_is_bot=True, random_spawn=False)
 
     def test_enable_disable_flag(self):
         """Verify enable_orange flag creates car and dynamic toggle cleanly adds/removes it."""

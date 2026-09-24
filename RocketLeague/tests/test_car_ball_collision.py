@@ -8,7 +8,7 @@ from src.core.actions import CarAction
 class TestCarBallCollision(unittest.TestCase):
 
     def setUp(self):
-        self.sim = Simulation()
+        self.sim = Simulation(random_spawn=False)
 
     def test_forward_strike_right_and_left(self):
         """Verify the car punches the ball forward in its driving direction (both Right and Left)."""
@@ -110,7 +110,7 @@ class TestCarBallCollision(unittest.TestCase):
         """Verify the ball spawns resting on the arena floor on start and on reset (not mid-air)."""
         from src.core.simulation import Simulation
 
-        sim = Simulation()
+        sim = Simulation(random_spawn=False)
         # 1. On start: ball is on the floor
         self.assertAlmostEqual(sim.ball.position[1], sim.ball_spawn_y, places=2)
         self.assertAlmostEqual(sim.ball.position[0], sim.center_x, places=2)
@@ -154,7 +154,7 @@ class TestCarBallCollision(unittest.TestCase):
         """Verify car spawns on its side and alternates between defensive (8.5m) and attack (13.5m) spots."""
         from src.core.simulation import Simulation
 
-        sim = Simulation()
+        sim = Simulation(random_spawn=False)
         # Initial spawn is at defensive position (8.5m)
         self.assertAlmostEqual(sim.car.position[0], 8.5, places=2)
         self.assertEqual(sim.car.facing_x, 1)

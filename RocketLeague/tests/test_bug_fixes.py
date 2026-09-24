@@ -18,7 +18,7 @@ class TestBugFixes(unittest.TestCase):
 
     def test_gentle_left_input_does_not_propel_rightward(self):
         """Verify that gentle left input (dir_x = -0.12) does not propel a right-facing car to the right."""
-        sim = Simulation()
+        sim = Simulation(enable_orange=False, random_spawn=False)
         sim.car.reset(10.0, sim.spawn_y, angle=0.0, facing_x=1)
         for _ in range(30):
             sim.step(CarAction(), 1.0 / 60.0)
@@ -40,7 +40,7 @@ class TestBugFixes(unittest.TestCase):
 
     def test_bot_persists_in_aerial_state_when_airborne(self):
         """Verify bot persists in AERIAL state across multiple airborne frames rather than aborting after 1 frame."""
-        sim = Simulation(enable_orange=True, orange_is_bot=True)
+        sim = Simulation(enable_orange=True, orange_is_bot=True, random_spawn=False)
         # Place ball high at midfield
         sim.ball.reset(17.0, 8.0, vx=0.0, vy=0.0)
         # Place Orange car grounded in midfield
@@ -59,7 +59,7 @@ class TestBugFixes(unittest.TestCase):
 
     def test_bot_kickoff_executes_power_dodge_flip(self):
         """Verify bot successfully executes a power dodge flip during kickoff approach."""
-        sim = Simulation(enable_orange=True, orange_is_bot=True)
+        sim = Simulation(enable_orange=True, orange_is_bot=True, random_spawn=False)
 
         flipped = False
         for step in range(120):
@@ -72,7 +72,7 @@ class TestBugFixes(unittest.TestCase):
 
     def test_simulation_rl_metrics_and_match_time(self):
         """Verify goal_scored_step triggers for strictly 1 frame and match_time accumulates across goals."""
-        sim = Simulation()
+        sim = Simulation(random_spawn=False)
         g_center_y = (sim.arena.goal_y_bot + sim.arena.goal_y_top) / 2.0
 
         # Step 10 frames before goal
