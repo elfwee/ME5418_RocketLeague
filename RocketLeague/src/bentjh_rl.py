@@ -108,6 +108,7 @@ class GymEnv(gym.Env):
         pass
 
 def train_headless(max_steps: int = 1):
+    
     """Run headless simulation loop for automated benchmark or verification."""
     print(f"Running headless simulation for {max_steps} steps...")
     sim = Simulation(enable_orange=True)
