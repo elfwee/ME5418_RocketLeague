@@ -36,24 +36,46 @@ class TerminateOnTimeout(gym.Wrapper):
 
 class RocketLeagueEnv(gym.Env):
     metadata = {'render_modes': ['human', 'terminal'], 'render_fps': SIM_HZ}
+    _tb_writer = None
+    _tb_writer_dir = None
+    _total_steps = 0
+    _total_episodes = 0
 
-    def __init__(self, render_mode=None, render_fps=SIM_HZ, bot_type='none', enable_tb_logging=None):
+    def __init__(self, render_mode=None, render_fps=SIM_HZ, bot_type='none', enable_tb_logging=None, terminate_on_goal=True):
 
         self.bot_type = bot_type
+        self.terminate_on_goal = terminate_on_goal
         self.render_mode = render_mode
         self.enable_orange = None
+        self.orange_is_bot = False
         self.render_fps = render_fps
         self.ball_prev = None
         self.input_prev = None
-
-        if self.bot_type == 'none':
-            self.enable_orange = False
-        elif self.bot_type == 'bot_level_3':
-            self.enable_orange = True
+        self.episode_reward = 0.0
+        self.step1_reward = 0.0
+        self.step2_reward = 0.0
+        self.step3_reward = 0.0
+        self.step4_reward = 0.0
+        self.goal_reward = 0.0
+        self.step_no = 0
+        if enable_tb_logging is None:
+            self.enable_tb_logging = (self.render_mode != 'human')
         else:
-            raise ValueError(f"Invalid bot_type: {self.bot_type}. Must be 'none' or 'orange'.")
+            self.enable_tb_logging = enable_tb_logging
 
-        self.sim = Simulation(enable_orange=self.enable_orange)
+        if self.bot_type in ('none', None, False):
+            self.enable_orange = False
+            self.orange_is_bot = False
+        elif self.bot_type in ('bot_level_3', 'heuristic_bot', 'bot', True):
+            self.enable_orange = True
+            self.orange_is_bot = True
+        elif self.bot_type == 'passive':
+            self.enable_orange = True
+            self.orange_is_bot = False
+        else:
+            raise ValueError(f"Invalid bot_type: {self.bot_type}. Must be 'none', 'bot_level_3', 'heuristic_bot', or 'passive'.")
+
+        self.sim = Simulation(enable_orange=self.enable_orange, orange_is_bot=self.orange_is_bot)
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)  # Initialize state
         self.obs_dim = self.state.shape[0]  # Observation dimension
         # print(f"Observation dimension: {self.obs_dim}")
@@ -76,6 +98,24 @@ class RocketLeagueEnv(gym.Env):
             dtype=np.float32
         )
 
+    def set_opponent(self, bot_type='bot_level_3'):
+        """Dynamically configure or switch the opponent without re-instantiating the environment."""
+        self.bot_type = bot_type
+        if self.bot_type in ('none', None, False):
+            self.enable_orange = False
+            self.orange_is_bot = False
+            self.sim.set_orange_enabled(False, is_bot=False)
+        elif self.bot_type in ('bot_level_3', 'heuristic_bot', 'bot', True):
+            self.enable_orange = True
+            self.orange_is_bot = True
+            self.sim.set_orange_enabled(True, is_bot=True)
+        elif self.bot_type == 'passive':
+            self.enable_orange = True
+            self.orange_is_bot = False
+            self.sim.set_orange_enabled(True, is_bot=False)
+        else:
+            raise ValueError(f"Invalid bot_type: {self.bot_type}. Must be 'none', 'bot_level_3', 'heuristic_bot', or 'passive'.")
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
@@ -87,10 +127,23 @@ class RocketLeagueEnv(gym.Env):
 
         self.sim.reset(reset_scores=True, spawn_pos=spawn_pos, spawn_index=spawn_index, random_spawn=random_spawn)
         self.ball_prev = None
+        self.input_prev = None
+        self.episode_reward = 0.0
+        self.step1_reward = 0.0
+        self.step2_reward = 0.0
+        self.step3_reward = 0.0
+        self.step4_reward = 0.0
+        self.goal_reward = 0.0
+        self.step_no = 0
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
         self.render()
-
-        return self.state, {} # observation, info
+        initial_info = {
+            "goals_for": int(self.sim.score_blue),
+            "goals_against": int(self.sim.score_orange),
+            "goal_difference": int(self.sim.score_blue - self.sim.score_orange),
+            "match_result": "draw",
+        }
+        return self.state, initial_info # observation, info
 
     def step(self, input_action):
         sub_action1, sub_action2, sub_action3 = input_action
@@ -129,8 +182,19 @@ class RocketLeagueEnv(gym.Env):
         action = CarAction(dir_x=input_dir_x, dir_y=input_dir_y, boost=sub_action3==1, jump=sub_action2==1).clamp()
 
         if not self.isopen:
-            return self.state, 0.0, False, True, {"is_success": False}
+            goals_for = int(self.sim.score_blue)
+            goals_against = int(self.sim.score_orange)
+            goal_diff = goals_for - goals_against
+            match_result = "win" if goal_diff > 0 else ("loss" if goal_diff < 0 else "draw")
+            return self.state, 0.0, False, True, {
+                "is_success": False,
+                "goals_for": goals_for,
+                "goals_against": goals_against,
+                "goal_difference": goal_diff,
+                "match_result": match_result,
+            }
 
+        RocketLeagueEnv._total_steps += 1
         self.sim.step(action, 1.0 / self.render_fps)
         reward, terminated = self._calculate_reward()
         if self.render_mode == 'human':
@@ -138,12 +202,42 @@ class RocketLeagueEnv(gym.Env):
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
         truncated = not self.isopen
 
+        goals_for = int(self.sim.score_blue)
+        goals_against = int(self.sim.score_orange)
+        goal_diff = goals_for - goals_against
+        match_result = "win" if goal_diff > 0 else ("loss" if goal_diff < 0 else "draw")
+
         goal_scored_step = self.sim.goal_scored_this_step
         info = {
-            "is_success": bool(goal_scored_step == 'blue')
+            "is_success": bool(goal_scored_step == 'blue'),
+            "goals_for": goals_for,
+            "goals_against": goals_against,
+            "goal_difference": goal_diff,
+            "match_result": match_result,
         }
         if goal_scored_step is not None:
             info["goal_scored"] = goal_scored_step
+
+        if terminated or truncated:
+            RocketLeagueEnv._total_episodes += 1
+            info["step_reward1"] = self.step1_reward
+            info["step_reward2"] = self.step2_reward
+            info["step_reward3"] = self.step3_reward
+            info["step_reward4"] = self.step4_reward
+            info["goal_reward"] = self.goal_reward
+            info["episode_reward"] = self.episode_reward
+
+            if self.enable_tb_logging:
+                writer = self._get_tb_writer()
+                if writer is not None:
+                    step_idx = RocketLeagueEnv._total_steps
+                    writer.add_scalar("rewards/step_reward1_field", self.step1_reward, step_idx)
+                    writer.add_scalar("rewards/step_reward2_ball_dist", self.step2_reward, step_idx)
+                    writer.add_scalar("rewards/step_reward3_step_penalty", self.step3_reward, step_idx)
+                    writer.add_scalar("rewards/step_reward4_input_dir", self.step4_reward, step_idx)
+                    writer.add_scalar("rewards/goal_reward", self.goal_reward, step_idx)
+                    writer.add_scalar("rewards/episode_reward", self.episode_reward, step_idx)
+                    writer.flush()
 
         return self.state, reward, terminated, truncated, info  # observation, reward, terminated, truncated, info
 
@@ -194,6 +288,43 @@ class RocketLeagueEnv(gym.Env):
         if self.render_mode == 'human' and pygame.get_init():
             pygame.display.quit()
             pygame.quit()
+        if RocketLeagueEnv._tb_writer is not None:
+            try:
+                RocketLeagueEnv._tb_writer.flush()
+                RocketLeagueEnv._tb_writer.close()
+                RocketLeagueEnv._tb_writer = None
+                RocketLeagueEnv._tb_writer_dir = None
+            except Exception:
+                pass
+
+    @classmethod
+    def _get_tb_writer(cls):
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+        except ImportError:
+            return None
+
+        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        if not os.path.exists(logs_dir):
+            return None
+
+        ppo_dirs = [
+            os.path.join(logs_dir, d)
+            for d in os.listdir(logs_dir)
+            if os.path.isdir(os.path.join(logs_dir, d)) and d.startswith("PPO_")
+        ]
+        target_dir = max(ppo_dirs, key=os.path.getmtime) if ppo_dirs else logs_dir
+
+        if cls._tb_writer is None or cls._tb_writer_dir != target_dir:
+            if cls._tb_writer is not None:
+                try:
+                    cls._tb_writer.close()
+                except Exception:
+                    pass
+            cls._tb_writer_dir = target_dir
+            cls._tb_writer = SummaryWriter(log_dir=target_dir)
+
+        return cls._tb_writer
 
     def _calculate_reward(self):
         reward = 0.0
@@ -202,7 +333,8 @@ class RocketLeagueEnv(gym.Env):
         last_touch = state['last_touch']
         goal_scored_step = state['goal_scored_step']
         if goal_scored_step is not None:
-            terminated = True
+            # print(f"step_no:{self.step_no}, episode reward:{self.episode_reward:.4f}, step1:{self.step1_reward:.4f}, step2:{self.step2_reward:.4f}, step3:{self.step3_reward:.4f}, step4:{self.step4_reward:.4f}")
+            terminated = bool(self.terminate_on_goal)
             if goal_scored_step == 'blue':  # Blue team scored
                 if last_touch == 'orange':
                     reward = 2.0
@@ -211,6 +343,8 @@ class RocketLeagueEnv(gym.Env):
             elif goal_scored_step == 'orange':  # Orange team scored
                 reward = -20.0  # Penalty for conceding a goal
             self.ball_prev = None
+            self.goal_reward += reward
+            self.episode_reward += reward
         else:
             # Field step reward
             step_reward1 = 0.0
@@ -247,6 +381,13 @@ class RocketLeagueEnv(gym.Env):
                 self.input_prev = last_input
                 step_reward4 = -0.001
             reward += step_reward4
+                
+            self.episode_reward += reward
+            self.step1_reward += step_reward1
+            self.step2_reward += step_reward2
+            self.step3_reward += step_reward3
+            self.step4_reward += step_reward4
+            self.step_no += 1
             
             # print(f"reward: {reward:.4f}, step1: {step_reward1:.4f}, step2: {step_reward2:.4f}, step3: {step_reward3:.4f}, step4: {step_reward4:.4f}")
         return reward, terminated
@@ -256,6 +397,40 @@ def my_check_env():
     env = gym.make('rocket-league-v1', render_mode=None, render_fps=SIM_HZ, bot_type='none', disable_env_checker=True)
     check_env(env.unwrapped)
     print("Environment check passed successfully!")
+
+try:
+    from stable_baselines3.common.callbacks import BaseCallback
+
+    class RewardLoggingCallback(BaseCallback):
+        """
+        Custom callback for Stable-Baselines3 that logs episode reward breakdown
+        (step_reward1, step_reward2, step_reward3, step_reward4, goal_reward, episode_reward)
+        directly into the SB3 Logger / TensorBoard.
+        """
+        def __init__(self, verbose: int = 0):
+            super().__init__(verbose)
+
+        def _on_step(self) -> bool:
+            for info in self.locals.get("infos", []):
+                if "step_reward1" in info:
+                    self.logger.record("rewards/step_reward1_field", info["step_reward1"])
+                    self.logger.record("rewards/step_reward2_ball_dist", info["step_reward2"])
+                    self.logger.record("rewards/step_reward3_step_penalty", info["step_reward3"])
+                    self.logger.record("rewards/step_reward4_input_dir", info["step_reward4"])
+                    self.logger.record("rewards/goal_reward", info["goal_reward"])
+                    self.logger.record("rewards/episode_reward", info["episode_reward"])
+            return True
+except ImportError:
+    class RewardLoggingCallback:
+        pass
+
+try:
+    from src.callbacks.soccer_eval_callback import SoccerEvalCallback
+except ImportError:
+    try:
+        from callbacks.soccer_eval_callback import SoccerEvalCallback
+    except ImportError:
+        SoccerEvalCallback = None
 
 if __name__ == "__main__":
     # my_check_env()

@@ -4,7 +4,7 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv
-from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
 
 # Ensure repository root is on sys.path when invoked directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,7 +22,7 @@ def train():
     os.makedirs(log_dir, exist_ok=True)
 
     # 6000 steps = 100 seconds (1 minute match) at 60 Hz
-    max_episode_steps = 6000
+    max_episode_steps = 3600
 
     env_kwargs = {
         "bot_type": "bot_level_3",
@@ -44,19 +44,36 @@ def train():
         tensorboard_log=log_dir,
     )
 
+    # model = PPO.load(
+    #     "/home/jensen/ME5418/ME5418_RocketLeague/RocketLeague/src/models/PPO/best_model_final2_nobot2.zip", 
+    #     env=env,
+    #     device="cpu",
+    #     tensorboard_log=log_dir,
+    #     )
+
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=os.path.join(model_dir, "PPO"),
         log_path=log_dir,
-        eval_freq=4000,       # Evaluates every 4,000 calls * 4 envs = 10,000 timesteps
-        n_eval_episodes=5,    # Evaluate across 5 full episodes
-        deterministic=True,   # Evaluates the agent using greedy/best actions
+        eval_freq=20_000,
+        n_eval_episodes=10,
+        deterministic=True,
         verbose=1,
     )
 
-    TIMESTEPS = max_episode_steps * 1000  # 6,000,000 timesteps total
+    checkpoint_callback = CheckpointCallback(
+        save_freq=1_000_000,
+        save_path=os.path.join(model_dir, "PPO", "checkpoints"),
+        name_prefix="ppo",
+    )
 
-    model.learn(total_timesteps=TIMESTEPS, callback=eval_callback)
+    TIMESTEPS = 10_000_000
+
+    model.learn(
+        total_timesteps=TIMESTEPS,
+        callback = CallbackList([eval_callback, checkpoint_callback]),
+        # reset_num_timesteps=False,
+    )
 
 if __name__ == "__main__":
     train()

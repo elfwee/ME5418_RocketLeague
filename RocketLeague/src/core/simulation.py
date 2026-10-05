@@ -673,8 +673,8 @@ class Simulation:
             ball["velocity"][0], ball["velocity"][1],
             ball["angular_velocity"],
             # 3. Agent relations (9 floats)
-            # rel["agent_to_ball"]["magnitude"],
-            # rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
+            rel["agent_to_ball"]["magnitude"],
+            rel["agent_to_ball"]["direction"][0], rel["agent_to_ball"]["direction"][1],
             rel["ball_to_opponent_goal"]["magnitude"],
             rel["ball_to_opponent_goal"]["direction"][0], rel["ball_to_opponent_goal"]["direction"][1],
             rel["ball_to_own_goal"]["magnitude"],
@@ -700,18 +700,18 @@ class Simulation:
                 # co["is_boost_recovery"],
                 # *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
             ])
-            # opp_rel = rel.get("opponent_to_ball")
-            # if opp_rel is not None:
-            #     vec.extend([
-            #         opp_rel["magnitude"],
-            #         opp_rel["direction"][0],
-            #         opp_rel["direction"][1]
-            #     ])
-            # else:
-            #     vec.extend([0.0, 0.0, 0.0])
+            opp_rel = rel.get("opponent_to_ball")
+            if opp_rel is not None:
+                vec.extend([
+                    opp_rel["magnitude"],
+                    opp_rel["direction"][0],
+                    opp_rel["direction"][1]
+                ])
+            else:
+                vec.extend([0.0, 0.0, 0.0])
         else:
             # Zero-fill when no opponent is present to preserve fixed observation size
-            vec.extend([0.0] * 13)
+            vec.extend([0.0] * 16)
 
         return vec
 
