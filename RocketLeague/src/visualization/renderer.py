@@ -32,7 +32,7 @@ class Renderer:
         # segment costs ~25 full-screen surfaces every frame.
         self._alpha_layer = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         self._cached_goal_surfaces = {}
-        self.show_raycasts: bool = True
+        self.show_raycasts: bool = False
         self.raycast_button_rect = pygame.Rect(0, 0, 0, 0)
 
     def world_to_screen(self, x: float, y: float) -> Tuple[int, int]:
