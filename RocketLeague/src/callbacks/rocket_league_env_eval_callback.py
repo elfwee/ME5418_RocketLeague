@@ -343,6 +343,7 @@ class RocketLeagueEnv(gym.Env):
             elif goal_scored_step == 'orange':  # Orange team scored
                 reward = -20.0  # Penalty for conceding a goal
             self.ball_prev = None
+            self.input_prev = None
             self.goal_reward += reward
             self.episode_reward += reward
         else:

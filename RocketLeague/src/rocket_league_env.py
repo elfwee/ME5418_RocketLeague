@@ -87,6 +87,7 @@ class RocketLeagueEnv(gym.Env):
 
         self.sim.reset(reset_scores=True, spawn_pos=spawn_pos, spawn_index=spawn_index, random_spawn=random_spawn)
         self.ball_prev = None
+        self.input_prev = None
         self.state = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
         self.render()
 
@@ -211,6 +212,7 @@ class RocketLeagueEnv(gym.Env):
             elif goal_scored_step == 'orange':  # Orange team scored
                 reward = -20.0  # Penalty for conceding a goal
             self.ball_prev = None
+            self.input_prev = None
         else:
             # Field step reward
             step_reward1 = 0.0
