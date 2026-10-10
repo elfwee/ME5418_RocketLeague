@@ -63,6 +63,50 @@ def get_observation(state: dict) -> np.ndarray:
 
 def gym_action_to_car_action(np_action: np.array) -> CarAction:
     """Convert a Gymnasium Discrete(5) action to a CarAction."""
+    np_action[0] #do nothing
+    
+    np_action[1] #left
+    np_action[2] #right
+    np_action[3] #up
+    np_action[4] #down
+    np_action[5] #jump
+    np_action[6] #boost
+
+    np_action[7] #left + up 
+    np_action[8] #left + down 
+    np_action[9] #right + up 
+    np_action[10] #right + down 
+    
+    np_action[11] #left + jump
+    np_action[12] #up + jump
+    np_action[13] #right + jump
+    np_action[14] #down + jump
+
+    np_action[15] #left + boost 
+    np_action[16] #right + boost 
+    np_action[17] #up + boost 
+    np_action[18] #down + boost 
+
+    np_action[19] #left + up + jump
+    np_action[20] #left + up + boost
+    np_action[21] #left + down + jump
+    np_action[22] #left + down + boost
+
+    np_action[23] #right + up + jump
+    np_action[24] #right + up + boost
+    np_action[25] #right + down + jump
+    np_action[26] #right + down + boost
+
+    np_action[27] #left + boost + jump
+    np_action[28] #right + boost + jump
+    np_action[29] #up + boost + jump
+    np_action[30] #down + boost + jump
+
+    np_action[31] #left + up + boost + jump
+    np_action[32] #left + down + boost + jump
+    np_action[33] #right + up + boost + jump
+    np_action[34] #right + down + boost + jump
+
     return CarAction(dir_x=np_action[0], 
                      dir_y=np_action[1], 
                      jump=np_action[2],
@@ -74,8 +118,8 @@ class GymEnv(gym.Env):
         self.sim = sim
         self.previous_score = {"blue":0, "orange":0}
         self.episode_count = 0
-        # self.observation_space = spaces.Box(low=1, high=1,shape=(4,),dtype=np.float32)
-        # self.action_space = spaces.Discrete(2)
+        self.observation_space = gym.spaces.Box(low=np.inf, high=np.inf,shape=(20,),dtype=np.float32)
+        self.action_space = gym.spaces.Discrete(35)
         # self.reward_range = (-1,1)
 
     def reset(self, seed=None, options=None):
@@ -90,6 +134,8 @@ class GymEnv(gym.Env):
         self.sim.step(gym_action_to_car_action(action), 1.0 / SIM_HZ)
         state = self.sim.get_state()
         self.observed_state = get_observation(state)
+        print(self.observed_state)
+        print(action)
 
         terminated = True
         truncated = False
