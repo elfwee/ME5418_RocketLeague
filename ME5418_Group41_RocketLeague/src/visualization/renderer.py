@@ -116,14 +116,14 @@ class Renderer:
 
             # Soft translucent goal pocket fill with smooth inside corners (cached to avoid per-frame allocations)
             cache_key = (is_left, rect.width, rect.height)
+            radii = {
+                "border_top_left_radius": r_px if is_left else 0,
+                "border_bottom_left_radius": r_px if is_left else 0,
+                "border_top_right_radius": 0 if is_left else r_px,
+                "border_bottom_right_radius": 0 if is_left else r_px,
+            }
             if cache_key not in self._cached_goal_surfaces:
                 goal_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-                radii = {
-                    "border_top_left_radius": r_px if is_left else 0,
-                    "border_bottom_left_radius": r_px if is_left else 0,
-                    "border_top_right_radius": 0 if is_left else r_px,
-                    "border_bottom_right_radius": 0 if is_left else r_px,
-                }
                 pygame.draw.rect(goal_surf, (*color, 45), pygame.Rect(0, 0, rect.width, rect.height), **radii)
 
                 # Netting grid lines masked to the rounded goal pocket
@@ -139,14 +139,8 @@ class Renderer:
                 goal_surf.blit(net_surf, (0, 0))
                 self._cached_goal_surfaces[cache_key] = goal_surf
 
-            radii_outline = {
-                "border_top_left_radius": r_px if is_left else 0,
-                "border_bottom_left_radius": r_px if is_left else 0,
-                "border_top_right_radius": 0 if is_left else r_px,
-                "border_bottom_right_radius": 0 if is_left else r_px,
-            }
             self.screen.blit(self._cached_goal_surfaces[cache_key], (rect.x, rect.y))
-            pygame.draw.rect(self.screen, color, rect, width=2, **radii_outline)
+            pygame.draw.rect(self.screen, color, rect, width=2, **radii)
 
     def _draw_ball(self, sim: Simulation):
         """Draw ball, rotation seam indicator, and trailing trajectory path."""
@@ -205,18 +199,12 @@ class Renderer:
 
         # 2. Rear Spoiler / Wing (elevated on dual struts at rear of car)
         cs = CAR_SCALE
-        strut1_base = body.local_to_world((-0.90 * cs, 0.20 * cs * facing))
-        strut1_top = body.local_to_world((-0.90 * cs, 0.48 * cs * facing))
-        strut2_base = body.local_to_world((-0.65 * cs, 0.20 * cs * facing))
-        strut2_top = body.local_to_world((-0.65 * cs, 0.48 * cs * facing))
-
-        s_s1_b = self.world_to_screen(strut1_base.x, strut1_base.y)
-        s_s1_t = self.world_to_screen(strut1_top.x, strut1_top.y)
-        s_s2_b = self.world_to_screen(strut2_base.x, strut2_base.y)
-        s_s2_t = self.world_to_screen(strut2_top.x, strut2_top.y)
-
-        pygame.draw.line(self.screen, (71, 85, 105), s_s1_b, s_s1_t, 2)
-        pygame.draw.line(self.screen, (71, 85, 105), s_s2_b, s_s2_t, 2)
+        for sx in (-0.90, -0.65):
+            strut_base = body.local_to_world((sx * cs, 0.20 * cs * facing))
+            strut_top = body.local_to_world((sx * cs, 0.48 * cs * facing))
+            pygame.draw.line(self.screen, (71, 85, 105),
+                             self.world_to_screen(strut_base.x, strut_base.y),
+                             self.world_to_screen(strut_top.x, strut_top.y), 2)
 
         # Wing blade
         wing_p1 = body.local_to_world((-1.05 * cs, 0.50 * cs * facing))

@@ -190,17 +190,18 @@ class Simulation:
             by = random.uniform(ball_y_min, ball_y_max)
 
             # Corner fillet clearance
-            # Bottom-Left: center (7.0, 4.0)
-            if bx < 7.0 and by < 4.0 and math.hypot(bx - 7.0, by - 4.0) > max_corner_dist:
-                continue
-            # Top-Left: center (7.0, 14.0)
-            if bx < 7.0 and by > 14.0 and math.hypot(bx - 7.0, by - 14.0) > max_corner_dist:
-                continue
-            # Bottom-Right: center (28.0, 4.0)
-            if bx > 28.0 and by < 4.0 and math.hypot(bx - 28.0, by - 4.0) > max_corner_dist:
-                continue
-            # Top-Right: center (28.0, 14.0)
-            if bx > 28.0 and by > 14.0 and math.hypot(bx - 28.0, by - 14.0) > max_corner_dist:
+            corner_fillets = (
+                (self.arena.x_left + CORNER_RADIUS, self.arena.y_floor + CORNER_RADIUS, -1, -1),
+                (self.arena.x_left + CORNER_RADIUS, self.arena.y_ceil - CORNER_RADIUS, -1, 1),
+                (self.arena.x_right - CORNER_RADIUS, self.arena.y_floor + CORNER_RADIUS, 1, -1),
+                (self.arena.x_right - CORNER_RADIUS, self.arena.y_ceil - CORNER_RADIUS, 1, 1),
+            )
+            if any(
+                (bx < cx_c if sx < 0 else bx > cx_c) and
+                (by < cy_c if sy < 0 else by > cy_c) and
+                math.hypot(bx - cx_c, by - cy_c) > max_corner_dist
+                for cx_c, cy_c, sx, sy in corner_fillets
+            ):
                 continue
 
             # Check overlap with Blue car
@@ -397,34 +398,53 @@ class Simulation:
             return (self.arena.x_left - ball_diameter, gy)
         return (self.arena.x_right + ball_diameter, gy)
 
-    def get_state(self) -> Dict[str, Any]:
-        """Query complete simulation state for headless evaluation or RL."""
-        # Relational state vectors (from point A pointing to point B)
-        # 1. agent-center-to-ball-center
-        agent_to_ball = _vector_relation(self.car.position, self.ball.position)
+    def _extract_car_state(self, car: Car) -> Dict[str, Any]:
+        """Extract un-normalized physical state dictionary for a vehicle."""
+        raycasts = car.compute_boundary_raycasts()
+        car_dict = {
+            "position": car.position,
+            "nose_position": car.nose_position,
+            "velocity": car.velocity,
+            "angle": car.angle,
+            "angular_velocity": car.body.angular_velocity,
+            "is_grounded": car.is_grounded,
+            "ground_normal": car.ground_normal,
+            "wheel_contacts": car.wheel_contact_count,
+            "both_wheels_grounded": car.both_wheels_grounded,
+            "has_jump2": car.has_jump2,
+            "is_flipping": car.is_flipping,
+            "is_turtling": car.is_turtling,
+            "is_turtling_recovery": car.is_turtling_recovery,
+            "boost": car.boost_amount,
+            "is_boosting": car.is_boosting,
+            "is_boost_recovery": car.is_boost_recovery,
+            "input_vector": car.last_input_vector,
+            "facing_x": car.facing_x,
+            "boundary_raycasts": raycasts,
+            "boundary_distances": [r["distance"] for r in raycasts]
+        }
+        if car is self.car_orange:
+            car_dict["bot_state"] = self.orange_bot.current_state if self.orange_bot else None
+        return car_dict
 
-        # 2. opponent-center-to-ball-center
-        opp_to_ball = (
-            _vector_relation(self.car_orange.position, self.ball.position)
-            if self.car_orange is not None else None
-        )
-
-        # 3. ball-center-to-opponent's goal-center
+    def _compute_relations(self) -> Dict[str, Any]:
+        """Compute relational direction and distance vectors between agents, ball, and goals."""
         opp_team = "orange" if self.car.team == "blue" else "blue"
         opp_goal_center = self.get_goal_center(opp_team)
-        ball_to_opp_goal = _vector_relation(self.ball.position, opp_goal_center)
-
-        # 4. ball-center-to-own goal-center
         own_goal_center = self.get_goal_center(self.car.team)
-        ball_to_own_goal = _vector_relation(self.ball.position, own_goal_center)
 
-        relations = {
-            "agent_to_ball": agent_to_ball,
-            "opponent_to_ball": opp_to_ball,
-            "ball_to_opponent_goal": ball_to_opp_goal,
-            "ball_to_own_goal": ball_to_own_goal
+        return {
+            "agent_to_ball": _vector_relation(self.car.position, self.ball.position),
+            "opponent_to_ball": (
+                _vector_relation(self.car_orange.position, self.ball.position)
+                if self.car_orange is not None else None
+            ),
+            "ball_to_opponent_goal": _vector_relation(self.ball.position, opp_goal_center),
+            "ball_to_own_goal": _vector_relation(self.ball.position, own_goal_center)
         }
 
+    def get_state(self) -> Dict[str, Any]:
+        """Query complete simulation state for headless evaluation or RL."""
         state = {
             "time": self.time_elapsed,
             "match_time": self.match_time,
@@ -435,29 +455,8 @@ class Simulation:
                 "angular_velocity": self.ball.body.angular_velocity,
                 "angle": self.ball.angle
             },
-            "car": {
-                "position": self.car.position,
-                "nose_position": self.car.nose_position,
-                "velocity": self.car.velocity,
-                "angle": self.car.angle,
-                "angular_velocity": self.car.body.angular_velocity,
-                "is_grounded": self.car.is_grounded,
-                "ground_normal": self.car.ground_normal,
-                "wheel_contacts": self.car.wheel_contact_count,
-                "both_wheels_grounded": self.car.both_wheels_grounded,
-                "has_jump2": self.car.has_jump2,
-                "is_flipping": self.car.is_flipping,
-                "is_turtling": self.car.is_turtling,
-                "is_turtling_recovery": self.car.is_turtling_recovery,
-                "boost": self.car.boost_amount,
-                "is_boosting": self.car.is_boosting,
-                "is_boost_recovery": self.car.is_boost_recovery,
-                "input_vector": self.car.last_input_vector,
-                "facing_x": self.car.facing_x,
-                "boundary_raycasts": self.car.compute_boundary_raycasts(),
-                "boundary_distances": [r["distance"] for r in self.car.compute_boundary_raycasts()]
-            },
-            "relations": relations,
+            "car": self._extract_car_state(self.car),
+            "relations": self._compute_relations(),
             "score": {
                 "blue": self.score_blue,
                 "orange": self.score_orange
@@ -468,29 +467,7 @@ class Simulation:
         }
 
         if self.car_orange is not None:
-            state["car_orange"] = {
-                "position": self.car_orange.position,
-                "nose_position": self.car_orange.nose_position,
-                "velocity": self.car_orange.velocity,
-                "angle": self.car_orange.angle,
-                "angular_velocity": self.car_orange.body.angular_velocity,
-                "is_grounded": self.car_orange.is_grounded,
-                "ground_normal": self.car_orange.ground_normal,
-                "wheel_contacts": self.car_orange.wheel_contact_count,
-                "both_wheels_grounded": self.car_orange.both_wheels_grounded,
-                "has_jump2": self.car_orange.has_jump2,
-                "is_flipping": self.car_orange.is_flipping,
-                "is_turtling": self.car_orange.is_turtling,
-                "is_turtling_recovery": self.car_orange.is_turtling_recovery,
-                "boost": self.car_orange.boost_amount,
-                "is_boosting": self.car_orange.is_boosting,
-                "is_boost_recovery": self.car_orange.is_boost_recovery,
-                "input_vector": self.car_orange.last_input_vector,
-                "facing_x": self.car_orange.facing_x,
-                "bot_state": self.orange_bot.current_state if self.orange_bot else None,
-                "boundary_raycasts": self.car_orange.compute_boundary_raycasts(),
-                "boundary_distances": [r["distance"] for r in self.car_orange.compute_boundary_raycasts()]
-            }
+            state["car_orange"] = self._extract_car_state(self.car_orange)
 
         return state
 
@@ -512,55 +489,33 @@ class Simulation:
         - is_boost_recovery: 1.0 (grounded and not boosting) or 0.0
         - opponent_present: 1.0 (opponent present) or 0.0 (no opponent)
 
-        Flat Array Layout (fixed 58 floats invariant length):
-        - Ego Car (20): [pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts,
-                         has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]
+        Flat Array Layout (fixed 52 floats invariant length):
+        - Ego Car (21): [pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts,
+                         has_jump2, is_flipping, is_turtling, is_boost_recovery, 8x raycast_distances]
         - Ball (5): [pos_x, pos_y, vel_x, vel_y, ang_vel]
         - Relations (9): [agent_to_ball (mag, dir_x, dir_y),
                           ball_to_opp_goal (mag, dir_x, dir_y),
                           ball_to_own_goal (mag, dir_x, dir_y)]
         - Opponent Present Flag (1): [1.0 if opponent exists else 0.0]
-        - Opponent-Dependent Features (23):
-            - If opponent present: opponent car (20) + opponent_to_ball (3)
-            - If no opponent: 23 zero-filled floats ([0.0] * 23)
+        - Opponent-Dependent Features (16):
+            - If opponent present: opponent car (13) + opponent_to_ball (3)
+            - If no opponent: 16 zero-filled floats ([0.0] * 16)
 
         Args:
-            as_flat_array: If True, returns a flat 1D list of 58 float features suitable for Box space.
+            as_flat_array: If True, returns a flat 1D list of 52 float features suitable for Box space.
                            If False (default), returns structured Dict[str, Any].
         """
         # 1. Normalized Relational State
-        opp_team = "orange" if self.car.team == "blue" else "blue"
-        opp_goal_center = self.get_goal_center(opp_team)
-        own_goal_center = self.get_goal_center(self.car.team)
-
-        agent_to_ball = _vector_relation(self.car.position, self.ball.position)
-        opp_to_ball = (
-            _vector_relation(self.car_orange.position, self.ball.position)
-            if self.car_orange is not None else None
-        )
-        ball_to_opp_goal = _vector_relation(self.ball.position, opp_goal_center)
-        ball_to_own_goal = _vector_relation(self.ball.position, own_goal_center)
-
+        raw_relations = self._compute_relations()
         relations_norm = {
-            "agent_to_ball": {
-                "magnitude": min(1.0, agent_to_ball["magnitude"] / ARENA_DIAGONAL),
-                "direction": agent_to_ball["direction"]
-            },
-            "opponent_to_ball": (
+            k: (
                 {
-                    "magnitude": min(1.0, opp_to_ball["magnitude"] / ARENA_DIAGONAL),
-                    "direction": opp_to_ball["direction"]
+                    "magnitude": min(1.0, v["magnitude"] / ARENA_DIAGONAL),
+                    "direction": v["direction"]
                 }
-                if opp_to_ball is not None else None
-            ),
-            "ball_to_opponent_goal": {
-                "magnitude": min(1.0, ball_to_opp_goal["magnitude"] / ARENA_DIAGONAL),
-                "direction": ball_to_opp_goal["direction"]
-            },
-            "ball_to_own_goal": {
-                "magnitude": min(1.0, ball_to_own_goal["magnitude"] / ARENA_DIAGONAL),
-                "direction": ball_to_own_goal["direction"]
-            }
+                if v is not None else None
+            )
+            for k, v in raw_relations.items()
         }
 
         # 2. Normalized Ball State

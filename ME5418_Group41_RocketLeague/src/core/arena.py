@@ -73,10 +73,6 @@ class Arena:
         yf = self.y_floor
         yc = self.y_ceil
         R = CORNER_RADIUS
-        gd = GOAL_DEPTH
-        rg = GOAL_CORNER_RADIUS
-        g_bot = self.goal_y_bot
-        g_top = self.goal_y_top
 
         # 1. Main Floor
         self._add_segment((xl + R, yf), (xr - R, yf), elasticity=0.7, friction=0.8)
@@ -94,44 +90,52 @@ class Arena:
         # Bottom-Right fillet: (xr, yf + R) -> (xr - R, yf)
         self._add_arc((xr - R, yf + R), R, 0.0, -math.pi * 0.5, steps=5, elasticity=0.75, friction=0.7)
 
-        # 4. Left Wall & Elevated Goal Structure
-        # Lower wall beneath goal: (xl, yf + R) up to (xl, g_bot)
-        # Balls rolling on the floor strike this vertical wall and bounce vertically in front of the goal
-        self._add_segment((xl, yf + R), (xl, g_bot), elasticity=0.82, friction=0.4)
-        # Left Goal Pocket with Smooth Inside Edges:
-        # Bottom crossbar/floor of goal pocket: (xl, g_bot) -> (xl - gd + rg, g_bot)
-        self._add_segment((xl, g_bot), (xl - gd + rg, g_bot), elasticity=0.6, friction=0.5)
-        # Bottom-back smooth curved corner:
-        self._add_arc((xl - gd + rg, g_bot + rg), rg, math.pi * 1.5, math.pi, steps=6, elasticity=0.45, friction=0.5)
-        # Back net: (xl - gd, g_bot + rg) -> (xl - gd, g_top - rg)
-        self._add_segment((xl - gd, g_bot + rg), (xl - gd, g_top - rg), elasticity=0.4, friction=0.5)
-        # Top-back smooth curved corner:
-        self._add_arc((xl - gd + rg, g_top - rg), rg, math.pi, math.pi * 0.5, steps=6, elasticity=0.45, friction=0.5)
-        # Top crossbar/ceiling of goal pocket: (xl - gd + rg, g_top) -> (xl, g_top)
-        self._add_segment((xl - gd + rg, g_top), (xl, g_top), elasticity=0.6, friction=0.5)
-        # Upper wall (backboard): (xl, g_top) -> (xl, yc - R)
-        self._add_segment((xl, g_top), (xl, yc - R), elasticity=0.85, friction=0.4)
+        # 4. Elevated Goal Structures & Backboards
+        self._add_goal_structure(xl, -1, "left")
+        self._add_goal_structure(xr, 1, "right")
 
-        # 5. Right Wall & Elevated Goal Structure
-        # Lower wall beneath goal: (xr, yf + R) up to (xr, g_bot)
-        self._add_segment((xr, yf + R), (xr, g_bot), elasticity=0.82, friction=0.4)
-        # Right Goal Pocket with Smooth Inside Edges:
-        # Bottom crossbar/floor of goal pocket: (xr, g_bot) -> (xr + gd - rg, g_bot)
-        self._add_segment((xr, g_bot), (xr + gd - rg, g_bot), elasticity=0.6, friction=0.5)
-        # Bottom-back smooth curved corner:
-        self._add_arc((xr + gd - rg, g_bot + rg), rg, -math.pi * 0.5, 0.0, steps=6, elasticity=0.45, friction=0.5)
-        # Back net: (xr + gd, g_bot + rg) -> (xr + gd, g_top - rg)
-        self._add_segment((xr + gd, g_bot + rg), (xr + gd, g_top - rg), elasticity=0.4, friction=0.5)
-        # Top-back smooth curved corner:
-        self._add_arc((xr + gd - rg, g_top - rg), rg, 0.0, math.pi * 0.5, steps=6, elasticity=0.45, friction=0.5)
-        # Top crossbar/ceiling of goal pocket: (xr + gd - rg, g_top) -> (xr, g_top)
-        self._add_segment((xr + gd - rg, g_top), (xr, g_top), elasticity=0.6, friction=0.5)
-        # Upper wall (backboard): (xr, g_top) -> (xr, yc - R)
-        self._add_segment((xr, g_top), (xr, yc - R), elasticity=0.85, friction=0.4)
+    def _add_goal_structure(self, x_line: float, direction: int, sensor_team: str):
+        """Construct lower wall, recessed goal pocket, backboard, and sensor.
 
-        # 6. Goal Sensors (Non-physical triggers inside the goal pocket)
-        self._add_goal_sensor((xl - gd, g_bot), (xl, g_top), "left")
-        self._add_goal_sensor((xr, g_bot), (xr + gd, g_top), "right")
+        Args:
+            x_line: Goal line X coordinate (x_left or x_right).
+            direction: -1 for left pocket (recessed into -X), +1 for right pocket (recessed into +X).
+            sensor_team: "left" or "right" sensor tag.
+        """
+        R = CORNER_RADIUS
+        gd = GOAL_DEPTH
+        rg = GOAL_CORNER_RADIUS
+        g_bot = self.goal_y_bot
+        g_top = self.goal_y_top
+        yf = self.y_floor
+        yc = self.y_ceil
+
+        x_back = x_line + direction * gd
+        x_inner = x_line + direction * (gd - rg)
+
+        # 1. Lower vertical wall below goal opening
+        self._add_segment((x_line, yf + R), (x_line, g_bot), elasticity=0.82, friction=0.4)
+
+        # 2. Goal Pocket structure
+        self._add_segment((x_line, g_bot), (x_inner, g_bot), elasticity=0.6, friction=0.5)
+
+        bot_arc_start, bot_arc_end = (math.pi * 1.5, math.pi) if direction == -1 else (-math.pi * 0.5, 0.0)
+        self._add_arc((x_inner, g_bot + rg), rg, bot_arc_start, bot_arc_end, steps=6, elasticity=0.45, friction=0.5)
+
+        self._add_segment((x_back, g_bot + rg), (x_back, g_top - rg), elasticity=0.4, friction=0.5)
+
+        top_arc_start, top_arc_end = (math.pi, math.pi * 0.5) if direction == -1 else (0.0, math.pi * 0.5)
+        self._add_arc((x_inner, g_top - rg), rg, top_arc_start, top_arc_end, steps=6, elasticity=0.45, friction=0.5)
+
+        self._add_segment((x_inner, g_top), (x_line, g_top), elasticity=0.6, friction=0.5)
+
+        # 3. Upper wall (backboard) above goal opening
+        self._add_segment((x_line, g_top), (x_line, yc - R), elasticity=0.85, friction=0.4)
+
+        # 4. Sensor
+        p_min = (min(x_line, x_back), g_bot)
+        p_max = (max(x_line, x_back), g_top)
+        self._add_goal_sensor(p_min, p_max, sensor_team)
 
     def _add_goal_sensor(self, p_min: Tuple[float, float], p_max: Tuple[float, float], team: str):
         """Invisible sensor box inside the goal pocket."""

@@ -41,19 +41,15 @@ import gymnasium as gym
 from src.rocket_league_env import RocketLeagueEnv
 
 # Instantiate directly or via gym.make
-env = RocketLeagueEnv(render_mode="human", bot_type="heuristic_bot", discrete_action=True)
+env = RocketLeagueEnv(render_mode="human", bot_type="heuristic_bot")
 obs, info = env.reset()
 ```
 
 ### A. Action Space
-The environment supports two action space formats:
-1. **Factored MultiDiscrete** (`discrete_action=False`):
-   * `MultiDiscrete([9, 2, 2])`:
-     * Direction (9): `0`: None, `1`: Right, `2`: Left, `3`: Down, `4`: Up, `5`: Down-Right, `6`: Up-Right, `7`: Down-Left, `8`: Up-Left
-     * Jump (2): `0`: Off, `1`: Jump / Dodge flip
-     * Boost (2): `0`: Off, `1`: Rocket boost
-2. **Flattened Discrete** (`discrete_action=True`):
-   * `Discrete(36)`: Single integer in range $[0, 35]$ factorized as $\text{action} = 4 \times \text{dir} + 2 \times \text{jump} + \text{boost}$.
+* `MultiDiscrete([9, 2, 2])`:
+  * Direction (9): `0`: None, `1`: Right, `2`: Left, `3`: Down, `4`: Up, `5`: Down-Right, `6`: Up-Right, `7`: Down-Left, `8`: Up-Left
+  * Jump (2): `0`: Off, `1`: Jump / Dodge flip
+  * Boost (2): `0`: Off, `1`: Rocket boost
 
 ### B. Observation Space (52-Dimensional Flat Vector)
 * **Space**: `gym.spaces.Box(low=-1.0, high=1.0, shape=(52,), dtype=np.float32)`
