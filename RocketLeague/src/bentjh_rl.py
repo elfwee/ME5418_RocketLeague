@@ -46,9 +46,10 @@ if local_config["rl_id"] not in gym.envs.registry:
         entry_point="src.bentjh_rl:GymEnv",
         max_episode_steps=local_config["max_steps"],
         render_mode="human",
-        render_fps=SIM_HZ, 
-        bot_type="zeros", 
+        render_fps=SIM_HZ,
+        bot_type="zeros",
     )
+
 
 # Define the wrapper to swap 'truncated' for 'terminated'
 class TerminateOnTimeout(gym.Wrapper):
@@ -60,6 +61,7 @@ class TerminateOnTimeout(gym.Wrapper):
             terminated = True
 
         return obs, reward, terminated, truncated, info
+
 
 def get_observation(state: dict) -> np.ndarray:
     """
@@ -126,7 +128,7 @@ def training_viz(sim: Simulation):
 class GymEnv(gym.Env):
     meta_data = {"render_mode": ["human", "terminal"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode: str = "terminal", bot_type:str="zeros"):
+    def __init__(self, render_mode: str = "terminal", bot_type: str = "zeros"):
         super().__init__()
 
         # Setting up simulation
@@ -145,13 +147,13 @@ class GymEnv(gym.Env):
         # Setting up Environment
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(18,), dtype=np.float32)
         # select x-direction, y-direction, jump, and boost
-        self.action_space = gym.spaces.MultiDiscrete([3,3,2,2]) # size = 36
+        self.action_space = gym.spaces.MultiDiscrete([3, 3, 2, 2])  # size = 36
         # select one of 9 possible directions, jump, and boost
         # self.action_space = gym.spaces.MultiDiscrete([9,2,2]) # size = 36
         # press any of 6 buttons (left, right, up, down, jump, boost)
         # self.action_space = gym.spaces.MultiBinary(6) # size = 64
         # has redundant actions e.g. up + down. This makes the probability of choosing a valid action lower
-        self.reward_range = (-1,1)
+        self.reward_range = (-1, 1)
 
     def calculate_reward(self, state):
         # score reward = [-1, 1]
@@ -180,27 +182,27 @@ class GymEnv(gym.Env):
         self.sim.reset(reset_scores=True)
         self.observed_state = get_observation(self.sim.get_state())
         self.render()
-        return self.observed_state, {} #
+        return self.observed_state, {}  #
+
+    def action_to_car_action(self, action):
+        x, y, jump, boost = action
+        dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[x]  # 0: no change, 1: right, 2:left
+        dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[y]  # 0: no change, 1: up, 2: down
+        jump = {0: False, 1: True}[jump]  # 0:no jump, 1: jump
+        boost = {0: False, 1: True}[boost]  # 0:no boost, 1: boost
+        return CarAction(dir_x=dir_x, dir_y=dir_y, jump=jump, boost=boost).clamp()
 
     def step(self, action):
-        """
-        """
+        """ """
         if not self.is_open:
             return self.observed_state, 0.0, False, True, {"is_success": False}
 
         # Apply Action
-        x, y, jump, boost = action
-        # x,y = [0,1,2] where 2 is going left or going down
-        # jump, boost = [0,1]
-        if x == 2:
-            x = -1 #left
-        if y == 2:
-            y = -1 #down
-        car_action = CarAction(dir_x=float(x), dir_y=float(y), jump=bool(jump), boost=bool(boost)).clamp()
+        car_action = self.action_to_car_action(action)
 
         # Updating State
         self.sim.step(car_action, 1.0 / SIM_HZ)
-        self.step_count+=1
+        self.step_count += 1
         state = self.sim.get_state()
         self.observed_state = get_observation(state)
 
@@ -208,7 +210,7 @@ class GymEnv(gym.Env):
         terminated = self.check_terminated(state)
         info = {"is_success": True}
         if terminated:
-            info["goal_scored":self.step_count]
+            info["goal_scored" : self.step_count]
         truncated = not self.is_open
 
         if self.render_mode == "human":
@@ -253,11 +255,14 @@ class GymEnv(gym.Env):
             pygame.display.quit()
             pygame.quit()
 
+
 def check_environment():
     from gymnasium.utils.env_checker import check_env
-    gym_env = gym.make(id=local_config["rl_id"], render_mode=None, disable_env_checker = True)
+
+    gym_env = gym.make(id=local_config["rl_id"], render_mode=None, disable_env_checker=True)
     check_env(gym_env.unwrapped)
     print("Environment check passed. gym.make successful")
+
 
 def train_headless():
     """Run headless simulation loop for automated benchmark or verification."""
@@ -267,6 +272,12 @@ def train_headless():
         bot_type = "zeros"
     # Create Gym Environment
     gym_env = gym.make(id=local_config["rl_id"])
+
+    # Affinely (linearly) rescales a Box action space of the environment to within the range of [min_action, max_action].
+    # gym_env = gym.wrappers.RescaleAction(gym_env, min_action=-1.0, max_action=1.0)
+
+    # Normalises observation, rewards to make training more stable
+    # gym_env = VecNormalise(gym_env, norm_obs = True, norm_reward  = True, clip_reward = 10)
     print("OBSERVATION SPACE:")
     observed_state, info = gym_env.reset()
     # print(observed_state)
@@ -276,19 +287,18 @@ def train_headless():
 
     # Using Stable Baseline PPO model
     model = PPO(policy="MultiInputPolicy", env=gym_env, device="cuda", verbose=1)
-    gym_env.reset()
+    observed_state, info = gym_env.reset()
     total_reward = 0
     while gym_env.unwrapped.isopen:
         action = gym_env.action_space.sample()
         # print(action)
         observed_state, reward, terminated, truncated, info = gym_env.step(action)
-        total_reward+=reward
+        total_reward += reward
         # print(observed_state)
         if not gym_env.unwrapped.isopen():
             break
         if terminated or truncated:
             print(f"Last Action:\n{action}\nRollout Reward:{total_reward}")
-
 
     model.save(f"PPO-{local_config['rl_id']}")
     print("Headless simulation benchmark completed successfully!")
