@@ -1,12 +1,12 @@
 """Pygame renderer providing 2D graphics, vector indicators, and Octane car visuals."""
 import math
-from typing import Tuple, List
+from typing import Tuple
 import pygame
 from src.config import (
-    TOTAL_WIDTH, TOTAL_HEIGHT, PPM,
+    TOTAL_HEIGHT, PPM,
     SCREEN_WIDTH, SCREEN_HEIGHT, WHEEL_RADIUS, GOAL_CORNER_RADIUS,
     CAR_SCALE,
-    COLOR_BG, COLOR_ARENA_BG, COLOR_FLOOR, COLOR_WALL, COLOR_CEILING,
+    COLOR_BG, COLOR_WALL,
     COLOR_GOAL_ORANGE, COLOR_GOAL_BLUE,
     COLOR_CAR_BLUE, COLOR_CAR_DARK, COLOR_CAR_ACCENT,
     COLOR_CAR_ORANGE, COLOR_CAR_ORANGE_DARK, COLOR_CAR_ORANGE_ACCENT,

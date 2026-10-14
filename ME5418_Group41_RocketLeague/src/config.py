@@ -34,7 +34,6 @@ SCREEN_HEIGHT = int(TOTAL_HEIGHT * PPM)       # 720 px
 # --- Physics Timing ---
 SIM_HZ = 60                # Frame rate
 PHYSICS_SUBSTEPS = 4       # Physics solver sub-steps per frame (240 Hz effective)
-FIXED_DT = 1.0 / (SIM_HZ * PHYSICS_SUBSTEPS)
 GRAVITY = (0.0, -28.0)     # Heavier downward gravity in m/s^2 for responsive falling
 GRAVITY_MAG = abs(GRAVITY[1])
 SOLVER_ITERATIONS = 14     # Pymunk constraint solver iterations (contact accuracy)
@@ -75,7 +74,6 @@ CAR_MAX_GROUND_SPEED = 14.5# Top ground speed (m/s)
 CAR_WHEELIE_SPEED_FACTOR = 0.10 # Speed multiplier when in wheelie/stoppie (10% of normal ground speed)
 CAR_WHEELIE_PITCH_THRESHOLD = 0.25 # Sine of pitch angle (~14.5 deg) required to trigger wheelie speed cap
 WHEEL_MIN_NORMAL_DOT = 0.15# Reject ray hits whose normal is not roughly under the car
-SURFACE_ALIGN_MIN_DOT = 0.20  # Only auto-align to surfaces no steeper than ~78 degrees
 
 # Equilibrium suspension compression once weight and downforce are both carried; used to
 # spawn the car exactly at its settled ride height instead of dropping it in.
@@ -150,10 +148,7 @@ COLLISION_GOAL_SENSOR = 5
 
 # --- Color Palette (RGB) ---
 COLOR_BG = (15, 18, 25)
-COLOR_ARENA_BG = (22, 27, 38)
-COLOR_FLOOR = (45, 55, 72)
 COLOR_WALL = (90, 105, 128)
-COLOR_CEILING = (45, 55, 72)
 COLOR_GOAL_ORANGE = (237, 137, 54)
 COLOR_GOAL_BLUE = (66, 153, 225)
 COLOR_CAR_BLUE = (49, 130, 206)
@@ -186,6 +181,4 @@ COLOR_RAYCAST_HIT = (255, 255, 255)      # White hit point marker
 # --- Opponent Car & Bot Settings ---
 ENABLE_ORANGE_CAR = True                # Default flag: whether Orange car is present (enabled by default in main.py)
 ORANGE_IS_BOT = True                     # Default flag: whether Orange car is AI-controlled
-BOT_DODGE_STRIKE_DIST = 2.2              # Distance to ball to trigger dodge flip strike (m)
 BOT_AERIAL_MIN_BOOST = 15.0              # Minimum boost required to commit to aerial launch
-BOT_DEFENSE_ZONE_X = 22.0                # X coordinate dividing midfield from defense (m)

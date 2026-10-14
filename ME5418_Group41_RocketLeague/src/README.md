@@ -55,8 +55,8 @@ The environment supports two action space formats:
 2. **Flattened Discrete** (`discrete_action=True`):
    * `Discrete(36)`: Single integer in range $[0, 35]$ factorized as $\text{action} = 4 \times \text{dir} + 2 \times \text{jump} + \text{boost}$.
 
-### B. Observation Space (58-Dimensional Flat Vector)
-* **Space**: `gym.spaces.Box(low=-1.0, high=1.0, shape=(58,), dtype=np.float32)`
+### B. Observation Space (52-Dimensional Flat Vector)
+* **Space**: `gym.spaces.Box(low=-1.0, high=1.0, shape=(52,), dtype=np.float32)`
 * Returned via `sim.get_state_norm(as_flat_array=True)`:
 
 | Index Range | Category | Dimension | Normalized Features |
@@ -69,17 +69,18 @@ The environment supports two action space formats:
 | `[8:9]` | Wheel Contacts | 1 | $\text{contact\_count} / 2.0 \in \{0.0, 0.5, 1.0\}$ |
 | `[9:10]` | Jump 2 Available | 1 | $1.0$ if ready else $0.0$ |
 | `[10:11]` | Dodge Flip Active | 1 | $1.0$ if flipping else $0.0$ |
-| `[11:12]` | Boost Recovery Active | 1 | $1.0$ if grounded & not boosting else $0.0$ |
-| `[12:20]` | 8 Radial Boundary Raycasts | 8 | Normalized distance to arena walls at $45^\circ$ intervals |
-| `[20:22]` | Ball Position | 2 | $(x - x_c)/w_h, (y - y_c)/h_h$ |
-| `[22:24]` | Ball Velocity | 2 | $v_x / 38.0, v_y / 38.0$ |
-| `[24:25]` | Ball Angular Velocity | 1 | $\omega / 30.0$ |
-| `[25:28]` | Ego-to-Ball Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
-| `[28:31]` | Ball-to-Opponent Goal Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
-| `[31:34]` | Ball-to-Own Goal Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
-| `[34:35]` | Opponent Present Flag | 1 | $1.0$ if opponent enabled else $0.0$ |
-| `[35:55]` | Opponent Car State | 20 | Symmetrical 20 features for Orange car (or zeros if absent) |
-| `[55:58]` | Opponent-to-Ball Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction (or zeros) |
+| `[11:12]` | Turtling Active | 1 | $1.0$ if roof-inverted else $0.0$ |
+| `[12:13]` | Boost Recovery Active | 1 | $1.0$ if grounded & not boosting else $0.0$ |
+| `[13:21]` | 8 Radial Boundary Raycasts | 8 | Normalized distance to arena walls at $45^\circ$ intervals |
+| `[21:23]` | Ball Position | 2 | $(x - x_c)/w_h, (y - y_c)/h_h$ |
+| `[23:25]` | Ball Velocity | 2 | $v_x / 38.0, v_y / 38.0$ |
+| `[25:26]` | Ball Angular Velocity | 1 | $\omega / 30.0$ |
+| `[26:29]` | Ego-to-Ball Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
+| `[29:32]` | Ball-to-Opponent Goal Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
+| `[32:35]` | Ball-to-Own Goal Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction $(\hat{d}_x, \hat{d}_y)$ |
+| `[35:36]` | Opponent Present Flag | 1 | $1.0$ if opponent enabled else $0.0$ |
+| `[36:49]` | Opponent Car State | 13 | Position (2), velocity (2), orientation (2), angular velocity (1), boost (1), wheel contacts (1), jump 2 (1), flipping (1), turtling (1), boosting (1) |
+| `[49:52]` | Opponent-to-Ball Relation | 3 | Normalized magnitude $[0, 1]$ and 2D unit direction (or zeros) |
 
 ### C. Reward Function Formulation
 * **Goal Scoring**:

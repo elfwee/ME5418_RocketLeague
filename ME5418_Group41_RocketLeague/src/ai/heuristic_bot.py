@@ -1,10 +1,10 @@
 """Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
 import math
-from typing import Tuple, Optional
+from typing import Tuple
 from src.core.actions import CarAction
 from src.config import (
-    CAR_MAX_GROUND_SPEED, CAR_MAX_AIR_SPEED, GRAVITY_MAG,
-    BOT_DODGE_STRIKE_DIST, BOT_AERIAL_MIN_BOOST, BOT_DEFENSE_ZONE_X
+    CAR_MAX_GROUND_SPEED, GRAVITY_MAG,
+    BOT_AERIAL_MIN_BOOST
 )
 
 

@@ -34,7 +34,7 @@ class RocketLeagueEnv(gym.Env):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
 
         self.render_mode = render_mode
-        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"))
+        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
         self.ball_prev = None
         self.input_prev = None
         self.isopen = True
@@ -59,7 +59,8 @@ class RocketLeagueEnv(gym.Env):
             random.seed(seed)
             np.random.seed(seed)
 
-        self.sim.reset(reset_scores=True)
+        random_spawn = options.get("random_spawn", None) if options else None
+        self.sim.reset(reset_scores=True, random_spawn=random_spawn)
         self.ball_prev = None
         self.input_prev = None
         self.render()
@@ -148,7 +149,7 @@ def my_check_env():
     print("Environment check passed successfully!")
 
 if __name__ == "__main__":
-    # my_check_env()
+    my_check_env()
     bot_type = "heuristic_bot" if ENABLE_ORANGE_CAR else "none"
     env = gym.make("rocket-league-v1", render_mode="human", bot_type=bot_type)
 

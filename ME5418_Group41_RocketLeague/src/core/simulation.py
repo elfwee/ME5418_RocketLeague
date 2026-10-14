@@ -1,11 +1,11 @@
 """Headless simulation manager orchestrating Pymunk space, entities, and collisions."""
 import math
 import random
-from typing import Dict, Any, Optional, Tuple, List, Union
+from typing import Dict, Any, Optional, Tuple
 import pymunk
 from src.config import (
     FIELD_WIDTH, FIELD_HEIGHT, MARGIN_X, MARGIN_Y,
-    TOTAL_WIDTH, TOTAL_HEIGHT, ARENA_DIAGONAL,
+    ARENA_DIAGONAL,
     CENTER_X, CENTER_Y, HALF_WIDTH, HALF_HEIGHT,
     BALL_MAX_SPEED, BALL_MAX_SPIN,
     CAR_MAX_SPEED, CAR_MAX_ANGULAR_SPEED, CAR_MAX_BOOST,
@@ -53,7 +53,7 @@ def _vector_relation(p_from: Tuple[float, float], p_to: Tuple[float, float]) -> 
 class Simulation:
     """Headless 2D physics simulation environment for Rocket League."""
 
-    def __init__(self, enable_orange: bool = ENABLE_ORANGE_CAR, orange_is_bot: bool = ORANGE_IS_BOT, random_spawn: bool = True):
+    def __init__(self, enable_orange: bool = ENABLE_ORANGE_CAR, orange_is_bot: bool = ORANGE_IS_BOT, random_spawn: bool = False):
         self.space = pymunk.Space()
         self.space.gravity = GRAVITY
         # No global damping: drag belongs to the entities that model it, otherwise it
@@ -697,8 +697,6 @@ class Simulation:
                 co["is_flipping"],
                 co["is_turtling"],
                 co["is_boosting"],
-                # co["is_boost_recovery"],
-                # *co["boundary_distances"] # TODO: Maybe Redundant, but keeping for symmetry
             ])
             opp_rel = rel.get("opponent_to_ball")
             if opp_rel is not None:

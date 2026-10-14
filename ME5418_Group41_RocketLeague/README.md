@@ -9,7 +9,7 @@ A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-b
 * **Physics Engine**: Deterministic $240\text{ Hz}$ physics solver ($60\text{ Hz} \times 4\text{ sub-steps}$) powered by Pymunk (Chipmunk2D).
 * **Vehicle Dynamics**: Raycast spring-damper suspension, Coulomb tire traction, 2D vector steering, two-stage jump-dodge ballistics, rocket boost aerodynamics, and turtle auto-recovery.
 * **Opponent AI**: Rule-based Hierarchical Zone & Intercept State Machine (HZISM) acting as an adversarial baseline.
-* **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with continuous/box observation space (58 normalized features) and factored action spaces.
+* **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with continuous/box observation space (52 normalized features) and factored action spaces.
 
 ---
 
