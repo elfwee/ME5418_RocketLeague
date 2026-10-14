@@ -96,6 +96,8 @@ class RocketLeagueEnv(gym.Env):
             self.ball_prev = ball_x
         delta_x = ball_x - self.ball_prev
         if abs(delta_x) > 0.0001:
+            # Non-linear weighting: x_factor exponentially amplifies rewards near the goal mouth (|ball_x| -> 1);
+            # y_factor attenuates ground-rolling balls (ball_y <= -0.55) to reward elevated aerial trajectories.
             x_factor = np.exp(1 / (1.2 - ball_x ** 2))
             y_factor = (1 - abs(ball_y)) ** 2 if ball_y > -0.55 else 0.0
             progress = delta_x * x_factor * y_factor

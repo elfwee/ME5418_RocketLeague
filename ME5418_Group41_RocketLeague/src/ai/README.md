@@ -48,7 +48,7 @@ The automated Orange car operates on an asynchronous finite state machine struct
 ### A. `KICKOFF`
 * **Trigger**: Activated immediately upon match start or after a goal reset.
 * **Behavior**: Commits full forward throttle with continuous rocket boost directly toward the midfield kickoff ball.
-* **Kickoff Power Strike**: When closing within $3.2\text{ m}$ of the ball, the bot executes an explosive forward dodge flip to maximize initial momentum transfer toward the opponent's half.
+* **Kickoff Power Strike**: When closing within $2.9\text{ m}$ of the ball, the bot executes an explosive forward dodge flip to maximize initial momentum transfer toward the opponent's half.
 
 ### B. `ROTATE_BACK` (Shadow Defense)
 * **Trigger**: Engaged whenever the bot gets caught downfield of the ball ($x_{car} \le x_{ball} - 0.2\text{ m}$).
@@ -77,7 +77,7 @@ The automated Orange car operates on an asynchronous finite state machine struct
 
 * **Dynamic Toggle**: The bot can be enabled or disabled at any time during simulation via:
   ```python
-  sim.set_orange_enabled(enable=True, is_bot=True)
+  sim.set_orange_enabled(enabled=True, is_bot=True)
   ```
   or by pressing the `B` key in interactive mode.
 * **Symmetrical Telemetry**: The bot uses identical input capabilities (`CarAction`: directional vector, jump, boost) and physical parameters as the human / RL player, ensuring a fair, physically grounded adversarial baseline.

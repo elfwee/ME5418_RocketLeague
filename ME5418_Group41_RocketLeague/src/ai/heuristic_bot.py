@@ -41,7 +41,7 @@ class HeuristicBot:
         pred_x = bx + vx * dt_ahead
         pred_y = by + vy * dt_ahead - 0.5 * GRAVITY_MAG * (dt_ahead ** 2)
 
-        # Floor bounce approximation
+        # Floor bounce approximation: inverts penetration below floor scaled by restitution factor e = 0.65
         if pred_y < floor_y:
             pred_y = floor_y + (floor_y - pred_y) * 0.65
 

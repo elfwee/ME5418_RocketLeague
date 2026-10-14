@@ -85,8 +85,8 @@ obs, info = env.reset()
   * Terminates the episode upon goal event.
 * **Dense Intermediate Shaping**:
   * **Ball Progress**: Positively rewards ball displacement toward the opponent's goal scaled by position proximity factors:
-    $$r_{progress} = \Delta x_{ball} \cdot e^{\frac{1}{1.2 - x_{ball}^2}} \cdot (1 - |y_{ball}|)^2$$
-  * **Ball Distance Penalty**: $-0.01 \times \|\vec{p}_{car} - \vec{p}_{ball}\|$
+    $$r_{progress} = \Delta x_{ball} \cdot e^{\frac{1}{1.2 - x_{ball}^2}} \cdot (1 - |y_{ball}|)^2 \quad (\text{for } y_{ball} > -0.55, \text{ else } 0)$$
+  * **Ball Distance Penalty**: $-0.01 \times d_{\text{norm}}(\text{car}, \text{ball})$ where $d_{\text{norm}} \in [0, 1]$ is the normalized relative distance
   * **Time Step Penalty**: $-0.001$ per step
   * **Control Churn Penalty**: $-0.001$ on abrupt changes in commanded direction vector
 

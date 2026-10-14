@@ -91,7 +91,8 @@ class Car:
             (-1.00 * CAR_SCALE, 0.22 * CAR_SCALE)     # Rear spoiler deck
         ]
 
-        # Flipped vertices for facing Left (reversing list maintains CCW winding)
+        # Flipped vertices for facing Left: inverting Y and reversing order combined with
+        # 180-deg body rotation mirrors horizontally while preserving CCW polygon winding.
         self.flipped_chassis_vertices: List[Tuple[float, float]] = [
             (vx, -vy) for vx, vy in reversed(self.base_chassis_vertices)
         ]
@@ -257,6 +258,7 @@ class Car:
         self.chassis_shape.unsafe_set_vertices(self.active_chassis_vertices)
         self.space.reindex_shapes_for_body(self.body)
         if snap:
+            # Reflect orientation across the vertical axis (theta -> pi - theta) and invert spin
             sign = math.copysign(math.pi, self.body.angle if self.body.angle != 0.0 else 1.0)
             self.body.angle = _wrap_angle(sign - self.body.angle)
             self.body.angular_velocity = -self.body.angular_velocity
@@ -421,6 +423,7 @@ class Car:
     def _surface_align_angle(self, normal: Optional[Tuple[float, float]] = None) -> float:
         """Body angle that puts the car's wheels along the surface normal (roof along +normal)."""
         nx, ny = normal if normal is not None else self._ground_normal
+        # Maps surface normal (nx, ny) to target yaw theta so the local roof vector aligns with the normal
         return math.atan2(-self.facing_x * nx, self.facing_x * ny)
 
     def _target_angle(self, action: CarAction) -> Optional[float]:
@@ -492,6 +495,8 @@ class Car:
         if self._flip_active:
             self._flip_timer += dt
             p = min(1.0, self._flip_timer / self._flip_duration)
+            # Half-sine angular velocity profile: integral over [0, T] equals total_spin,
+            # providing smooth zero angular acceleration and velocity at start and finish.
             omega_target = self._flip_total_spin * (math.pi / (2.0 * self._flip_duration)) * math.sin(math.pi * p)
             self.body.angular_velocity = omega_target
             if p >= 1.0:

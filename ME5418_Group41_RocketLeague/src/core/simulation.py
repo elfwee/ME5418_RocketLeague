@@ -196,6 +196,8 @@ class Simulation:
                 (self.arena.x_right - CORNER_RADIUS, self.arena.y_floor + CORNER_RADIUS, 1, -1),
                 (self.arena.x_right - CORNER_RADIUS, self.arena.y_ceil - CORNER_RADIUS, 1, 1),
             )
+            # Corner fillet clearance: (sx, sy) defines the quadrant relative to arc center (cx_c, cy_c).
+            # Points located in that quadrant with distance > max_corner_dist lie in the cut-out corner.
             if any(
                 (bx < cx_c if sx < 0 else bx > cx_c) and
                 (by < cy_c if sy < 0 else by > cy_c) and

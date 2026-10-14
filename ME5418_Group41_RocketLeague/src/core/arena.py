@@ -119,6 +119,7 @@ class Arena:
         # 2. Goal Pocket structure
         self._add_segment((x_line, g_bot), (x_inner, g_bot), elasticity=0.6, friction=0.5)
 
+        # Bottom-back and top-back rounded corners (transitioning horizontal bars to vertical back net)
         bot_arc_start, bot_arc_end = (math.pi * 1.5, math.pi) if direction == -1 else (-math.pi * 0.5, 0.0)
         self._add_arc((x_inner, g_bot + rg), rg, bot_arc_start, bot_arc_end, steps=6, elasticity=0.45, friction=0.5)
 
