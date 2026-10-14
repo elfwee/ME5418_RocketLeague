@@ -63,51 +63,6 @@ class TerminateOnTimeout(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
-def get_observation(state: dict) -> np.ndarray:
-    """
-    Extract pose and twist for:
-        car, car_orange, ball
-
-    Returns:
-        np.ndarray with shape (14,)
-    """
-    obs = []
-
-    for name in ("car", "car_orange", "ball"):
-        obj = state[name]
-
-        # Pose: x, y, theta
-        obs.extend(
-            [
-                obj["position"][0] / FIELD_WIDTH,  # [m]
-                obj["position"][1] / FIELD_HEIGHT,  # [m]
-                obj["angle"] / (np.pi),  # [rad]
-            ]
-        )
-
-        # Twist: vx, vy, omega
-        if "car" in name:
-            obs.extend(
-                [
-                    obj["velocity"][0] / CAR_MAX_SPEED,
-                    obj["velocity"][1] / CAR_MAX_SPEED,
-                    obj["angular_velocity"] / CAR_MAX_ANGULAR_SPEED,
-                ]
-            )
-        elif "ball" in name:
-            obs.extend(
-                [
-                    obj["velocity"][0] / BALL_MAX_SPEED,
-                    obj["velocity"][1] / BALL_MAX_SPEED,
-                    obj["angular_velocity"] / BALL_MAX_SPIN,
-                ]
-            )
-
-    # Score
-    # obs.extend([state["score"]["blue"], state["score"]["orange"]])
-
-    return np.asarray(obs, dtype=np.float32)
-
 
 def training_viz(sim: Simulation):
     """Launch the Pygame interactive sandbox with 2D vector controls and Octane physics."""
@@ -154,6 +109,8 @@ class GymEnv(gym.Env):
         # self.action_space = gym.spaces.MultiBinary(6) # size = 64
         # has redundant actions e.g. up + down. This makes the probability of choosing a valid action lower
         self.reward_range = (-1, 1)
+        self.info = {}
+        # self.observed_state = 
 
     def calculate_reward(self, state):
         # score reward = [-1, 1]
@@ -175,16 +132,7 @@ class GymEnv(gym.Env):
         self.previous_score["orange"] = state["score"]["orange"]
         return terminated
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.previous_score = {"blue": 0, "orange": 0}
-        self.step_count = 0
-        self.sim.reset(reset_scores=True)
-        self.observed_state = get_observation(self.sim.get_state())
-        self.render()
-        return self.observed_state, {}  #
-
-    def action_to_car_action(self, action):
+    def action_to_sim_action(self, action):
         x, y, jump, boost = action
         dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[x]  # 0: no change, 1: right, 2:left
         dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[y]  # 0: no change, 1: up, 2: down
@@ -192,25 +140,87 @@ class GymEnv(gym.Env):
         boost = {0: False, 1: True}[boost]  # 0:no boost, 1: boost
         return CarAction(dir_x=dir_x, dir_y=dir_y, jump=jump, boost=boost).clamp()
 
+    def sim_state_to_observation(self, state: dict) -> np.ndarray:
+        """
+        Extract pose and twist for:
+            car, car_orange, ball
+    
+        Returns:
+            np.ndarray with shape (18,)
+        """
+        obs = []
+    
+        for name in ("car", "car_orange", "ball"):
+            obj = state[name]
+    
+            # Pose: x, y, theta
+            obs.extend(
+                [
+                    obj["position"][0] / FIELD_WIDTH,  # [m]
+                    obj["position"][1] / FIELD_HEIGHT,  # [m]
+                    obj["angle"] / (np.pi),  # [rad]
+                ]
+            )
+    
+            # Twist: vx, vy, omega
+            if "car" in name:
+                obs.extend(
+                    [
+                        obj["velocity"][0] / CAR_MAX_SPEED,
+                        obj["velocity"][1] / CAR_MAX_SPEED,
+                        obj["angular_velocity"] / CAR_MAX_ANGULAR_SPEED,
+                    ]
+                )
+            elif "ball" in name:
+                obs.extend(
+                    [
+                        obj["velocity"][0] / BALL_MAX_SPEED,
+                        obj["velocity"][1] / BALL_MAX_SPEED,
+                        obj["angular_velocity"] / BALL_MAX_SPIN,
+                    ]
+                )
+    
+        # Score
+        # obs.extend([state["score"]["blue"], state["score"]["orange"]])
+    
+        return np.asarray(obs, dtype=np.float32)
+
+
+    def _get_observation(self):
+        return self.observed_state
+
+    def _get_info(self):
+        return self.info
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.previous_score = {"blue": 0, "orange": 0}
+        self.step_count = 0
+        self.sim.reset(reset_scores=True)
+        self.observed_state = get_observation(self.sim.get_state())
+        self.info={}
+        self.render()
+        return self.observed_state, self.info
+
     def step(self, action):
         """ """
         if not self.is_open:
             return self.observed_state, 0.0, False, True, {"is_success": False}
 
         # Apply Action
-        car_action = self.action_to_car_action(action)
+        car_action = self.action_to_sim_action(action)
 
         # Updating State
         self.sim.step(car_action, 1.0 / SIM_HZ)
         self.step_count += 1
         state = self.sim.get_state()
-        self.observed_state = get_observation(state)
+        self.observed_state = self.sim_state_to_observation(state)
 
         reward = self.calculate_reward(state)
         terminated = self.check_terminated(state)
-        info = {"is_success": True}
+        self.info["is_success : True]
         if terminated:
-            info["goal_scored" : self.step_count]
+            self.info["goal_scored" : self.step_count]
         truncated = not self.is_open
 
         if self.render_mode == "human":
