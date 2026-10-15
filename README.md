@@ -17,10 +17,10 @@ A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-b
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
-- 📚 **[System & RL Environment (`src/README.md`)](src/README.md)**: Gymnasium observation/action spaces, reward shaping formulation, telemetry API, and control scheme.
-- ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](src/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
-- 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](src/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
-- 🎨 **[Visualization & HUD Telemetry (`src/visualization/README.md`)](src/visualization/README.md)**: Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and HUD layout.
+- 📚 **[System & RL Environment (`src/README.md`)](./ME5418_Group41_RocketLeague/src/README.md)**: Gymnasium observation/action spaces, reward shaping formulation, telemetry API, and control scheme.
+- ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](./ME5418_Group41_RocketLeague/src/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
+- 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](./ME5418_Group41_RocketLeague/src/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
+- 🎨 **[Visualization & HUD Telemetry (`src/visualization/README.md`)](./ME5418_Group41_RocketLeague/src/visualization/README.md)**: Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and HUD layout.
 
 ---
 
