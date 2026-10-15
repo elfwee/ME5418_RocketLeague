@@ -31,33 +31,37 @@ Detailed technical specifications and mathematical formulations are organized mo
 
 ## 3. Quickstart & Usage
 
-### Step 1: Environment Setup
+### Step 1: Cloning and working directory
+
+```bash
+git clone https://github.com/elfwee/ME5418_RocketLeague.git
+cd ./ME5418_Group41_RocketLeague
+```
+
+### Step 2: Environment Setup
 
 Create and activate the Conda environment using the provided configuration:
 
 ```bash
-cd ./ME5418_Group41_RocketLeague
 conda env create -f environment.yml
 conda activate me5418_projenv
 ```
 
 _(Alternatively, install the core dependencies via pip: `pip install gymnasium pygame pymunk numpy`)_
 
-### Step 2: Run Gym Environment Demo
+### Step 3: Run Gym Environment Demo
 
 Launch sample episodes running under random actions with graphic visualization:
 
 ```bash
-# cd ./ME5418_Group41_RocketLeague
 python demo.py
 ```
 
-### Step 3: Run Interactive Sandbox
+### Step 4: Run Interactive Sandbox
 
 Drive the car manually via keyboard or gamepad against the AI bot:
 
 ```bash
-# cd ./ME5418_Group41_RocketLeague
 python src/main.py
 ```
 
@@ -70,7 +74,7 @@ python src/main.py
     - `R`: Reset Ball & Car to kickoff positions
     - `Escape`: Quit simulation
 
-### Step 4: Run Headless Benchmark
+### Step 5: Run Headless Benchmark
 
 Run automated headless stepping for fast physics verification:
 
