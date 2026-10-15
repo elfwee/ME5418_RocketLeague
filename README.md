@@ -1,6 +1,13 @@
-# ME5418 - Autonomous Rocket League 2D Simulation (Group 41)
+# ME5418_RocketLeague
+
+> Team 41:
+> Lu Jia Yih Jensen, Benjamin Teh Jhen Hing, Wee Fook Choon
+
+---
 
 A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-ball interaction, aerial maneuvering, and reinforcement learning environments inspired by **Rocket League Sideswipe**.
+
+## ![Demo](./demo.gif)
 
 ---
 
@@ -10,8 +17,6 @@ A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-b
 - **Vehicle Dynamics**: Raycast spring-damper suspension, Coulomb tire traction, 2D vector steering, two-stage jump-dodge ballistics, rocket boost aerodynamics, and turtle auto-recovery.
 - **Opponent AI**: Rule-based Hierarchical Zone & Intercept State Machine (HZISM) acting as an adversarial baseline.
 - **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with continuous/box observation space (52 normalized features) and factored action spaces.
-
-## ![Demo](./demo.gif)
 
 ## 2. Architecture & Modular Documentation
 
@@ -43,6 +48,7 @@ _(Alternatively, install the core dependencies via pip: `pip install gymnasium p
 Launch sample episodes running under random actions with graphic visualization:
 
 ```bash
+# cd ./ME5418_Group41_RocketLeague
 python demo.py
 ```
 
@@ -51,6 +57,7 @@ python demo.py
 Drive the car manually via keyboard or gamepad against the AI bot:
 
 ```bash
+# cd ./ME5418_Group41_RocketLeague
 python src/main.py
 ```
 
