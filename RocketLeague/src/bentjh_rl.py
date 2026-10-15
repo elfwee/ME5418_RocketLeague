@@ -113,6 +113,9 @@ class GymEnv(gym.Env):
         # self.observed_state = 
 
     def calculate_reward(self, state):
+        """
+        takes the sate from sim and returns a reward
+        """
         # score reward = [-1, 1]
         score_reward = (state["score"]["blue"] - self.previous_score["blue"]) - (
             state["score"]["orange"] - self.previous_score["orange"]
@@ -122,6 +125,9 @@ class GymEnv(gym.Env):
         return score_reward + time_reward
 
     def check_terminated(self, state):
+        """
+        takes the state from sim and returns True if any goal is scored, otherwise False
+        """
         terminated = False
         if (
             state["score"]["blue"] != self.previous_score["blue"]
@@ -133,6 +139,9 @@ class GymEnv(gym.Env):
         return terminated
 
     def action_to_sim_action(self, action):
+        """
+        takes the action from the environment and returns the CarAction object that defines the controls of the car
+        """
         x, y, jump, boost = action
         dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[x]  # 0: no change, 1: right, 2:left
         dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[y]  # 0: no change, 1: up, 2: down
@@ -142,11 +151,7 @@ class GymEnv(gym.Env):
 
     def sim_state_to_observation(self, state: dict) -> np.ndarray:
         """
-        Extract pose and twist for:
-            car, car_orange, ball
-    
-        Returns:
-            np.ndarray with shape (18,)
+        takes the sim state returns the pose and twist of the car, car_orange and ball as a np.ndarray with shape (18,)
         """
         obs = []
     
