@@ -35,7 +35,7 @@ Detailed technical specifications and mathematical formulations are organized mo
 
 ```bash
 git clone https://github.com/elfwee/ME5418_RocketLeague.git
-cd ./ME5418_Group41_RocketLeague
+cd ./ME5418_RocketLeague/ME5418_Group41_RocketLeague
 ```
 
 ### Step 2: Environment Setup
