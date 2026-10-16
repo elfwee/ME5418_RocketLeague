@@ -1,7 +1,6 @@
 """Action definitions for 2D direction vector and car control."""
 import math
 from dataclasses import dataclass
-from typing import Tuple
 
 
 @dataclass
@@ -38,20 +37,3 @@ class CarAction:
     def target_angle(self) -> float:
         """Target orientation angle in radians corresponding to (dir_x, dir_y)."""
         return math.atan2(self.dir_y, self.dir_x)
-
-    # --- Backward compatibility accessors for older test cases ---
-    @property
-    def throttle(self) -> float:
-        return self.dir_x
-
-    @throttle.setter
-    def throttle(self, val: float):
-        self.dir_x = float(val)
-
-    @property
-    def pitch(self) -> float:
-        return -self.dir_y
-
-    @pitch.setter
-    def pitch(self, val: float):
-        self.dir_y = -float(val)
