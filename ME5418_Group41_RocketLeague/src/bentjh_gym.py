@@ -176,12 +176,15 @@ class RocketLeagueSideSwipeGym(gym.Env):
         obs[3] = state["car"]["velocity"][0] / CAR_MAX_SPEED
         obs[4] = state["car"]["velocity"][1] / CAR_MAX_SPEED
         obs[5] = state["car"]["angular_velocity"] / CAR_MAX_ANGULAR_SPEED
-        print(f"car: [{obs[0]:.1f}, {obs[1]:.1f}, {obs[2]:.1f}], [{obs[3]:.1f}, {obs[4]:.1f}], {obs[5]:.1f}")
+        # print(f"car: [{obs[0]:.1f}, {obs[1]:.1f}, {obs[2]:.1f}], [{obs[3]:.1f}, {obs[4]:.1f}], {obs[5]:.1f}")
         # car_orange
         if self.bot_type != "none":
             obs[6] = state["car_orange"]["position"][0] / (FIELD_WIDTH + 2*GOAL_DEPTH) * 2 - 1
             obs[7] = state["car_orange"]["position"][1] / FIELD_WIDTH * 2 - 1
             obs[8] = state["car_orange"]["angle"] / np.pi
+            obs[8] = obs[8] % 2
+            if 1.0 < abs(obs[8]):
+                obs[8] = obs[8] - 2 * np.sign(obs[8])
             obs[9] = state["car_orange"]["velocity"][0] / CAR_MAX_SPEED
             obs[10] = state["car_orange"]["velocity"][1] /CAR_MAX_SPEED
             obs[11] = state["car_orange"]["angular_velocity"] / CAR_MAX_ANGULAR_SPEED
