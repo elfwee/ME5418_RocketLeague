@@ -198,8 +198,6 @@ class RocketLeagueSideSwipeGym(gym.Env):
 
         #Score
         # obs.extend([state["score"]["blue"], state["score"]["orange"]])
-
-        # TODO observation conversion not returning -1 to 1 conversion
         return np.asarray(obs, dtype=np.float32)
 
     def _get_observation(self):
