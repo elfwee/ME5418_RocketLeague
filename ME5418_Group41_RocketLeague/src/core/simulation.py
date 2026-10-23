@@ -409,18 +409,16 @@ class Simulation:
             "boundary_raycasts": raycasts,
             "boundary_distances": [r["distance"] for r in raycasts]
         }
-        if car is self.car_orange:
-            car_dict["bot_state"] = self.orange_bot.current_state if self.orange_bot else None
         return car_dict
 
     def _compute_relations(self) -> Dict[str, Any]:
         """Compute relational direction and distance vectors between agents, ball, and goals."""
-        opp_team = "orange" if self.car.team == "blue" else "blue"
+        opp_team = "orange" if self.car_blue.team == "blue" else "blue"
         opp_goal_center = self.get_goal_center(opp_team)
-        own_goal_center = self.get_goal_center(self.car.team)
+        own_goal_center = self.get_goal_center(self.car_blue.team)
 
         return {
-            "agent_to_ball": _vector_relation(self.car.position, self.ball.position),
+            "agent_to_ball": _vector_relation(self.car_blue.position, self.ball.position),
             "opponent_to_ball": (
                 _vector_relation(self.car_orange.position, self.ball.position)
                 if self.car_orange is not None else None
@@ -441,7 +439,7 @@ class Simulation:
                 "angular_velocity": self.ball.body.angular_velocity,
                 "angle": self.ball.angle
             },
-            "car": self._extract_car_state(self.car),
+            "car": self._extract_car_state(self.car_blue),
             "relations": self._compute_relations(),
             "score": {
                 "blue": self.score_blue,
@@ -653,4 +651,3 @@ class Simulation:
             vec.extend([0.0] * 16)
 
         return vec
-
