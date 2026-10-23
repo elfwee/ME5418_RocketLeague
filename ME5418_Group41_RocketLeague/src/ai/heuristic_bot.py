@@ -125,7 +125,7 @@ class HeuristicBot:
 
     def compute_action(self, sim) -> CarAction:
         """Generate the control action (steering, throttle, jump, boost) for the bot car."""
-        car = sim.car_orange if self.team == "orange" else sim.car
+        car = sim.car_orange if self.team == "orange" else sim.car_blue
         if car is None:
             return CarAction()
 

@@ -48,7 +48,7 @@ class Renderer:
         self._draw_arena(sim)
         self._draw_boundary_raycasts(sim)
         self._draw_ball(sim)
-        self._draw_car(sim.car)
+        self._draw_car(sim.car_blue)
         if sim.car_orange is not None:
             self._draw_car(sim.car_orange)
         self._draw_vector_indicators(sim)
@@ -275,7 +275,7 @@ class Renderer:
 
     def _draw_vector_indicators(self, sim: Simulation):
         """Draw purple direction input vector and blue heading/velocity arrow for cars."""
-        cars = [sim.car]
+        cars = [sim.car_blue]
         if sim.car_orange is not None:
             cars.append(sim.car_orange)
 
@@ -351,8 +351,8 @@ class Renderer:
 
         # Orange Bot Status Pill (Top Center, below scoreboard)
         if sim.enable_orange and sim.car_orange is not None:
-            state_label = sim.orange_bot.current_state if sim.orange_bot else "ACTIVE"
-            bot_text = f"ORANGE BOT: {state_label}"
+            # bot_text = f"ORANGE BOT: {state_label}"
+            bot_text = "ORANGE BOT: ON"
             bot_col = COLOR_CAR_ORANGE
         else:
             bot_text = "ORANGE BOT: OFF"
@@ -390,7 +390,7 @@ class Renderer:
         self.screen.blit(r_txt, (20, y_offset + 40))
 
         # --- Top-Right Car Telemetry ---
-        car = sim.car
+        car = sim.car_blue
         speed_kmh = car.body.velocity.length * 3.6
         pitch_deg = abs(math.degrees(math.atan2(car.forward_vector[1], abs(car.forward_vector[0]))))
         if car.both_wheels_grounded:

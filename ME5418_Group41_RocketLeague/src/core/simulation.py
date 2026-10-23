@@ -20,7 +20,6 @@ from src.core.actions import CarAction
 from src.core.arena import Arena
 from src.core.ball import Ball
 from src.core.car import Car
-from src.ai.heuristic_bot import HeuristicBot
 
 
 def _clamp(val: float, low: float, high: float) -> float:
@@ -82,47 +81,39 @@ class Simulation:
         self.ball = Ball(self.space, x=self.center_x, y=self.ball_spawn_y)
         # 2. Blue Car spawns on its side at initial kickoff position
         init_x, init_y, init_ang, init_fac = self.get_spawn_position("blue")
-        self.car = Car(self.space, x=init_x, y=init_y, angle=init_ang, team="blue")
-        self.car.reset(init_x, init_y, angle=init_ang, facing_x=init_fac)
+        self.car_blue = Car(self.space, x=init_x, y=init_y, angle=init_ang, team="blue")
+        self.car_blue.reset(init_x, init_y, angle=init_ang, facing_x=init_fac)
 
         # 3. Orange Car and AI Bot (optional, toggleable)
         self.enable_orange: bool = enable_orange
-        self.orange_is_bot: bool = orange_is_bot
         self.car_orange: Optional[Car] = None
-        self.orange_bot: Optional[HeuristicBot] = None
 
         if self.enable_orange:
             ox, oy, oang, ofac = self.get_spawn_position("orange")
             self.car_orange = Car(self.space, x=ox, y=oy, angle=oang, team="orange")
             self.car_orange.reset(ox, oy, angle=oang, facing_x=ofac)
-            if self.orange_is_bot:
-                self.orange_bot = HeuristicBot(team="orange")
 
         self._spawn_index += 1
         self._setup_collision_handlers()
         if self.random_spawn:
             self.reset(reset_scores=True, random_spawn=True)
 
-    def set_orange_enabled(self, enabled: bool, is_bot: bool = True):
+    def set_orange_enabled(self, enabled: bool):
         """Enable or disable the Orange opponent car and AI bot dynamically."""
         if enabled == self.enable_orange:
             return
 
         self.enable_orange = enabled
-        self.orange_is_bot = is_bot
 
         if enabled:
             if self.car_orange is None:
                 ox, oy, oang, ofac = self.get_spawn_position("orange")
                 self.car_orange = Car(self.space, x=ox, y=oy, angle=oang, team="orange")
                 self.car_orange.reset(ox, oy, angle=oang, facing_x=ofac)
-            if self.orange_is_bot and self.orange_bot is None:
-                self.orange_bot = HeuristicBot(team="orange")
         else:
             if self.car_orange is not None:
                 self.space.remove(self.car_orange.chassis_shape, self.car_orange.body)
                 self.car_orange = None
-                self.orange_bot = None
 
     @property
     def spawn_y(self) -> float:
@@ -291,7 +282,7 @@ class Simulation:
 
         return None
 
-    def step(self, action: CarAction, dt: float = 1.0 / SIM_HZ, action_orange: Optional[CarAction] = None):
+    def step(self, action_blue: CarAction = CarAction, action_orange: CarAction = CarAction, dt: float = 1.0 / SIM_HZ):
         """Advance the physics simulation by dt using sub-stepping for stability."""
         if self.goal_scored_this_step is not None:
             # Previous frame was a goal: reset touch tracking for the new kickoff round
@@ -299,14 +290,11 @@ class Simulation:
 
         self.goal_scored_this_step = None
 
-        if self.car_orange is not None and action_orange is None and self.orange_bot is not None:
-            action_orange = self.orange_bot.compute_action(self)
-
         sub_dt = dt / PHYSICS_SUBSTEPS
         for _ in range(PHYSICS_SUBSTEPS):
-            self.car.update(action, sub_dt)
+            self.car_blue.update(action_blue, sub_dt)
             if self.car_orange is not None:
-                self.car_orange.update(action_orange or CarAction(), sub_dt)
+                self.car_orange.update(action_orange, sub_dt)
             self.ball.apply_aerodynamics(sub_dt)
             self.space.step(sub_dt)
 
@@ -315,7 +303,7 @@ class Simulation:
         self.match_time += dt
 
         # Clear boundary raycast cache for the new frame
-        self.car.clear_raycast_cache()
+        self.car_blue.clear_raycast_cache()
         if self.car_orange is not None:
             self.car_orange.clear_raycast_cache()
 
@@ -370,7 +358,7 @@ class Simulation:
             else:
                 x, y, angle, facing = spawn_pos
 
-            self.car.reset(x, y, angle=angle, facing_x=facing)
+            self.car_blue.reset(x, y, angle=angle, facing_x=facing)
 
             # 3. Orange Car spawns at kickoff position
             if self.car_orange is not None:
@@ -382,10 +370,6 @@ class Simulation:
                     oang = math.pi
                     ofacing = -1
                 self.car_orange.reset(ox, oy, angle=oang, facing_x=ofacing)
-
-        # Reset bot if active
-        if self.orange_bot is not None:
-            self.orange_bot.reset()
 
         # Advance kickoff spawn index for the next kickoff round
         self._spawn_index += 1
