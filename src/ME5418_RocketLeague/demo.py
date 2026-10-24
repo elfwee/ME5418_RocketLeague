@@ -2,13 +2,13 @@
 ME5418 Project Milestone 1 - Rocket League Gym Environment Demo
 Runs sample episodes under a random policy with graphic visualization.
 """
-import os
-import sys
+# import os
+# import sys
 
 # Ensure src can be imported directly
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.rocket_league_env import RocketLeagueEnv
+from ME5418_RocketLeague.gym_environment.rocket_league_env import RocketLeagueEnv
 
 
 def run_demo(episodes: int = 3, bot: bool = True):

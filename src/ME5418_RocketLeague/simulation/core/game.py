@@ -1,18 +1,17 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
-import sys
-import os
+# import sys
+# import os
 
 # Ensure repository root is on sys.path when invoked directly
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pygame
-from src.config import (
+from ME5418_RocketLeague.config.sim_config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 )
-from src.core.actions import CarAction
-from src.core.control import CarControl
-from src.core.simulation import Simulation
-from src.visualization.renderer import Renderer
+from ME5418_RocketLeague.simulation.core.control import CarControl
+from ME5418_RocketLeague.simulation.core.simulation import Simulation
+from ME5418_RocketLeague.visualization.renderer import Renderer
 
 class Game():
     def __init__(self):
@@ -88,6 +87,52 @@ class Game():
 
         print("Headless simulation benchmark completed successfully!")
 
+    def run_demo(self):
+        """Run visualised game"""
+        pygame.init()
+        pygame.display.set_caption("Rocket League Sideswipe 2D - Suspension Physics Sandbox")
+        screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        clock = pygame.time.Clock()
+        renderer = Renderer(screen)
+
+        sim = Simulation(enable_orange=True)
+        orange_control = CarControl(control_type="level3", team="orange", sim=sim)
+        blue_control = CarControl(control_type="level3", team="blue", sim=sim)
+
+        running = True
+        while running:
+            dt = 1.0 / SIM_HZ
+
+            # --- Event Handling ---
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_r:
+                        sim.reset()
+                    elif event.key == pygame.K_b:
+                        # Toggle Orange bot on/off
+                        sim.set_orange_enabled(not sim.enable_orange)
+                    elif event.key == pygame.K_l:
+                        # Toggle 45-degree boundary raycasts on/off
+                        renderer.show_raycasts = not renderer.show_raycasts
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        renderer.handle_click(event.pos)
+
+            # --- Simulation Step ---
+            sim.step(action_blue=blue_control.get_action(), 
+                     action_orange=orange_control.get_action(),
+                     dt=dt)
+
+            # --- Render ---
+            renderer.render(sim)
+            pygame.display.flip()
+            clock.tick(SIM_HZ)
+
+        pygame.quit()
 
 if __name__ == '__main__':
     game = Game

@@ -12,7 +12,7 @@ from typing import List, Optional, Tuple, Dict, Any
 
 import pymunk
 
-from src.config import (
+from ME5418_RocketLeague.config.sim_config import (
     CAR_SCALE, CAR_WIDTH, CAR_HEIGHT, CAR_MASS,
     CHASSIS_FRICTION, CHASSIS_ELASTICITY,
     WHEEL_AXLE_Y, WHEEL_REAR_X, WHEEL_FRONT_X,
@@ -38,7 +38,7 @@ from src.config import (
     COLLISION_CAR_BODY, COLLISION_ARENA,
     GRAVITY_MAG,
 )
-from src.core.actions import CarAction
+from ME5418_RocketLeague.simulation.core.actions import CarAction
 
 
 def _clamp(value: float, low: float, high: float) -> float:

@@ -1,7 +1,8 @@
 import pygame
-from src.core.actions import CarAction
-from src.ai.heuristic_bot import HeuristicBot
-from src.core.simulation import Simulation
+import numpy as np
+from ME5418_RocketLeague.simulation.core.actions import CarAction
+from ME5418_RocketLeague.ai.heuristic_bot import HeuristicBot
+from ME5418_RocketLeague.simulation.core.simulation import Simulation
 from typing import Dict, Any, Optional, Tuple
 
 class CarControl():
@@ -21,13 +22,12 @@ class CarControl():
         self.team = team
 
     def get_action(self):
+        action = CarAction()
         if self.control_type == "none":
-            action = CarAction()
-            return action
+            pass
 
         elif self.control_type == "human":
             # gets keyboard input into CarAction
-            action = CarAction()
             keys = pygame.key.get_pressed()
 
             dir_x = 0.0
@@ -54,11 +54,19 @@ class CarControl():
                 keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or
                 keys[pygame.K_o] or keys[pygame.K_j]
             )
-            return action.clamp()
+
+        elif self.control_type == "random":
+            if self.sim.match_time % 0.5 < 0.001:
+                self.random_action = CarAction(dir_x={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)], 
+                                   dir_y={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)],
+                                   jump={0: False, 1: True}[np.random.randint(2)],
+                                   boost={0: False, 1: True}[np.random.randint(2)])
+            action = self.random_action
 
         elif self.control_type == "level3":
             self.bot = HeuristicBot(team=self.team)
             action = self.bot.compute_action(self.sim)
+
         return action
 
     def reset(self):

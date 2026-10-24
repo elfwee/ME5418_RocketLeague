@@ -1,8 +1,8 @@
 """Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
 import math
 from typing import Tuple
-from src.core.actions import CarAction
-from src.config import (
+from ME5418_RocketLeague.simulation.core.actions import CarAction
+from ME5418_RocketLeague.config.sim_config import (
     CAR_MAX_GROUND_SPEED, GRAVITY_MAG,
     BOT_AERIAL_MIN_BOOST
 )
@@ -125,7 +125,7 @@ class HeuristicBot:
 
     def compute_action(self, sim) -> CarAction:
         """Generate the control action (steering, throttle, jump, boost) for the bot car."""
-        car = sim.car_orange if self.team == "orange" else sim.car
+        car = sim.car_orange if self.team == "orange" else sim.car_blue
         if car is None:
             return CarAction()
 

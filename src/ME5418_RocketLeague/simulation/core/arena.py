@@ -2,7 +2,7 @@
 import math
 from typing import List, Tuple
 import pymunk
-from src.config import (
+from ME5418_RocketLeague.config.sim_config import (
     FIELD_WIDTH, FIELD_HEIGHT, CORNER_RADIUS,
     GOAL_DEPTH, GOAL_CORNER_RADIUS, GOAL_BOTTOM_Y, GOAL_TOP_Y,
     MARGIN_X, MARGIN_Y, ARENA_SEGMENT_RADIUS,

@@ -2,7 +2,7 @@
 import math
 from typing import Tuple
 import pygame
-from src.config import (
+from ME5418_RocketLeague.config.sim_config import (
     TOTAL_HEIGHT, PPM,
     SCREEN_WIDTH, SCREEN_HEIGHT, WHEEL_RADIUS, GOAL_CORNER_RADIUS,
     CAR_SCALE,
@@ -17,8 +17,8 @@ from src.config import (
     COLOR_RAYCAST_BLUE, COLOR_RAYCAST_ORANGE, COLOR_RAYCAST_HIT,
     COLOR_TEXT, COLOR_UI_BAR_BG, COLOR_BOOST_BAR
 )
-from src.core.car import Car
-from src.core.simulation import Simulation
+from ME5418_RocketLeague.simulation.core.car import Car
+from ME5418_RocketLeague.simulation.core.simulation import Simulation
 
 
 class Renderer:
