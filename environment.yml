@@ -1,4 +1,4 @@
-name: me5418_projenv
+came: me5418_projenv
 channels:
   - conda-forge
   - defaults
