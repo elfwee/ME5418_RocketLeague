@@ -7,7 +7,7 @@
 
 A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-ball interaction, aerial maneuvering, and reinforcement learning environments inspired by **Rocket League Sideswipe**.
 
-## ![Demo](./demo.gif)
+## ![Demo](./assets/demo.gif)
 
 ---
 
