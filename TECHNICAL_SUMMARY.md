@@ -39,7 +39,7 @@ The project represents a generational evolution from **V1** (a top-down planar s
 
 The codebase is organized modularly under `src/`. For ease of navigation and specialized context, each subsystem includes its own comprehensive technical documentation:
 
-* 📚 **[System & RL Environment (`src/README.md`)](ME5418_Group41_RocketLeague/src/README.md)**: Gymnasium environment API, 58-dimensional flat observation space, action spaces, reward shaping formulation, and control scheme.
+* 📚 **[System & RL Environment (`src/README.md`)](ME5418_Group41_RocketLeague/src/README.md)**: Gymnasium environment API, 52-dimensional flat observation space, action spaces, reward shaping formulation, and control scheme.
 * ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](ME5418_Group41_RocketLeague/src/core/README.md)**: 240 Hz sub-stepping solver, raycast spring-damper suspension, Coulomb traction, attitude control, two-stage jump-dodge ballistics, rocket boost, ball aerodynamics, and elevated goal arena geometry.
 * 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](ME5418_Group41_RocketLeague/src/ai/README.md)**: Hierarchical Zone & Intercept State Machine (HZISM), kickoff tactics, shadow defense, zone goalie routine, and aerial save intercepts.
 * 🎨 **[Visualization & HUD Telemetry (`src/visualization/README.md`)](ME5418_Group41_RocketLeague/src/visualization/README.md)**: 40 PPM Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and live telemetry HUD.
@@ -374,7 +374,7 @@ Calling `sim.get_state_norm()` provides fully scaled observations optimized for 
 | **Opponent present (`opponent_present`)** | $1.0$ if opponent exists else $0.0$ | $\{0.0, 1.0\}$ |
 
 #### Invariant Flat Observation Vector (`as_flat_array=True`):
-Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list of **58 floats** suitable for standard `gym.spaces.Box(low=-1.0, high=1.0, shape=(58,), dtype=np.float32)`:
+Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list of **52 floats** suitable for standard `gym.spaces.Box(low=-1.0, high=1.0, shape=(52,), dtype=np.float32)`:
 1. **Ego Car (20 floats)**: `[pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts, has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]`
 2. **Ball (5 floats)**: `[pos_x, pos_y, vel_x, vel_y, ang_vel]`
 3. **Ego Relations (9 floats)**:
@@ -387,7 +387,7 @@ Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list 
    - If no opponent: strictly zero-filled with 23 zeros (`[0.0] * 23`).
 
 ```python
-obs_vector = sim.get_state_norm(as_flat_array=True)  # Strictly fixed 58 floats in all modes
+obs_vector = sim.get_state_norm(as_flat_array=True)  # Strictly fixed 52 floats in all modes
 ```
 
 ---

@@ -29,18 +29,23 @@ DIRECTIONS = [(0, 0), (1, 0), (-1, 0), (0, -1), (0, 1), (1, -1), (1, 1), (-1, -1
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode=None, bot_type="none"):
+    def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
         if bot_type not in ("none", "heuristic_bot"):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
 
         self.render_mode = render_mode
         self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
         self.ball_prev = None
+        self.dist_prev = None
         self.input_prev = None
         self.isopen = True
+        self.discrete_action = discrete_action
 
         # direction (9), jump (2), boost (2) = 36 discrete actions
-        self.action_space = gym.spaces.MultiDiscrete([9, 2, 2])
+        if self.discrete_action:
+            self.action_space = gym.spaces.Discrete(36)
+        else:
+            self.action_space = gym.spaces.MultiDiscrete([9, 2, 2])
         obs_dim = len(self.sim.get_state_norm(as_flat_array=True))
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
@@ -62,12 +67,18 @@ class RocketLeagueEnv(gym.Env):
         random_spawn = options.get("random_spawn", None) if options else None
         self.sim.reset(reset_scores=True, random_spawn=random_spawn)
         self.ball_prev = None
+        self.dist_prev = None
         self.input_prev = None
         self.render()
         return self._get_obs(), {}
 
     def step(self, action):
-        direction, jump, boost = action
+        if self.discrete_action:
+            direction = action // 4
+            jump = (action % 4) // 2
+            boost = action % 2
+        else:
+            direction, jump, boost = action
         dir_x, dir_y = DIRECTIONS[direction]
         car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
 
@@ -83,6 +94,7 @@ class RocketLeagueEnv(gym.Env):
 
         if goal is not None:
             self.ball_prev = None
+            self.dist_prev = None
             self.input_prev = None
             if goal == "blue":
                 return (2.0 if last_touch == "orange" else 20.0), True
@@ -97,25 +109,22 @@ class RocketLeagueEnv(gym.Env):
         delta_x = ball_x - self.ball_prev
         if abs(delta_x) > 0.0001:
             # Non-linear weighting: x_factor exponentially amplifies rewards near the goal mouth (|ball_x| -> 1);
-            # y_factor attenuates ground-rolling balls (ball_y <= -0.55) to reward elevated aerial trajectories.
+            # y_factor retains a 0.25 baseline for ground-rolling balls (ball_y <= -0.55) while rewarding elevated trajectories.
             x_factor = np.exp(1 / (1.2 - ball_x ** 2))
-            y_factor = (1 - abs(ball_y)) ** 2 if ball_y > -0.55 else 0.0
+            y_factor = (1 - abs(ball_y)) ** 2 if ball_y > -0.55 else 0.25
             progress = delta_x * x_factor * y_factor
             if not ((progress <= 0.0 and last_touch == "blue") or (progress >= 0.0 and last_touch == "orange")):
                 reward += progress
         self.ball_prev = ball_x
 
-        # distance to ball and time penalty
-        reward -= abs(state["relations"]["agent_to_ball"]["magnitude"]) * 0.01
+        # Potential-based car-to-ball approach shaping + distance and time penalty
+        dist = abs(state["relations"]["agent_to_ball"]["magnitude"])
+        if self.dist_prev is None:
+            self.dist_prev = dist
+        reward += (self.dist_prev - dist) * 1.5
+        self.dist_prev = dist
+        reward -= dist * 0.005
         reward -= 0.001
-
-        # penalty for changing input direction
-        last_input = state["car"]["input_vector"]
-        if self.input_prev is None:
-            self.input_prev = last_input
-        elif last_input != (0.0, 0.0) and last_input != self.input_prev:
-            self.input_prev = last_input
-            reward -= 0.001
 
         return reward, False
 
