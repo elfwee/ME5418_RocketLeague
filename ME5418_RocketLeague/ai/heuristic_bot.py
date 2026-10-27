@@ -1,0 +1,416 @@
+"""Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
+import math
+from typing import Tuple
+from ME5418_RocketLeague.simulation.actions import CarAction
+from ME5418_RocketLeague.config.sim_config import (
+    CAR_MAX_GROUND_SPEED, GRAVITY_MAG,
+    BOT_AERIAL_MIN_BOOST
+)
+
+
+class HeuristicBot:
+    """Rule-based AI bot with trajectory lookahead, shadow defense, and dynamic aerial/ground mechanics."""
+
+    def __init__(self, team: str = "orange", difficulty: str = "pro"):
+        self.team = team
+        self.difficulty = difficulty
+        self.current_state = "KICKOFF"
+        self._is_kickoff = True
+        self._jump_cooldown = 0.0
+        self._jump_press_timer = 0
+        self._last_dodge_time = 0.0
+        self._stuck_timer = 0.0
+        self._unstick_active = 0.0
+
+    def reset(self):
+        """Reset internal timers and behavioral state upon kickoff."""
+        self.current_state = "KICKOFF"
+        self._is_kickoff = True
+        self._jump_cooldown = 0.0
+        self._jump_press_timer = 0
+        self._last_dodge_time = 0.0
+        self._stuck_timer = 0.0
+        self._unstick_active = 0.0
+
+    def predict_ball_position(self, sim, dt_ahead: float) -> Tuple[float, float]:
+        """Predict ball position dt_ahead seconds into the future assuming ballistic trajectory and floor bounce."""
+        bx, by = sim.ball.position
+        vx, vy = sim.ball.velocity
+        floor_y = sim.ball_spawn_y
+
+        pred_x = bx + vx * dt_ahead
+        pred_y = by + vy * dt_ahead - 0.5 * GRAVITY_MAG * (dt_ahead ** 2)
+
+        # Floor bounce approximation: inverts penetration below floor scaled by restitution factor e = 0.65
+        if pred_y < floor_y:
+            pred_y = floor_y + (floor_y - pred_y) * 0.65
+
+        # Arena bounds clamping
+        pred_x = max(sim.arena.x_left + 1.0, min(sim.arena.x_right - 1.0, pred_x))
+        pred_y = max(floor_y, min(sim.arena.y_ceil - 1.0, pred_y))
+
+        return (pred_x, pred_y)
+
+    def determine_state(self, sim, car) -> str:
+        """Evaluate match geometry to select the active behavioral state."""
+        bx, by = sim.ball.position
+        b_vel = sim.ball.velocity
+        b_speed = math.hypot(b_vel[0], b_vel[1])
+        cx, cy = car.position
+
+        # Kickoff tracking: true kickoff ends once ball is struck or moves from center
+        if self._is_kickoff:
+            if abs(bx - sim.center_x) > 0.6 or b_speed > 1.2 or (by - sim.ball_spawn_y) > 0.4:
+                self._is_kickoff = False
+
+        # 1. KICKOFF: Only during actual kickoff phase AND when car is on its own side of the ball
+        if self._is_kickoff:
+            b_spd = math.hypot(*sim.ball.velocity)
+            if b_spd < 0.1 and abs(bx - sim.center_x) < 0.5:
+                if self.team == "orange" and cx < bx:
+                    self._is_kickoff = False
+                elif self.team == "blue" and cx > bx:
+                    self._is_kickoff = False
+                else:
+                    return "KICKOFF"
+            else:
+                self._is_kickoff = False
+
+        def_zone_depth = 8.5
+        att_zone_depth = 7.5
+        aerial_def_depth = 6.5
+
+        # 2. AERIAL Persistence: only persist if ball is genuinely airborne (> 3.5m) and in front of car
+        if self.current_state == "AERIAL" and not car.both_wheels_grounded:
+            ball_in_front = (cx > bx) if self.team == "orange" else (cx < bx)
+            if car.boost_amount > 5.0 and by > 3.5 and ball_in_front:
+                if self.team == "orange" and bx > (sim.arena.x_right - aerial_def_depth):
+                    return "DEFEND"
+                elif self.team == "blue" and bx < (sim.arena.x_left + aerial_def_depth):
+                    return "DEFEND"
+                return "AERIAL"
+
+        if self.team == "orange":
+            # 1. In defensive half, DEFEND takes top priority!
+            if bx > (sim.arena.x_right - def_zone_depth):
+                return "DEFEND"
+            # 2. In opponent half (attacking third), stay on attack if behind ball
+            if bx < (sim.arena.x_left + att_zone_depth):
+                if cx <= bx - 1.5:
+                    return "ROTATE_BACK"
+                if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+                    return "AERIAL"
+                return "ATTACK"
+            # 3. In midfield, rotate back if caught on wrong side
+            if cx <= bx - 0.2:
+                return "ROTATE_BACK"
+        else:
+            # Blue defends Left goal
+            if bx < (sim.arena.x_left + def_zone_depth):
+                return "DEFEND"
+            if bx > (sim.arena.x_right - att_zone_depth):
+                if cx >= bx + 1.5:
+                    return "ROTATE_BACK"
+                if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+                    return "AERIAL"
+                return "ATTACK"
+            if cx >= bx + 0.2:
+                return "ROTATE_BACK"
+
+        # 4. AERIAL vs ATTACK:
+        if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
+            return "AERIAL"
+
+        return "ATTACK"
+
+    def compute_action(self, sim) -> CarAction:
+        """Generate the control action (steering, throttle, jump, boost) for the bot car."""
+        car = sim.car_orange if self.team == "orange" else sim.car_blue
+        if car is None:
+            return CarAction()
+
+        action = CarAction()
+        self.current_state = self.determine_state(sim, car)
+
+        cx, cy = car.position
+        bx, by = sim.ball.position
+        b_vx, b_vy = sim.ball.velocity
+        self._jump_cooldown = max(0.0, self._jump_cooldown - (1.0 / 60.0))
+
+        goal_target_x = sim.arena.x_left if self.team == "orange" else sim.arena.x_right
+        own_goal_x = sim.arena.x_right if self.team == "orange" else sim.arena.x_left
+        goal_target_y = (sim.arena.goal_y_bot + sim.arena.goal_y_top) * 0.5
+
+        # Obstacle Stagnation Detector: If bot is trying to advance toward ball but blocked by an obstacle or wall
+        if self._unstick_active > 0.0:
+            self._unstick_active = max(0.0, self._unstick_active - (1.0 / 60.0))
+            if cx < (sim.arena.x_left + 3.0):
+                action.dir_x = 1.0
+            elif cx > (sim.arena.x_right - 3.0):
+                action.dir_x = -1.0
+            else:
+                action.dir_x = 1.0 if (bx - cx) > 0 else -1.0
+            action.dir_y = 0.60
+            action.jump = True
+            action.boost = True
+            return action
+        elif (car.is_grounded or car.can_ground_jump or car.wheel_contact_count >= 1) and abs(car.velocity[0]) < 0.20:
+            self._stuck_timer += (1.0 / 60.0)
+            if self._stuck_timer > 0.5:
+                self._stuck_timer = 0.0
+                self._unstick_active = 0.35
+                if cx < (sim.arena.x_left + 3.0):
+                    action.dir_x = 1.0
+                elif cx > (sim.arena.x_right - 3.0):
+                    action.dir_x = -1.0
+                else:
+                    action.dir_x = 1.0 if (bx - cx) > 0 else -1.0
+                action.dir_y = 0.70
+                action.jump = True
+                action.boost = True
+                return action
+        else:
+            self._stuck_timer = max(0.0, self._stuck_timer - (2.0 / 60.0))
+
+        # -------------------------------------------------------------
+        # STATE 1: KICKOFF
+        # -------------------------------------------------------------
+        if self.current_state == "KICKOFF":
+            dx = bx - cx
+            dist_to_ball = abs(dx)
+            sign = 1.0 if dx > 0 else -1.0
+            action.dir_x = sign
+            action.dir_y = 0.0
+            action.boost = True
+
+            # Chip/pop on kickoff approach: launch ball on an elevated arc toward elevated goal mouth
+            if dist_to_ball < 2.9 and car.has_jump2:
+                if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                    action.jump = True
+                    action.dir_y = 0.55
+                    self._jump_cooldown = 0.6
+                    self._jump_press_timer = 1
+                elif not car.both_wheels_grounded and car.has_jump2:
+                    if self._jump_press_timer == 1:
+                        # Release jump button for 1 frame so edge-detector resets
+                        action.jump = False
+                        self._jump_press_timer = 2
+                    else:
+                        action.jump = True
+                        action.dir_x = sign
+                        action.dir_y = 0.40
+                        self._jump_press_timer = 0
+            return action
+
+        # -------------------------------------------------------------
+        # STATE 2: ROTATE_BACK (Shadow Defense / Anti-Own-Goal)
+        # -------------------------------------------------------------
+        if self.current_state == "ROTATE_BACK":
+            # Dynamic safe target behind the ball: at least 3.0m behind ball or at defensive post
+            if self.team == "orange":
+                safe_target_x = min(sim.arena.x_right - 2.0, max(bx + 3.0, own_goal_x - 3.5))
+                dx = safe_target_x - cx
+                if abs(dx) > 0.4:
+                    action.dir_x = 1.0 if dx > 0 else -1.0
+                else:
+                    action.dir_x = -1.0
+
+                # Anti-Own-Goal: If caught on wrong side and approaching ball, jump cleanly OVER it without boosting into own net
+                if cx < bx and (bx - cx) < 3.5 and by < 4.0:
+                    action.dir_x = 1.0
+                    action.dir_y = 0.8
+                    action.jump = True
+                    action.boost = False
+                    return action
+            else:
+                safe_target_x = max(sim.arena.x_left + 2.0, min(bx - 3.0, own_goal_x + 3.5))
+                dx = safe_target_x - cx
+                if abs(dx) > 0.4:
+                    action.dir_x = 1.0 if dx > 0 else -1.0
+                else:
+                    action.dir_x = 1.0
+
+                # Anti-Own-Goal: If Blue caught on wrong side and approaching ball, jump OVER it without boosting into own net
+                if cx > bx and (cx - bx) < 3.5 and by < 4.0:
+                    action.dir_x = -1.0
+                    action.dir_y = 0.8
+                    action.jump = True
+                    action.boost = False
+                    return action
+
+            action.dir_y = 0.0
+
+            # Boost to recover quickly if far out of position
+            if abs(dx) > 5.0 and car.boost_amount > 25.0:
+                action.boost = True
+
+            return action
+
+        # -------------------------------------------------------------
+        # STATE 3: DEFEND (Goalie Clearance in Defensive Zone)
+        # -------------------------------------------------------------
+        if self.current_state == "DEFEND":
+            # Intercept ball before it enters goal
+            lead_time = min(0.5, max(0.1, abs(cx - bx) / (CAR_MAX_GROUND_SPEED + 0.1)))
+            pred_bx, pred_by = self.predict_ball_position(sim, lead_time)
+
+            dx = pred_bx - cx
+            dy = pred_by - cy
+            dist = math.hypot(dx, dy)
+
+            if self.team == "orange":
+                # Orange defends Right goal (x = 30.5). Clearance MUST ALWAYS BE DIRECTED LEFT (-1.0)!
+                if cx < pred_bx - 0.5:
+                    if pred_bx > 28.0:
+                        if b_vx < -1.5:
+                            # Rebound coming out to midfield: hold outside to strike it
+                            action.dir_x = 1.0 if cx < 26.0 else -1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                        else:
+                            # Ball slow or stopped in corner: drive in along floor to dislodge/clear it!
+                            action.dir_x = 1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                    else:
+                        action.dir_x = 1.0
+                        if (pred_bx - cx) < 3.5 and pred_by < 4.0:
+                            action.jump = True
+                            action.dir_y = 0.8
+                    return action
+                else:
+                    clear_dir_x = -1.0
+            else:
+                # Blue defends Left goal (x = 4.5). Clearance MUST ALWAYS BE DIRECTED RIGHT (+1.0)!
+                if cx > pred_bx + 0.5:
+                    if pred_bx < 7.0:
+                        if b_vx > 1.5:
+                            action.dir_x = -1.0 if cx > 9.0 else 1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                        else:
+                            action.dir_x = -1.0
+                            action.dir_y = 0.0
+                            action.jump = False
+                            action.boost = False
+                    else:
+                        action.dir_x = -1.0
+                        if (cx - pred_bx) < 3.5 and pred_by < 4.0:
+                            action.jump = True
+                            action.dir_y = 0.8
+                    return action
+                else:
+                    clear_dir_x = 1.0
+
+            # High shot: execute aerial save
+            if pred_by > 3.0 and car.boost_amount > 10.0:
+                action.dir_x = clear_dir_x
+                action.dir_y = 0.8
+                action.boost = True
+                if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                    action.jump = True
+                    self._jump_cooldown = 0.6
+                elif car.has_jump2 and dist < 2.0:
+                    action.jump = True  # Dodge clear
+            else:
+                # Ground clearance toward opponent net
+                action.dir_x = clear_dir_x
+                action.dir_y = 0.0
+                if dist < 2.0 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                    action.jump = True
+                    self._jump_cooldown = 0.6
+
+            return action
+
+        # -------------------------------------------------------------
+        # STATE 4: AERIAL (High Ball Challenge)
+        # -------------------------------------------------------------
+        if self.current_state == "AERIAL":
+            pred_bx, pred_by = self.predict_ball_position(sim, 0.4)
+            dx = pred_bx - cx
+            dy = pred_by - cy
+            angle_to_ball = math.atan2(dy, dx)
+
+            action.dir_x = math.cos(angle_to_ball)
+            action.dir_y = math.sin(angle_to_ball)
+
+            if self.team == "orange" and action.dir_x > 0:
+                action.dir_x = -1.0
+                action.boost = False
+            elif self.team == "blue" and action.dir_x < 0:
+                action.dir_x = 1.0
+                action.boost = False
+            else:
+                if car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+                    action.jump = True
+                    self._jump_cooldown = 0.6
+                else:
+                    action.boost = True
+                    if math.hypot(dx, dy) < 2.5 and car.has_jump2:
+                        action.jump = True  # Dodge strike
+
+            return action
+
+        # -------------------------------------------------------------
+        # STATE 5: ATTACK (Offensive Strike & Power Shot)
+        # -------------------------------------------------------------
+        lead_time = 0.15
+        pred_bx, pred_by = self.predict_ball_position(sim, lead_time)
+        dx_to_ball = pred_bx - cx
+        dist_to_ball = math.hypot(dx_to_ball, pred_by - cy)
+
+        if self.team == "orange":
+            # Orange shoots toward Blue net (Left, -X)
+            # In deep attacking pocket near Blue goal mouth, always push toward net
+            if cx < (sim.arena.x_left + 3.0) or cx >= pred_bx - 0.5:
+                action.dir_x = -1.0
+            else:
+                action.dir_x = 1.0
+                if abs(dx_to_ball) < 3.0 and pred_by < 4.0:
+                    action.jump = True
+                    action.dir_y = 0.8
+        else:
+            # Blue shoots toward Orange net (Right, +X)
+            # In deep attacking pocket near Orange goal mouth, always push toward net
+            if cx > (sim.arena.x_right - 3.0) or cx <= pred_bx + 0.5:
+                action.dir_x = 1.0
+            else:
+                action.dir_x = -1.0
+                if abs(dx_to_ball) < 3.0 and pred_by < 4.0:
+                    action.jump = True
+                    action.dir_y = 0.8
+
+        action.dir_y = 0.0
+
+        # Jump strike in attack
+        in_att_zone = (bx < sim.arena.x_left + 7.5) if self.team == "orange" else (bx > sim.arena.x_right - 7.5)
+        closing = (b_vx > 1.0) if self.team == "orange" else (b_vx < -1.0)
+        attack_dist_thresh = 3.5 if closing else 2.2
+
+        if in_att_zone and dist_to_ball < attack_dist_thresh:
+            if car.can_ground_jump and self._jump_cooldown <= 0.0:
+                action.dir_y = 0.80
+                action.jump = True
+                self._jump_cooldown = 0.5
+            elif not car.can_ground_jump and car.has_jump2:
+                action.dir_x = -1.0 if self.team == "orange" else 1.0
+                action.dir_y = 0.50
+                action.jump = True
+                action.boost = True
+        elif pred_by > 2.8 and dist_to_ball < 2.2 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+            action.dir_y = 0.40
+            action.jump = True
+            self._jump_cooldown = 0.6
+        elif dist_to_ball < 1.4 and abs(car.velocity[0]) > 6.0 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+            action.jump = True
+            action.dir_y = 0.50
+            self._jump_cooldown = 0.6
+
+        # Boost when closing in from distance
+        if dist_to_ball > 4.0 and abs(cx - pred_bx) > 3.0 and car.boost_amount > 40.0:
+            action.boost = True
+
+        return action
