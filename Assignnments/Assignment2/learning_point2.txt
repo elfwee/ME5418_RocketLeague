@@ -1,0 +1,31 @@
+ME5418 - Assignment 2: Neural Network Architecture & Feature Engineering
+Team 41: Benjamin Teh Jhen Hing, Lu Jia Yih Jensen, Wee Fook Choon
+
+1 Network Architecture & Multi-Head Formulation
+To interface seamlessly with the rocket-league-v1 Gymnasium environment, the neural network employs an Actor-Critic architecture tailored for continuous observation spaces and factored multi-discrete action spaces:
+• Input Layer: A 52-dimensional linear input layer receiving the normalized observation vector S in [-1.0, 1.0]^52.
+• Shared Feature Extractor (Backbone): Multi-layer perceptron (e.g., Linear(52, 256) -> Tanh/ReLU -> Linear(256, 256) -> Tanh/ReLU) that extracts joint spatial and kinematic representations.
+• Factored Policy Heads (Actor): To parameterize the MultiDiscrete([9, 2, 2]) action distribution without combinatorial explosion, the actor branches into three independent linear categorical heads:
+  1. Direction Head: 9 logits corresponding to 8 directions (45-degree intervals) and neutral (0, 0).
+  2. Jump Head: 2 logits corresponding to jump binary on/off.
+  3. Boost Head: 2 logits corresponding to rocket boost binary on/off.
+  During forward execution, categorical distributions (e.g., torch.distributions.Categorical) evaluate log-probabilities and entropies across each head independently.
+• Value Head (Critic): A linear layer mapping the shared feature embedding to a single scalar value estimate V(s) used for baseline reduction and Generalized Advantage Estimation (GAE).
+
+2 Learning Points & Reflections on Feature Engineering
+Reflections and empirical lessons learned while designing the network architecture and input representations:
+
+• Symmetry Pruning in Input State Space:
+  Initially, both the ego agent and the adversarial bot were assigned identical state representations, including 8 boundary raycasts each. However, preliminary ablation experiments revealed that opponent raycasts did not contribute to the ego vehicle's decision-making and increased parameter count without benefit. Removing opponent raycasts reduced the observation dimensionality, accelerated training throughput, and prevented the network from overfitting to opponent boundary proximity.
+
+• Critical Inductive Bias of Relational Features:
+  We experimented with reducing relational state features (specifically the relative distance and orientation vectors connecting the car, ball, and goals), assuming the network could infer spatial relations purely from raw Cartesian coordinates. However, training suffered severely and the agent failed to learn effective ball interception or clearing maneuvers. Retaining all four explicit relation metrics (agent-to-ball, opponent-to-ball, ball-to-opponent-goal, and ball-to-own-goal) proved indispensable as a geometric inductive bias for the neural network.
+
+• Multi-Head Factored Policy vs. Monolithic Softmax:
+  A monolithic categorical head over all 36 combinations would require computing a 36-way softmax, which entangles direction, jump, and boost gradients. Factoring the policy into three distinct sub-heads (9 + 2 + 2 = 13 logits total) enables modular gradient backpropagation: the jump and boost decisions can be learned independently while sharing spatial representations with the steering controller.
+
+3 Forward and Backward Pass Verification
+A standalone verification script demonstrates:
+1. Instantiation of the Actor-Critic network with randomized batch inputs (batch_size, 52).
+2. Forward evaluation outputting directional, jump, and boost action distributions alongside state values V(s).
+3. Synthetic loss evaluation (actor policy loss + critic MSE loss) and successful backward gradient backpropagation (loss.backward()), ensuring all parameters receive valid, finite gradients without vanishing or exploding.

@@ -1,0 +1,64 @@
+ME5418 - Final Project: Comprehensive Technical Synthesis & Lessons Learned
+Team 41: Benjamin Teh Jhen Hing, Lu Jia Yih Jensen, Wee Fook Choon
+
+1 Executive Summary of Project Evolution
+Throughout the lifecycle of the project—from the initial proposal through Gymnasium environment design, neural network construction, and agent training—pre-testing with reinforcement learning libraries (e.g., Stable-Baselines3 PPO) uncovered several critical discrepancies between theoretical formulation and empirical learning dynamics. 
+
+The agent frequently discovered unintended physical and mathematical shortcuts (reward hacking) that maximized cumulative returns without producing effective soccer gameplay. Addressing these pathologies required iterative modifications across vehicle physics, arena geometry, MDP horizon formulation, and reward function mathematics.
+
+2 Deep Dive: Reward Hacking Case Studies & Mechanical/Algorithmic Solutions
+
+• Case 1: Ground Chassis Downward-Pitch Wedge / Ramp Exploit
+  - Initial Failure Mode: When resting on the ground, the car could pitch downward. The agent discovered that by parking slightly downfield with its nose pinned to the floor, the inclined chassis acted as a stationary ramp. Incoming ground balls simply rolled up the vehicle and deflected into the net, allowing the agent to score without maneuvering or engaging the ball.
+  - Corrective Solution: The vehicle mechanics were redesigned to enforce horizontal ground alignment. The chassis hull was reconstructed with a strictly vertical front bumper face spanning y in [1.83, 2.15] m, matching the equatorial lower hemisphere of the grounded ball. This guaranteed pure horizontal momentum transfer on impact, eliminating the passive wedge exploit.
+
+• Case 2: Arena Corner Fillet Slide & Infinite Reward Loop
+  - Initial Failure Mode: Dense reward shaping initially awarded positive points for advancing the ball toward the opponent's goal along the horizontal axis. In the rounded corner fillets at the bottom of the arena, the ball would roll up the curved wall and slide back down due to gravity. The agent learned to trap the ball against the corner curve, continuously nudging it up the fillet to harvest infinite progress rewards without attempting to shoot.
+  - Corrective Solution: A bifurcated non-linear reward formulation was introduced: progress = delta_x * x_factor * y_factor. 
+    1. x_factor = exp(1 / (1.2 - x_ball^2)) exponentially weights horizontal advancement toward the net.
+    2. y_factor = (1 - |y_ball|)^2 is strictly zeroed for low elevations (y_ball <= -0.55).
+    Zeroing rewards near the floor eliminated boundary sliding loops and forced the agent to lift the ball into the aerial zone aligned with the elevated goal opening.
+
+• Case 3: Exploitation of Heuristic Opponent Errors
+  - Initial Failure Mode: In early iterations, a uniform terminal reward of +20.0 was granted whenever a goal was scored in the opponent's net. The agent rapidly learned an adversarial exploit: rather than challenging for the ball, it positioned itself defensively and waited for the rule-based bot to commit an unforced error or deflect the ball into its own net.
+  - Corrective Solution: The terminal reward was made conditional on the last-touch telemetry: +20.0 if the agent delivered the scoring strike, but only +2.0 if the goal resulted from an opponent touch. This asymmetric payout incentivized proactive ball striking and discouraged passive reliance on bot blunders.
+
+• Case 4: Passive Goal Camping & Inertial Local Optima
+  - Initial Failure Mode: When relying solely on terminal rewards and forward progress, the agent often converged to a local optimum of parking inside its own goal mouth to minimize defensive penalties, refusing to cross midfield.
+  - Corrective Solution: An explicit Euclidean distance penalty between vehicle and ball (-0.01 * ||p_agent - p_ball||) was integrated into every timestep, actively driving the agent out of its defensive shell toward the ball.
+
+• Case 5: High-Frequency Action Chattering / Control Jitter
+  - Initial Failure Mode: Due to discrete multi-directional control, unregularized policies exhibited high-frequency switching between opposing inputs (e.g., alternating between Left and Right on consecutive frames), causing severe chassis oscillation and erratic steering.
+  - Corrective Solution: A step penalty of -0.001 was imposed whenever the agent changed its directional input vector between consecutive frames, penalizing mechanical jerk and encouraging smooth, continuous trajectories.
+
+3 Architectural & MDP Formulation Evolutions
+
+• MDP Horizon Redesign (Terminated vs. Truncated):
+  - Initial Approach: A continuous match clock with episode endings governed solely by timeout truncation (emulating full sports matches).
+  - Empirical Discovery: Fixed-horizon sports matches generated sparse credit assignment and severely delayed PPO value convergence.
+  - Final Formulation: The environment now triggers terminated=True immediately upon any goal event, resetting positions for a fresh kickoff. Truncation (truncated=True) is reserved strictly for maximum step timeouts (3600 frames). This distinction enables mathematically sound PPO value bootstrapping: V(s_terminal) = 0 for goal terminations, while V(s_truncated) bootstraps from the critic.
+
+• State Space Optimization & Symmetry Pruning:
+  - Initial Approach: Symmetrical 35-feature observation vectors for both ego car and opponent.
+  - Final Formulation: Pruned redundant opponent raycasts (which provided field boundary distances from the bot's perspective) after discovering they offered zero utility to the ego policy. This pruned the observation space down to an invariant 52 floats while preserving essential opponent kinematic vectors.
+
+• Critical Value of Explicit Relational Inductive Biases:
+  - Empirical Ablation: Removing the 4 explicit relation vectors (agent-to-ball, opponent-to-ball, ball-to-opponent-goal, and ball-to-own-goal) caused policy training to collapse. Raw Cartesian coordinates alone proved insufficient for the MLP to resolve spatial distances and approach angles within reasonable sample budgets, confirming that relational embeddings are vital inductive biases.
+
+• Software Engineering & Verification:
+  - Rigorous validation using Gymnasium's check_env() utility confirmed space bound compliance and deterministic transition repeatability under identical random seeds.
+  - Integration of the unwrapped.isopen flag resolved Pygame event loop deadlocks during headless and multi-worker execution.
+
+4 Synthesis Matrix: Proposal vs. Final Implemented System
+
+| Component | Proposal Baseline | Final Implemented System | Primary Motivation / Lesson Learned |
+| :--- | :--- | :--- | :--- |
+| **Action Space** | Factored Multi-Discrete [9, 2, 2] | Factored Multi-Discrete [9, 2, 2] | Confirmed superiority over MultiBinary(6) by eliminating invalid/conflicting combinations |
+| **Goal Terminal Reward** | Symmetric +/-20.0 for all goals | +20.0 (agent touch) / +2.0 (opponent touch), -20.0 conceded | Prevents reward hacking where agent exploits bot own-goals |
+| **Ball Progress Reward** | Scaled purely by ball position | Non-linear: x_factor (exponential near goal) * y_factor (zero on floor) | Prevents infinite reward loops along bottom corner fillets; incentivizes aerial lift |
+| **State Space** | Full symmetric kinematics + raycasts | 52-dim vector with pruned opponent raycasts & retained relational metrics | Eliminates redundant features while preserving crucial geometric inductive biases |
+| **Episode Horizon** | Match-based continuous clock | Goal-based episodic termination (terminated=True) + timeout (truncated=True) | Accelerates PPO credit assignment and enables correct critic value bootstrapping |
+| **Control Regularization** | None | Direction change penalty (-0.001) | Suppresses high-frequency action chattering and promotes smooth vehicular trajectory |
+
+
+Other: Have to make car and balls to random spawn to increase domain randomization

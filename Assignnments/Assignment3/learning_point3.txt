@@ -1,0 +1,25 @@
+ME5418 - Assignment 3: Learning Agent & PPO Training Pipeline
+Team 41: Benjamin Teh Jhen Hing, Lu Jia Yih Jensen, Wee Fook Choon
+
+1 Learning Agent Architecture & PPO Pipeline
+The learning agent is implemented using Proximal Policy Optimization (PPO), an on-policy Actor-Critic algorithm that ensures stable policy updates via a clipped surrogate objective:
+• Trajectory Rollout Buffer: Collects transitions (state, action, reward, value, log_prob, done) over fixed rollout steps across parallelized or single simulation worker threads.
+• Factored Action Sampling: Evaluates joint action probability under the factored policy:
+  pi(a|s) = pi_dir(a_dir|s) * pi_jump(a_jump|s) * pi_boost(a_boost|s)
+  log pi(a|s) = log pi_dir(a_dir|s) + log pi_jump(a_jump|s) + log pi_boost(a_boost|s)
+• Advantage Estimation & Value Loss: Computes Generalized Advantage Estimation (GAE-lambda) with bootstrapping conditioned on the truncation vs. termination flags.
+• Clipped Surrogate Objective: Updates policy parameters with probability ratio clipping (epsilon = 0.2) to prevent catastrophic policy collapse, augmented with an entropy bonus to sustain exploratory maneuvers.
+
+2 Learning Points & Training Dynamics Reflections
+Pre-testing the training loop using standard RL frameworks (such as Stable-Baselines3) provided several critical insights into training stability and agent behavior:
+
+• Episode Horizon & Value Bootstrapping (Terminated vs. Truncated):
+  Initially, the environment was designed to mimic full-duration sports matches (e.g., soccer or basketball) where episodes progressed under a continuous clock and only ended via truncation. However, this generated an excessively long, sparse credit-assignment horizon, causing policy learning to progress very slowly.
+  To accelerate policy convergence, the environment was restructured to set terminated=True immediately upon any goal event, resetting the kickoff state. The truncated=True flag is preserved solely as a timeout ceiling (e.g., 3600 steps) for prolonged stalemates. Crucially, this distinction enables correct value bootstrapping in PPO: terminal goal states bootstrap to a target value of 0, whereas truncated timeout states bootstrap from the critic's value estimate V(s_timeout), preventing artificial value distortion.
+
+• Adversarial Co-Adaptation & Opponent Tuning:
+  Training an RL agent in an adversarial 1v1 setup requires a balanced sparring partner. Initially, the rule-based opponent required extensive tuning; an unrefined bot frequently committed own-goals or vacated the net, degrading the quality of the training distribution.
+  Furthermore, when any goal was rewarded equally (+20.0), the agent discovered an adversarial reward-hacking exploit: instead of attacking, it learned to bait the opponent bot into kicking the ball into its own net. Lowering the reward to +2.0 when the opponent touched the ball last eliminated this exploit and enforced active ball possession and striking.
+
+• Control Chattering Mitigation:
+  Unregularized discrete RL policies frequently suffer from high-frequency action oscillation ("chattering" or bang-bang control jitter), where the policy flips between opposing directional commands on successive frames. Introducing a small direction-change penalty (-0.001 per frame) successfully smoothed the agent's trajectory, reducing mechanical jerk while preserving responsive vehicle steering.
