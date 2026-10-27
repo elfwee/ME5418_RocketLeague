@@ -5,7 +5,7 @@
 
 ---
 
-A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-ball interaction, aerial maneuvering, and reinforcement learning environments inspired by **Rocket League Sideswipe**.
+A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforcement learning framework modeling vehicle-ball interaction, aerial maneuvering, and **Dueling Deep Q-Network (Dueling DQN)** control inspired by **Rocket League Sideswipe**.
 
 ## ![Demo](./demo.gif)
 
@@ -16,12 +16,14 @@ A high-fidelity 2D vertical-plane robotic simulation platform modeling vehicle-b
 - **Physics Engine**: Deterministic $240\text{ Hz}$ physics solver ($60\text{ Hz} \times 4\text{ sub-steps}$) powered by Pymunk (Chipmunk2D).
 - **Vehicle Dynamics**: Raycast spring-damper suspension, Coulomb tire traction, 2D vector steering, two-stage jump-dodge ballistics, rocket boost aerodynamics, and turtle auto-recovery.
 - **Opponent AI**: Rule-based Hierarchical Zone & Intercept State Machine (HZISM) acting as an adversarial baseline.
-- **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with continuous/box observation space (52 normalized features) and factored action spaces.
+- **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with continuous/box observation space (52 normalized features) and discrete/factored action spaces (`Discrete(36)` / `MultiDiscrete([9, 2, 2])`).
+- **Neural Network Architecture**: PyTorch **Dueling Deep Q-Network (`DQN`)** with `LayerNorm`-stabilized shared feature extraction and decoupled State-Value $V(s)$ and Action-Advantage $A(s, a)$ streams.
 
 ## 2. Architecture & Modular Documentation
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
+- 🧠 **[Dueling DQN Neural Network (`src/algorithms/dqn/model.py`)](./src/algorithms/dqn/model.py)**: PyTorch `nn.Module` supporting standard and Dueling DQN streams, `LayerNorm` stabilization, and standalone forward/backward pass verification.
 - 📚 **[System & RL Environment (`src/README.md`)](./src/README.md)**: Gymnasium observation/action spaces, reward shaping formulation, telemetry API, and control scheme.
 - ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](./src/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
 - 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](./src/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
@@ -46,40 +48,17 @@ conda env create -f environment.yml
 conda activate me5418_projenv
 ```
 
-_(Alternatively, install the core dependencies via pip: `pip install gymnasium pygame pymunk numpy`)_
+_(Alternatively, install the core dependencies via pip: `pip install torch gymnasium pygame pymunk numpy matplotlib`)_
 
-### Step 3: Run Gym Environment Demo
+### Step 3: Run Neural Network Forward & Backward Pass Demo
 
-Launch sample episodes running under random actions with graphic visualization:
+Run the neural network demo to instantiate the Dueling DQN and verify a complete forward pass (input state $\to$ output $Q(s, a)$ values) and backward pass (Double-DQN TD Huber loss $\to$ `loss.backward()` layer gradients $\to$ `optimizer.step()`):
 
 ```bash
 python demo.py
 ```
 
-### Step 4: Run Interactive Sandbox
-
-Drive the car manually via keyboard or gamepad against the AI bot:
-
-```bash
-python src/main.py
-```
-
-- **Controls**:
-    - `W`/`A`/`S`/`D` or `Arrow Keys` (or Gamepad Left Stick): 2D Direction Vector
-    - `Space` (or Gamepad A): Jump 1 (Ground) / Jump 2 (Neutral double jump or 360° dodge flip) / Turtle recovery
-    - `Left Shift` / `O` (or Gamepad B): Rocket Boost
-    - `B`: Toggle Orange AI Bot on/off
-    - `L`: Toggle 8 egocentric boundary raycasts
-    - `R`: Reset Ball & Car to kickoff positions
-    - `Escape`: Quit simulation
-
-### Step 5: Run Headless Benchmark
-
-Run automated headless stepping for fast physics verification:
-
-```bash
-python src/main.py --headless
-```
+_(Or run the neural network module directly: `python src/algorithms/dqn/model.py`)_
 
 ---
 

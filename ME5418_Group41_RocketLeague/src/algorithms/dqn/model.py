@@ -73,20 +73,18 @@ class DQN(nn.Module):
             return self.fc3(x)
 
 
-if __name__ == "__main__":
-    # -------------------------------------------------------------------------
-    # Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass
-    # -------------------------------------------------------------------------
+def run_network():
+    """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = gym.make("rocket-league-v1", render_mode="human", bot_type="heuristic_bot", discrete_action=True)
+    env = gym.make("rocket-league-v1", render_mode=None, bot_type="heuristic_bot", discrete_action=True)
 
     num_states = env.observation_space.shape[0]
     num_actions = env.action_space.n
-    fcl_nodes = 256
+    hidden_dim = 256
 
     # 1. Create Policy and Target Dueling DQN Networks
-    policy_dqn = DQN(num_states, num_actions, fcl_nodes, enable_dueling_dqn=True).to(device)
-    target_dqn = DQN(num_states, num_actions, fcl_nodes, enable_dueling_dqn=True).to(device)
+    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=True).to(device)
+    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=True).to(device)
     target_dqn.load_state_dict(policy_dqn.state_dict())
     target_dqn.eval()
 
@@ -95,14 +93,14 @@ if __name__ == "__main__":
     gamma = 0.99
 
     print("=" * 65)
-    print("1. NETWORK ARCHITECTURE")
+    print("1. NETWORK ARCHITECTURE (DUELING DQN)")
     print("=" * 65)
-    print(f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions}")
+    print(f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions} | Hidden Dim: {hidden_dim}")
     print(policy_dqn)
 
     # 2. Forward Pass with Environment Observation
-    state, _ = env.reset()
-    state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)  # Shape: (1, 52)
+    obs, info = env.reset()
+    state_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)  # Shape: (1, 52)
 
     q_values = policy_dqn(state_tensor)  # Shape: (1, 36)
     action_idx = q_values.argmax(dim=-1).item()
@@ -117,7 +115,7 @@ if __name__ == "__main__":
     print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
     print(f"Output Q(s, .) Shape: {q_values.shape}")
     print(f"Output Q(s, .) Sample (first 6 actions): {q_values[0, :6].detach().cpu().numpy().round(4)}")
-    print(f"Selected Greedy Action Index: {action_idx} -> dir={DIRECTIONS[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
+    print(f"Selected Action   : {action_idx} -> dir={DIRECTIONS[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
 
     # Step environment once with the selected action to observe transition (s, a, r, s', done)
     next_state, reward, terminated, truncated, _ = env.step(action_idx)
@@ -160,3 +158,7 @@ if __name__ == "__main__":
     print("=" * 65)
 
     env.close()
+
+
+if __name__ == "__main__":
+    run_network()
