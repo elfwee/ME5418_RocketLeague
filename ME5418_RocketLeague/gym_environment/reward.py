@@ -3,6 +3,7 @@ from math import dist
 import numpy as np
 from ME5418_RocketLeague.config.gym_config import GymConfig
 from ME5418_RocketLeague.config.sim_config import FIELD_HEIGHT, FIELD_WIDTH, GOAL_DEPTH
+from ME5418_RocketLeague.simulation import ball
 from ME5418_RocketLeague.simulation.simulation import Simulation
 
 
@@ -17,9 +18,15 @@ class GymReward:
         - sim: Simulation
         """
         self.sim = sim
+        self.target_goal = np.array(self.sim.arena.goal_right_center, dtype=np.float32)
+        self.own_goal = np.array(self.sim.arena.goal_left_center, dtype=np.float32)
+        self.reset()
 
     def reset(self):
-        pass
+        self.prev_car_pos = np.array([0, 0], dtype=np.float32)
+        self.prev_car_vel = np.array([0, 0], dtype=np.float32)
+        self.prev_ball_pos = np.array([0, 0], dtype=np.float32)
+        self.prev_ball_vel = np.array([0, 0], dtype=np.float32)
 
     def calculate_reward(self):
         """
@@ -30,7 +37,6 @@ class GymReward:
         state['score']['blue'], state['score']['orange']
         """
 
-        eps = 1e-8
         state = self.sim.get_state()
         # Extract kinematics as NumPy arrays
         car_pos = np.array(state["car"]["position"], dtype=np.float32)
@@ -41,10 +47,23 @@ class GymReward:
         own_goal = np.array(self.sim.arena.goal_left_center, dtype=np.float32)
 
         # ------------------------------------------------------------------
-        # 1. Sparse Event Reward (Delta Score)
+        # 1. Terminal Reward
         # ------------------------------------------------------------------
         score_reward = state["score"]["blue"] - state["score"]["orange"]
         score_reward = GymConfig.score_gain * score_reward
+
+        # ------------------------------------------------------------------
+        # 2. Shaped Reward
+        # ------------------------------------------------------------------
+        ball2goal = target_goal - ball_pos
+        y_ball_reward = 2 * ball_pos[1] / FIELD_HEIGHT - 1
+        y_ball_reward *= 1.0
+
+        x_ball_reward = (ball_pos[0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) - 0.5) * 2
+        x_ball_reward *= 0.0
+
+        dist2goal = np.linalg.norm(ball2goal)
+        reward = 1 / dist2goal**2
 
         # ------------------------------------------------------------------
         # 2. Agent Moving Towards Ball
@@ -81,18 +100,9 @@ class GymReward:
         # ------------------------------------------------------------------
         # Ball Near Goal
         # ------------------------------------------------------------------
-        y_ball_reward = ball_pos[1] / FIELD_HEIGHT
-        y_ball_reward *= 1.0
-
-        x_ball_reward = (ball_pos[0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) - 0.5) * 2
-        x_ball_reward *= 1.0
-
-        dist2goal = np.linalg.norm(ball2goal)
-        reward = 1 / dist2goal**2
-
         time_penalty = GymConfig.time_penalty
 
         # return x_ball_reward + y_ball_reward + score_reward
-        return reward + score_reward + action_reward
-        # return score_reward + action_reward + progress_reward + orientation_reward + time_penalty
+        # return reward + score_reward + action_reward
+        return score_reward + action_reward + progress_reward + orientation_reward + time_penalty
         # return near_ball + 1 / np.linalg.norm(car2ball) + action_reward

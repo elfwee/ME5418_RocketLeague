@@ -49,7 +49,8 @@ class RocketLeagueSideSwipeGym(gym.Env):
 
         # Setting up Environment
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(17,), dtype=np.float32)
-        # select x-direction, y-direction, jump, and boost
+        # select cardinal-ordinal direction, jump, and boost
+        # self.action_space = gym.spaces.MultiDiscrete([9, 2, 2])  # size = 36
         self.action_space = gym.spaces.MultiDiscrete([3, 3, 2, 2])  # size = 36
         self.gym_reward = GymReward(self.sim)
         self.info = {}

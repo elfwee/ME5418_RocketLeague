@@ -33,18 +33,12 @@ class SB3ActorCritic:
 
     def train(self):
         train_env = gym.make(
-            id=GymConfig.gym_id, 
-            render_mode=GymConfig.train_render_mode, 
-            adversary_type=GymConfig.train_bot_type
+            id=GymConfig.gym_id, render_mode=GymConfig.train_render_mode, adversary_type=GymConfig.train_bot_type
         )
 
-        model = A2C(policy="MlpPolicy", 
-                    env=train_env, 
-                    device="cpu", 
-                    verbose=1, 
-                    tensorboard_log="./tb_logs/")
+        model = A2C(policy="MlpPolicy", env=train_env, device="cpu", verbose=1, tensorboard_log="./tb_logs/")
         model.learn(GymConfig.train_max_steps)
-        model.save(f"./ME5418_RocketLeague/gym_environment/{self.file_name}")
+        model.save(f"./ME5418_RocketLeague/gym_environment/models/{self.file_name}")
         train_env.close()
 
     def test(self):
@@ -56,7 +50,7 @@ class SB3ActorCritic:
         )
         # print("Metadata:", test_env.unwrapped.metadata)
         # print("Render Mode:", test_env.unwrapped.render_mode)
-        loaded_model = A2C.load(f"./ME5418_RocketLeague/gym_environment/{self.file_name}", device="cpu")
+        loaded_model = A2C.load(f"./ME5418_RocketLeague/gym_environment/models/{self.file_name}", device="cpu")
         observed_state, info = test_env.reset()
 
         done = False
@@ -70,6 +64,19 @@ class SB3ActorCritic:
             print(f"{reward:0.1f}")
         test_env.close()
 
+    def cont_training(self):
+        train_env = gym.make(
+            id=GymConfig.gym_id, render_mode=GymConfig.train_render_mode, adversary_type=GymConfig.train_bot_type
+        )
+        loaded_model = A2C.load(
+            f"./ME5418_RocketLeague/gym_environment/models/{self.file_name}", device="cpu", env=train_env
+        )
+        loaded_model.learn(
+            total_timesteps=GymConfig.train_max_steps, reset_num_timesteps=False, tb_log_name="ppo_continued_run"
+        )
+        loaded_model.save(f"./ME5418_RocketLeague/gym_environment/models/{self.file_name}_cont")
+        train_env.close()
+
         # if not test_env.unwrapped.is_open:
         # break
         # if terminated or truncated:
@@ -80,5 +87,6 @@ class SB3ActorCritic:
 
 def test_net(args=None):
     actor_critic = SB3ActorCritic()
-    actor_critic.train()
-    actor_critic.test()
+    # actor_critic.train()
+    # actor_critic.test()
+    actor_critic.cont_training()

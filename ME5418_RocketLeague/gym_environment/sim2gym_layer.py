@@ -21,6 +21,18 @@ def gym_action_to_sim_action(action: tuple) -> CarAction:
     x, y, jump, boost = action
     dir_x = {0: 0.0, 1: 1.0, 2: -1.0}[x]  # 0: neutral, 1: right, 2:left
     dir_y = {0: 0.0, 1: 1.0, 2: -1.0}[y]  # 0: neutral, 1: up, 2: down
+    # dir, jump, boost = action
+    # dir_x, dir_y = {
+    #     0: (0.0, 0.0),
+    #     1: (0.0, 1.0),
+    #     2: (0.0, -1.0),
+    #     3: (1.0, 0.0),
+    #     4: (-1.0, 0.0),
+    #     5: (1.0, 1.0),
+    #     6: (-1.0, 1.0),
+    #     7: (-1.0, -1.0),
+    #     8: (1.0, -1.0),
+    # }[dir]
     jump = {0: False, 1: True}[jump]  # 0:no jump, 1: jump
     boost = {0: False, 1: True}[boost]  # 0:no boost, 1: boost
     return CarAction(dir_x=dir_x, dir_y=dir_y, jump=jump, boost=boost).clamp()
@@ -68,6 +80,21 @@ def sim_state_to_gym_observation(sim_state: dict) -> np.ndarray:
 
 
 def sim_action_to_gym_action(sim_action: CarAction):
+    # act = [0, 0, 0]
+    # dir_dict = {
+    #     0: (0.0, 0.0),
+    #     1: (0.0, 1.0),
+    #     2: (0.0, -1.0),
+    #     3: (1.0, 0.0),
+    #     4: (-1.0, 0.0),
+    #     5: (1.0, 1.0),
+    #     6: (-1.0, 1.0),
+    #     7: (-1.0, -1.0),
+    #     8: (1.0, -1.0),
+    # }
+    # act[0] = [dir for dir, val in dir_dict.items() if val == (sim_action.dir_x, sim_action.dir_y)][0]
+    # act[1] = {True: 1, False: 0}[sim_action.jump]
+    # act[2] = {True: 1, False: 0}[sim_action.boost]
     act = [0, 0, 0, 0]
     act[0] = {-1.0: 2, 0.0: 0, 1.0: 1}[sim_action.dir_x]
     act[1] = {-1.0: 2, 0.0: 0, 1.0: 1}[sim_action.dir_y]
