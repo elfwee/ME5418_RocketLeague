@@ -51,22 +51,31 @@ ME5418_Group41_RocketLeague/
 ├── environment.yml               # Conda environment configuration
 └── src/
     ├── README.md                 # System architecture & Gymnasium RL documentation
-    ├── config.py                 # Global physical constants, geometry, and simulation tunings
-    ├── main.py                   # Interactive Pygame sandbox and headless benchmark runner
-    ├── rocket_league_env.py      # Gymnasium Environment wrapper
-    ├── core/
-    │   ├── README.md             # Subsystem technical summary: Physics & mechanics
-    │   ├── actions.py            # Unified 2D directional input & action dataclass
-    │   ├── arena.py              # Bounded arena geometry, corner fillets, and elevated goals
-    │   ├── ball.py               # Rigid-body ball with aerodynamic drag and spin decay
-    │   ├── car.py                # Chassis dynamics, raycast suspension, AWD, attitude control
-    │   └── simulation.py         # Physics manager, contact callbacks, scoring, sub-stepping
-    ├── ai/
-    │   ├── README.md             # Subsystem technical summary: HZISM state machine
-    │   └── heuristic_bot.py      # Hierarchical Zone & Intercept State Machine (HZISM) AI
-    └── visualization/
-        ├── README.md             # Subsystem technical summary: Pygame renderer & HUD
-        └── renderer.py           # Pygame 2D renderer, vector visualizer, HUD, and effects
+    ├── main.py                   # branching into play, and demos
+    ├── config
+        ├── sim_config.py         # Global physical constants, geometry, and simulation tunings
+        ├── gym_config.py         # Global gym config
+    │   └── nn_config.py          # Global neural network config
+    ├── gym_env
+    │   └── rocket_league_env.py      # Gymnasium Environment wrapper
+    ├── neural_nets
+    │   └── dqn_tf.py             # Basic DQN implementation
+    ├── sim
+        ├── game.py                   # Interactive Pygame sandbox and headless benchmark runner
+        ├── core/
+        │   ├── README.md             # Subsystem technical summary: Physics & mechanics
+        │   ├── actions.py            # Unified 2D directional input & action dataclass
+        │   ├── control.py            # Switching controllers for game i.e. interactive, heuristic, nn
+        │   ├── arena.py              # Bounded arena geometry, corner fillets, and elevated goals
+        │   ├── ball.py               # Rigid-body ball with aerodynamic drag and spin decay
+        │   ├── car.py                # Chassis dynamics, raycast suspension, AWD, attitude control
+        │   └── simulation.py         # Physics manager, contact callbacks, scoring, sub-stepping
+        ├── ai/
+        │   ├── README.md             # Subsystem technical summary: HZISM state machine
+        │   └── heuristic_bot.py      # Hierarchical Zone & Intercept State Machine (HZISM) AI
+        └── visualization/
+            ├── README.md             # Subsystem technical summary: Pygame renderer & HUD
+            └── renderer.py           # Pygame 2D renderer, vector visualizer, HUD, and effects
 ```
 
 ---
