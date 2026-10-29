@@ -10,6 +10,7 @@ import sys
 from ME5418_RocketLeague.simulation.game import Game
 from ME5418_RocketLeague.gym_environment.bentjh_gym import test_gym
 from ME5418_RocketLeague.gym_environment.bentjh_net import test_net
+from ME5418_RocketLeague.net.DQN import test_nn
 
 def main():
     game = Game()
@@ -25,7 +26,7 @@ def main():
         # test_gym(render_mode="terminal", adversary_type="none")
     
     elif "--net" in sys.argv:
-        test_net()
+        test_nn()
 
     else:
         game.run_interactive()
