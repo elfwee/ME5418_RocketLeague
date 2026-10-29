@@ -7,7 +7,7 @@
 
 A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforcement learning framework modeling vehicle-ball interaction, aerial maneuvering, and **Dueling Deep Q-Network (Dueling DQN)** control inspired by **Rocket League Sideswipe**.
 
-## ![Demo](./demo.gif)
+## ![Demo](./assets/demo.gif)
 
 ---
 
@@ -50,12 +50,26 @@ conda activate me5418_projenv
 
 _(Alternatively, install the core dependencies via pip: `pip install torch gymnasium pygame pymunk numpy matplotlib`)_
 
-### Step 3: Run Neural Network Forward & Backward Pass Demo
+### Step 3: Demo
+
+#### Play the game
+```bash
+# play interatively
+python -m src --play
+
+# play headlessly
+python -m src --play --headless
+```
+#### Demo the gym
+```bash
+python -m src --demo --gym
+```
+#### Demo the neural network
 
 Run the neural network demo to instantiate the Dueling DQN and verify a complete forward pass (input state $\to$ output $Q(s, a)$ values) and backward pass (Double-DQN TD Huber loss $\to$ `loss.backward()` layer gradients $\to$ `optimizer.step()`):
 
 ```bash
-python demo.py
+python -m src --demo --nn
 ```
 
 _(Or run the neural network module directly: `python src/algorithms/dqn/model.py`)_
