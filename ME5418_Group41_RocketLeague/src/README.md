@@ -9,36 +9,51 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 ```text
 src/
 ├── __init__.py
-├── config.py                 # Global constants, physics rates, geometry, and tunings
-├── main.py                   # Interactive sandbox and headless benchmark runner
-├── rocket_league_env.py      # Gymnasium Environment (action/observation space, reward, step, reset)
+├── __main__.py               # Enables `python -m src` (delegates to main.py)
+├── main.py                   # Entry point: interactive sandbox, headless benchmark, gym demo
 │
-├── core/                     # 2D physics engine & entities (Pymunk)
-│   ├── actions.py            # Unified 2D CarAction dataclass
-│   ├── arena.py              # Field walls, elevated goals, and deflection ramps
-│   ├── ball.py               # Rigid-body ball with aerodynamic drag and spin decay
-│   ├── car.py                # Chassis dynamics, raycast suspension, boost, jump-dodge
-│   ├── simulation.py         # Physics manager, contact callbacks, sub-stepping loop
-│   └── README.md             # Deep-dive physics & mathematical formulation
+├── config/                   # Centralised configuration
+│   ├── sim_config.py         # Physics rates, field geometry, car/ball tunings, display settings
+│   ├── gym_config.py         # GymConfig: env id, episode/training step limits, action directions
+│   └── nn_config.py          # DQNConfig: network sizes, learning rate, replay buffer, batch size
 │
-├── ai/                       # Scripted adversarial baseline bot
-│   ├── heuristic_bot.py      # Hierarchical Zone & Intercept State Machine (HZISM)
-│   └── README.md             # State machine architecture & decision logic
+├── gym_env/                  # Gymnasium RL environment
+│   └── rocket_league_env.py  # RocketLeagueEnv (action/observation space, reward, step, reset)
 │
-└── visualization/            # Graphic visualization & HUD (Pygame)
-    ├── renderer.py           # Procedural Octane vehicle, vector debug, telemetry HUD
-    └── README.md             # Coordinate mapping, HUD specs, and visual features
+├── neural_nets/              # Deep Q-Network agents
+│   ├── dqn_tf.py             # DQN implementation in TensorFlow/Keras
+│   └── dqn_torch.py          # Dueling DQN implementation in PyTorch
+│
+└── sim/                      # 2D simulation (physics, AI opponent, rendering)
+    ├── game.py               # Interactive & headless game loops (play_interactive, play_headless)
+    │
+    ├── core/                 # 2D physics engine & entities (Pymunk)
+    │   ├── actions.py        # Unified 2D CarAction dataclass
+    │   ├── arena.py          # Field walls, elevated goals, and deflection ramps
+    │   ├── ball.py           # Rigid-body ball with aerodynamic drag and spin decay
+    │   ├── car.py            # Chassis dynamics, raycast suspension, boost, jump-dodge
+    │   ├── control.py        # CarControl: none / human (keyboard) / heuristic bot input sources
+    │   ├── simulation.py     # Physics manager, contact callbacks, sub-stepping loop
+    │   └── README.md         # Deep-dive physics & mathematical formulation
+    │
+    ├── ai/                   # Scripted adversarial baseline bot
+    │   ├── heuristic_bot.py  # Hierarchical Zone & Intercept State Machine (HZISM)
+    │   └── README.md         # State machine architecture & decision logic
+    │
+    └── visualization/        # Graphic visualization & HUD (Pygame)
+        ├── renderer.py       # Procedural Octane vehicle, vector debug, telemetry HUD
+        └── README.md         # Coordinate mapping, HUD specs, and visual features
 ```
 
 ---
 
-## 2. Gymnasium Environment API (`rocket_league_env.py`)
+## 2. Gymnasium Environment API (`gym_env/rocket_league_env.py`)
 
 The environment implements the standard `gymnasium.Env` interface:
 
 ```python
 import gymnasium as gym
-from src.rocket_league_env import RocketLeagueEnv
+from src.gym_env.rocket_league_env import RocketLeagueEnv
 
 # Instantiate directly or via gym.make
 env = RocketLeagueEnv(render_mode="human", bot_type="heuristic_bot")
@@ -109,6 +124,6 @@ obs, info = env.reset()
 ## 4. Module Deep Dives
 
 For exhaustive mathematical equations and subsystem specifications, see:
-* [Core Physics Engine (`src/core/README.md`)](core/README.md)
-* [Opponent AI Controller (`src/ai/README.md`)](ai/README.md)
-* [Pygame Rendering Engine (`src/visualization/README.md`)](visualization/README.md)
+* [Core Physics Engine (`src/sim/core/README.md`)](sim/core/README.md)
+* [Opponent AI Controller (`src/sim/ai/README.md`)](sim/ai/README.md)
+* [Pygame Rendering Engine (`src/sim/visualization/README.md`)](sim/visualization/README.md)
