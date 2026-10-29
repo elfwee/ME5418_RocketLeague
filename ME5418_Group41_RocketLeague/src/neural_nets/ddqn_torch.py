@@ -9,7 +9,7 @@ from torch import nn
 from torch.nn import functional as F
 
 # Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[3]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
