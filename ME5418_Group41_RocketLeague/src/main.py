@@ -25,5 +25,5 @@ def main():
             from src.neural_nets.dqn_tf import test_nn
             test_nn()
         elif "--ddqn" in sys.argv:
-            from src.neural_nets.dqn_torch import run_network
+            from src.neural_nets.ddqn_torch import run_network
             run_network()

@@ -22,7 +22,7 @@ src/
 │
 ├── neural_nets/              # Deep Q-Network agents
 │   ├── dqn_tf.py             # DQN implementation in TensorFlow/Keras
-│   └── dqn_torch.py          # Dueling DQN implementation in PyTorch
+│   └── ddqn_torch.py          # Dueling DQN implementation in PyTorch
 │
 └── sim/                      # 2D simulation (physics, AI opponent, rendering)
     ├── game.py               # Interactive & headless game loops (play_interactive, play_headless)
