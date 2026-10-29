@@ -24,7 +24,6 @@ if GymConfig.gym_id not in gym.envs.registry:
     )
 
 # (dir_x, dir_y): none, right, left, down, up, down-right, up-right, down-left, up-left
-DIRECTIONS = [(0, 0), (1, 0), (-1, 0), (0, -1), (0, 1), (1, -1), (1, 1), (-1, -1), (-1, 1)]
 
 
 class RocketLeagueEnv(gym.Env):
@@ -80,7 +79,7 @@ class RocketLeagueEnv(gym.Env):
             boost = action % 2
         else:
             direction, jump, boost = action
-        dir_x, dir_y = DIRECTIONS[direction]
+        dir_x, dir_y = GymConfig.directions[direction]
         car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
 
         self.sim.step(car_action, 1.0 / SIM_HZ)

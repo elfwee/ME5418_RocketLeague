@@ -11,8 +11,6 @@ import sys
 
 from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
-from src.neural_nets.dqn_tf import test_nn
-
 
 def main():
     if "--play" in sys.argv:
@@ -22,13 +20,10 @@ def main():
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
             demo_gym()
-        elif "--nn" in sys.argv:
+        # Import lazily: loading TensorFlow and PyTorch in one process crashes (LLVM conflict)
+        elif "--dqn" in sys.argv:
+            from src.neural_nets.dqn_tf import test_nn
             test_nn()
-
-    # elif "--gym" in sys.argv:
-    #     # test_gym(render_mode="human", adversary_type="random")
-    #     test_gym(render_mode="human", adversary_type="none")
-    #     # test_gym(render_mode="terminal", adversary_type="none")
-    #
-    # elif "--net" in sys.argv:
-    #     test_nn()
+        elif "--ddqn" in sys.argv:
+            from src.neural_nets.dqn_torch import run_network
+            run_network()

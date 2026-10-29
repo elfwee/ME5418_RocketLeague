@@ -69,7 +69,10 @@ python -m src --demo --gym
 Run the neural network demo to instantiate the Dueling DQN and verify a complete forward pass (input state $\to$ output $Q(s, a)$ values) and backward pass (Double-DQN TD Huber loss $\to$ `loss.backward()` layer gradients $\to$ `optimizer.step()`):
 
 ```bash
-python -m src --demo --nn
+# Basic DQN
+python -m src --demo --dqn
+# Dueling DQN
+python -m src --demo --ddqn
 ```
 
 _(Or run the neural network module directly: `python src/algorithms/dqn/model.py`)_
