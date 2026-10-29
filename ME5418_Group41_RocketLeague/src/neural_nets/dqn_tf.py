@@ -90,8 +90,9 @@ def test_nn():
     expand_nested=True
     )
 
+    demo_steps = 5_000
     recent_episode_returns = deque(maxlen=20)
-    for step in range(3_000):
+    for step in range(demo_steps):
         epsilon = max(0.05, 1.0 - step / DQNConfig.epsilon_decay_steps)  # epsilon-greedy
         if random.random() < epsilon:
             action = random.randrange(DQNConfig.output_dim)

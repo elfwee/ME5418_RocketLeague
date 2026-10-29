@@ -13,13 +13,14 @@ from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+from src.config.gym_config import GymConfig
 
 # register env as gym environment
-if "rocket-league-v1" not in gym.envs.registry:
+if GymConfig.gym_id not in gym.envs.registry:
     gym.register(
-        id="rocket-league-v1",
-        entry_point="src.rocket_league_env:RocketLeagueEnv",
-        max_episode_steps=3600,
+        id=GymConfig.gym_id,
+        entry_point="src.gym_env.rocket_league_env:RocketLeagueEnv",
+        max_episode_steps=GymConfig.episode_max_steps,
     )
 
 # (dir_x, dir_y): none, right, left, down, up, down-right, up-right, down-left, up-left
@@ -110,7 +111,7 @@ class RocketLeagueEnv(gym.Env):
         if abs(delta_x) > 0.0001:
             # Non-linear weighting: x_factor exponentially amplifies rewards near the goal mouth (|ball_x| -> 1);
             # y_factor retains a 0.25 baseline for ground-rolling balls (ball_y <= -0.55) while rewarding elevated trajectories.
-            x_factor = np.exp(1 / (1.2 - ball_x ** 2))
+            x_factor = np.exp(1 / (1.2 - ball_x**2))
             y_factor = (1 - abs(ball_y)) ** 2 if ball_y > -0.55 else 0.25
             progress = delta_x * x_factor * y_factor
             if not ((progress <= 0.0 and last_touch == "blue") or (progress >= 0.0 and last_touch == "orange")):
@@ -153,28 +154,38 @@ class RocketLeagueEnv(gym.Env):
         if self.render_mode == "human" and pygame.get_init():
             pygame.quit()
 
+
 def my_check_env():
     from gymnasium.utils.env_checker import check_env
-    env = gym.make('rocket-league-v1', render_mode=None, bot_type='none', disable_env_checker=True)
+
+    env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="none", disable_env_checker=True)
     check_env(env.unwrapped)
     print("Environment check passed successfully!")
 
-if __name__ == "__main__":
+
+def demo_gym():
     my_check_env()
     bot_type = "heuristic_bot" if ENABLE_ORANGE_CAR else "none"
-    env = gym.make("rocket-league-v1", render_mode="human", bot_type=bot_type)
+    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type)
 
     obs, info = env.reset()
     total_reward = 0.0
 
+    step = 0
     while env.unwrapped.isopen:
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
 
+        with np.printoptions(precision=2, suppress=True):
+            print(f"step: {step}")
+            step+=1
+            print("Observed State: ", obs)
+
         if terminated or truncated:
             print(f"Episode reward: {total_reward:.4f}, terminated: {terminated}, truncated: {truncated}")
             obs, info = env.reset()
             total_reward = 0.0
+            break
 
     env.close()
