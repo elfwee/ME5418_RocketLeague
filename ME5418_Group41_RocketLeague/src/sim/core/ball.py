@@ -3,7 +3,7 @@ import math
 from collections import deque
 from typing import Deque, Tuple
 import pymunk
-from src.config import (
+from src.config.sim_config import (
     BALL_RADIUS, BALL_MASS, BALL_RESTITUTION,
     BALL_FRICTION, BALL_AIR_DRAG, BALL_SPIN_DRAG,
     BALL_MAX_SPEED, BALL_MAX_SPIN,

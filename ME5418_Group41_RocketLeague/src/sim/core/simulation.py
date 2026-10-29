@@ -3,7 +3,7 @@ import math
 import random
 from typing import Dict, Any, Optional, Tuple
 import pymunk
-from src.config import (
+from src.config.sim_config import (
     FIELD_WIDTH, FIELD_HEIGHT, MARGIN_X, MARGIN_Y,
     ARENA_DIAGONAL,
     CENTER_X, CENTER_Y, HALF_WIDTH, HALF_HEIGHT,
@@ -16,11 +16,11 @@ from src.config import (
     COLLISION_CAR_BODY, COLLISION_BALL, COLLISION_GOAL_SENSOR,
     ENABLE_ORANGE_CAR, ORANGE_IS_BOT
 )
-from src.core.actions import CarAction
-from src.core.arena import Arena
-from src.core.ball import Ball
-from src.core.car import Car
-from src.ai.heuristic_bot import HeuristicBot
+from src.sim.core.actions import CarAction
+from src.sim.core.arena import Arena
+from src.sim.core.ball import Ball
+from src.sim.core.car import Car
+from src.sim.ai.heuristic_bot import HeuristicBot
 
 
 def _clamp(val: float, low: float, high: float) -> float:

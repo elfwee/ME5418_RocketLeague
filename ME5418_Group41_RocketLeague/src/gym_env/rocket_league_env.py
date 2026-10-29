@@ -9,10 +9,10 @@ import pygame
 # Ensure repository root is on sys.path when invoked directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.core.actions import CarAction
-from src.core.simulation import Simulation
-from src.visualization.renderer import Renderer
-from src.config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+from src.sim.core.actions import CarAction
+from src.sim.core.simulation import Simulation
+from src.sim.visualization.renderer import Renderer
+from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 
 # register env as gym environment
 if "rocket-league-v1" not in gym.envs.registry:
