@@ -74,7 +74,7 @@ class DQN(nn.Module):
             return self.fc3(x)
 
 
-def run_network(enable_dueling_dqn = True):
+def run_dqn_network(enable_dueling_dqn = True):
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="heuristic_bot", discrete_action=True)
