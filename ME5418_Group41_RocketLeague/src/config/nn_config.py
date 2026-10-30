@@ -17,4 +17,20 @@ class DQNConfig:
     epsilon_decay_steps = 8000
     demo_max_steps = 5000
 
+@dataclass
+class PPOConfig:
+    input_dim = 52
+    output_dim = 36  # prod(action_dims): one Q-value per flattened action
+    hidden_size = 256
+    learning_rate = 0.99
+    buffer_size = 16_384
+    batch_size = 64
+    clipping_epsilon = 0.2
+    value_function_coefficient = 0.5
+    entropy_coefficient = 0.01
+    maximum_gradient_norm = 0.5
+    epochs = 10
+    target_kl = 0.03
+
+
 
