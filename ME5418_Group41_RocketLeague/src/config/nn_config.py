@@ -11,9 +11,10 @@ class DQNConfig:
     learning_rate = 1e-3
     discount_factor = 0.99
     buffer_size = 16_384
-    learning_start = 500
+    learning_start = 128
     batch_size = 64
     target_update_interval = 500
     epsilon_decay_steps = 8000
+    demo_max_steps = 5000
 
 
