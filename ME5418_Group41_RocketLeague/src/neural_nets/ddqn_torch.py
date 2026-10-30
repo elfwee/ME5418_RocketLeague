@@ -9,12 +9,13 @@ from torch import nn
 from torch.nn import functional as F
 
 # Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[3]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.rocket_league_env import RocketLeagueEnv, DIRECTIONS
 
+from src.gym_env.rocket_league_env import RocketLeagueEnv
+from src.config.gym_config import GymConfig
 
 class DQN(nn.Module):
     """Deep Q-Network supporting both Standard and Dueling DQN architectures.
@@ -76,7 +77,7 @@ class DQN(nn.Module):
 def run_network():
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = gym.make("rocket-league-v1", render_mode=None, bot_type="heuristic_bot", discrete_action=True)
+    env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="heuristic_bot", discrete_action=True)
 
     num_states = env.observation_space.shape[0]
     num_actions = env.action_space.n
@@ -115,7 +116,7 @@ def run_network():
     print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
     print(f"Output Q(s, .) Shape: {q_values.shape}")
     print(f"Output Q(s, .) Sample (first 6 actions): {q_values[0, :6].detach().cpu().numpy().round(4)}")
-    print(f"Selected Action   : {action_idx} -> dir={DIRECTIONS[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
+    print(f"Selected Action   : {action_idx} -> dir={GymConfig.directions[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
 
     # Step environment once with the selected action to observe transition (s, a, r, s', done)
     next_state, reward, terminated, truncated, _ = env.step(action_idx)
