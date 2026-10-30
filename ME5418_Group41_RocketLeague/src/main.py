@@ -29,3 +29,6 @@ def main():
         elif "--dueling_ddqn" in sys.argv:
             from src.neural_nets.dueling_ddqn_torch import run_network
             run_network()
+        elif "--ppo" in sys.argv:
+            from src.neural_nets.ppo import test_nn
+            test_nn()

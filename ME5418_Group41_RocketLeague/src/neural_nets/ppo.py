@@ -4,6 +4,7 @@ import tensorflow as tf
 from collections import deque
 
 from src.config.nn_config import PPOConfig
+from src.gym_env.rocket_league_env import RocketLeagueEnv
 
 from src.neural_nets.common import RolloutBuffer
 
@@ -18,7 +19,7 @@ class PPO:
     @staticmethod
     def _build_mlp(input_dim, hidden, out_dim):
         net = tf.keras.Sequential()
-        net.add(tf.keras.Input(input_dim))
+        net.add(tf.keras.Input((input_dim,)))
         for units in hidden:
             net.add(tf.keras.layers.Dense(units, activation="tanh"))
         net.add(tf.keras.layers.Dense(out_dim))
@@ -26,7 +27,7 @@ class PPO:
 
     @property
     def trainable_variables(self):
-        return self.actor.trainable_variables + self.critic.trainable_variables
+        return self.actor_net.trainable_variables + self.critic_net.trainable_variables
         
     # ------------------------------------------------------------------
     # Forward propagation
@@ -85,8 +86,8 @@ class PPO:
             loss = policy_loss + PPOConfig.value_function_coefficient * value_loss - PPOConfig.entropy_coefficient * entropy_mean
 
         grads = tape.gradient(loss, self.trainable_variables)
-        grads, _ = tf.clip_by_global_norm(grads, self.max_grad_norm)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        grads, _ = tf.clip_by_global_norm(grads, PPOConfig.maximum_gradient_norm)
+        self.optimiser.apply_gradients(zip(grads, self.trainable_variables))
 
         approx_kl = tf.reduce_mean(old_log_prob - new_log_prob)
         return {
@@ -109,17 +110,29 @@ class PPO:
                 break
         return {k: float(v) for k, v in stats.items()}
 
-    # ------------------------------------------------------------------
-    # Saving and loading
-    # ------------------------------------------------------------------
-    def save(self, path_prefix):
-        self.actor.save_weights(f"{path_prefix}_actor.weights.h5")
-        self.critic.save_weights(f"{path_prefix}_critic.weights.h5")
+def test_nn(rollout_len=256, seed=0):
+    ppo = PPO()
+    buffer = RolloutBuffer()
+    env = RocketLeagueEnv()
+    obs, _ = env.reset()
 
-    def load(self, path_prefix):
-        self.actor.load_weights(f"{path_prefix}_actor.weights.h5")
-        self.critic.load_weights(f"{path_prefix}_critic.weights.h5")
+    for update in range(100):
+        buffer.reset()
 
-def test_nn():
-    # Quick smoke test on the gym environment
-    net = PPO()
+        # Play and record
+        for _ in range(2048):
+            action, log_prob, value = ppo.act(obs)
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+            buffer.add(obs, action, log_prob, reward, done, value)
+            obs = next_obs
+            if done:
+                obs, _ = env.reset()
+
+        # Compute advantages, then learn
+        buffer.finish(ppo.get_value(obs), gamma=0.99, lam=0.95)
+        stats = ppo.update(buffer, epochs=10, batch_size=64, target_kl=0.03)
+        print(f"update: {update}, stat: {stats['policy_loss']:.2f}, {stats['value_loss']:.2f}")
+
+if __name__ == "__main__":
+    test_nn()

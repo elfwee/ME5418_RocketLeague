@@ -22,7 +22,7 @@ class PPOConfig:
     input_dim = 52
     output_dim = 36  # prod(action_dims): one Q-value per flattened action
     hidden_size = 256
-    learning_rate = 0.99
+    learning_rate = 3e-4
     buffer_size = 16_384
     batch_size = 64
     clipping_epsilon = 0.2
