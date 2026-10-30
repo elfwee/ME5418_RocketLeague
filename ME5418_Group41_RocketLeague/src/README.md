@@ -21,8 +21,6 @@ src/
 │   └── rocket_league_env.py  # RocketLeagueEnv (action/observation space, reward, step, reset)
 │
 ├── neural_nets/              # Deep Q-Network agents
-│   ├── dqn_tf.py             # Vanilla DQN implementation in TensorFlow/Keras
-│   ├── double_dqn_tf.py      # Double DQN implementation in TensorFlow/Keras
 │   └── dueling_ddqn_torch.py # Dueling Double DQN implementation in PyTorch
 │
 └── sim/                      # 2D simulation (physics, AI opponent, rendering)
