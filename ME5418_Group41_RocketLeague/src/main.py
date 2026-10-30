@@ -11,7 +11,7 @@ import sys
 
 from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
-from src.neural_nets.dueling_ddqn_torch import run_network
+from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 
 def main():
     if "--play" in sys.argv:
@@ -22,6 +22,7 @@ def main():
         if "--gym" in sys.argv:
             demo_gym()
         elif "--double_dqn" in sys.argv:
-            run_network(enable_dueling_dqn=False)
+            run_dqn_network(enable_dueling_dqn=False)
         elif "--dueling_ddqn" in sys.argv:
-            run_network()
+            run_dqn_network(enable_dueling_dqn=True)
+            
