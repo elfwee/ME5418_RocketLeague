@@ -22,8 +22,8 @@ def main():
             demo_gym()
         # Import lazily: loading TensorFlow and PyTorch in one process crashes (LLVM conflict)
         elif "--dqn" in sys.argv:
-            from src.neural_nets.dqn_tf import test_nn
+            from src.neural_nets.double_dqn_tf import test_nn
             test_nn()
         elif "--ddqn" in sys.argv:
-            from src.neural_nets.ddqn_torch import run_network
+            from ME5418_Group41_RocketLeague.src.neural_nets.dueling_ddqn_torch import run_network
             run_network()
