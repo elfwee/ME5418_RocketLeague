@@ -33,14 +33,14 @@ class DoubleDQN():
     @tf.function
     def _back_propagation(self, state, action, reward, next_state, done):
         # ONLINE NETWORK
-        best_action = tf.argmax(self.q_net(next_state, training=False, axis=1), output_type=tf.int32)
+        best_action = tf.argmax(self.q_net(next_state, training=False), axis=1, output_type=tf.int32)
         # TARGET NETWORK
-        next_q = tf.gather(self.target_net(next_state, training=False), best_action, DQNConfig.batch_size)
-         
-        td_target = reward + tf.constant(DQNConfig.discount_factor, shape=DQNConfig.batch_size) * (1.0 - done) * next_q
+        next_q = tf.gather(self.target_net(next_state, training=False), best_action, batch_dims=1)
+
+        td_target = reward + DQNConfig.discount_factor * (1.0 - done) * next_q
         with tf.GradientTape() as tape:
             q_all = self.q_net(state, training=True)
-            q_sa = tf.gather(q_all, action, DQNConfig.batch_size)
+            q_sa = tf.gather(q_all, action, batch_dims=1)
             loss = self.loss_fn(td_target, q_sa)
         gradients = tape.gradient(loss, self.q_net.trainable_variables)
         self.optimiser.apply_gradients(zip(gradients, self.q_net.trainable_variables))
@@ -58,9 +58,8 @@ def test_nn():
     episode_return = 0.0
 
     print("Q-values:", net._forward_pass(observation[np.newaxis, :]).numpy())
-    demo_steps = 5_000
     recent_episode_returns = deque(maxlen=20)
-    for step in range(demo_steps):
+    for step in range(DQNConfig.demo_max_steps):
         epsilon = max(0.05, 1.0 - step / DQNConfig.epsilon_decay_steps)  # epsilon-greedy
         if random.random() < epsilon:
             action = random.randrange(DQNConfig.output_dim)
@@ -86,7 +85,7 @@ def test_nn():
                                tf.constant(batch_rewards), tf.constant(batch_next_states),
                                tf.constant(batch_terminals))
             if step % DQNConfig.target_update_interval == 0:
-                net.target_net.set_weights(net.q_net.get_weights())
-            if step % 2000 == 0:
+                net.sync_target()
+            if step % int(DQNConfig.demo_max_steps//10) == 0:
                 mean_return = sum(recent_episode_returns) / max(len(recent_episode_returns), 1)
                 print(f"  step: {step:6d} | eps: {epsilon:.2f} | train return: {mean_return:6.1f} | episodes: {len(recent_episode_returns)}")

@@ -27,5 +27,5 @@ def main():
             from src.neural_nets.double_dqn_tf import test_nn
             test_nn()
         elif "--dueling_ddqn" in sys.argv:
-            from ME5418_Group41_RocketLeague.src.neural_nets.dueling_ddqn_torch import run_network
+            from src.neural_nets.dueling_ddqn_torch import run_network
             run_network()
