@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.config.gym_config import GymConfig
+from src.config.nn_config import DQNConfig
 
 class DQN(nn.Module):
     """Deep Q-Network supporting both Standard and Dueling DQN architectures.
@@ -74,29 +75,38 @@ class DQN(nn.Module):
             return self.fc3(x)
 
 
-def run_dqn_network(enable_dueling_dqn = True):
+def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = True):
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="heuristic_bot", discrete_action=True)
 
     num_states = env.observation_space.shape[0]
     num_actions = env.action_space.n
-    hidden_dim = 256
+    hidden_dim = DQNConfig.hidden_size
 
-    # 1. Create Policy and Target Dueling DQN Networks
-    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn).to(device)
-    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn).to(device)
+    # 1. Create Policy and Target DQN Networks
+    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=enable_dueling_dqn).to(device)
+    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=enable_dueling_dqn).to(device)
     target_dqn.load_state_dict(policy_dqn.state_dict())
     target_dqn.eval()
 
-    optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=DQNConfig.learning_rate)
     criterion = nn.SmoothL1Loss()  # Huber loss for Temporal-Difference (TD) error
-    gamma = 0.99
+    gamma = DQNConfig.discount_factor
+
+    arch_label = (
+        "DUELING DOUBLE DQN" if (enable_dueling_dqn and enable_double_dqn)
+        else ("DOUBLE DQN" if enable_double_dqn else "VANILLA DQN")
+    )
+    total_params = sum(p.numel() for p in policy_dqn.parameters() if p.requires_grad)
 
     print("=" * 65)
-    print("1. NETWORK ARCHITECTURE (DUELING DQN)")
+    print(f"1. NETWORK ARCHITECTURE ({arch_label})")
     print("=" * 65)
-    print(f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions} | Hidden Dim: {hidden_dim}")
+    print(
+        f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions} | "
+        f"Hidden Dim: {hidden_dim} | Trainable Params: {total_params:,}"
+    )
     print(policy_dqn)
 
     # 2. Forward Pass with Environment Observation
@@ -125,9 +135,13 @@ def run_dqn_network(enable_dueling_dqn = True):
 
     # 3. Backward Pass (TD Target, Loss Computation & Gradient Backpropagation)
     with torch.no_grad():
-        # Double DQN target: select best next action using policy network, evaluate using target network
-        next_best_action = policy_dqn(next_state_tensor).argmax(dim=-1, keepdim=True)
-        next_q_value = target_dqn(next_state_tensor).gather(1, next_best_action).squeeze(1)
+        if enable_double_dqn:
+            # Double DQN target: select best next action using policy network, evaluate using target network
+            next_best_action = policy_dqn(next_state_tensor).argmax(dim=-1, keepdim=True)
+            next_q_value = target_dqn(next_state_tensor).gather(1, next_best_action).squeeze(1)
+        else:
+            # Vanilla DQN target: target network both selects and evaluates max_a' Q_target(s', a')
+            next_q_value = target_dqn(next_state_tensor).max(dim=-1)[0]
         q_target = torch.tensor([reward], dtype=torch.float32, device=device) + gamma * (1.0 - float(done)) * next_q_value
 
     # Predicted Q(s, a) for the executed action
@@ -161,5 +175,9 @@ def run_dqn_network(enable_dueling_dqn = True):
     env.close()
 
 
+# Alias for backward compatibility
+run_network = run_dqn_network
+
+
 if __name__ == "__main__":
-    run_network()
+    run_dqn_network()

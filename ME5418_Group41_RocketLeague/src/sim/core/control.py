@@ -6,20 +6,24 @@ from src.sim.core.simulation import Simulation
 from typing import Dict, Any, Optional, Tuple
 
 class CarControl():
-    """
+    """Controller wrapper dispatching car actions by control source.
+
     - control_type:
         - none: returns empty action
         - human: enables keyboard control
-        - level3: uses heuristics bot
+        - random: samples a random action every 0.5s
+        - heuristic_bot: uses HeuristicBot (HZISM)
     - team:
         - orange
         - blue
-    - sim: Simulation needed for Heuristics Bot
+    - sim: Simulation needed for HeuristicBot
     """
-    def __init__(self, control_type:str = "none", team:str = "blue", sim:Optional[Simulation] = None):
+    def __init__(self, control_type: str = "none", team: str = "blue", sim: Optional[Simulation] = None):
         self.control_type = control_type
         self.sim = sim
         self.team = team
+        self.random_action = CarAction()
+        self.bot = HeuristicBot(team=self.team) if self.control_type == "heuristic_bot" else None
 
     def get_action(self):
         action = CarAction()
@@ -56,19 +60,22 @@ class CarControl():
             )
 
         elif self.control_type == "random":
-            if self.sim.match_time % 0.5 < 0.001:
-                self.random_action = CarAction(dir_x={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)], 
-                                   dir_y={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)],
-                                   jump={0: False, 1: True}[np.random.randint(2)],
-                                   boost={0: False, 1: True}[np.random.randint(2)])
+            if self.sim is not None and self.sim.match_time % 0.5 < 0.001:
+                self.random_action = CarAction(
+                    dir_x={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)],
+                    dir_y={0: 0.0, 1: 1.0, 2: -1.0}[np.random.randint(3)],
+                    jump={0: False, 1: True}[np.random.randint(2)],
+                    boost={0: False, 1: True}[np.random.randint(2)],
+                )
             action = self.random_action
 
         elif self.control_type == "heuristic_bot":
-            self.bot = HeuristicBot(team=self.team)
+            if self.bot is None:
+                self.bot = HeuristicBot(team=self.team)
             action = self.bot.compute_action(self.sim)
 
         return action
 
     def reset(self):
-        if self.control_type == "heuristic_bot":
+        if self.control_type == "heuristic_bot" and self.bot is not None:
             self.bot.reset()

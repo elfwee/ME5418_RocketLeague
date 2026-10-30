@@ -1,4 +1,4 @@
-# Visualization & Telemetry Interface (`src/visualization/`)
+# Visualization & Telemetry Interface (`src/sim/visualization/`)
 
 This directory contains the 2D rendering pipeline, procedural Octane vehicle graphics, vector visualizers, and real-time HUD telemetry powered by Pygame.
 
