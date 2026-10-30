@@ -6,40 +6,9 @@ from collections import deque
 from src.config.nn_config import DQNConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv
 
-# Define a helper function to create Dense layers configured with identical activation and kernel_initializer
-def dense_layer(num_units):
-  return tf.keras.layers.Dense(
-      num_units,
-      activation=tf.keras.activations.relu,
-      kernel_initializer=tf.keras.initializers.VarianceScaling(
-          scale=2.0, mode='fan_in', distribution='truncated_normal'))
+from src.neural_nets.common import multi_layer_perceptron, ReplayBuffer
 
-# Definer helper function to create an MLP
-def multi_layer_perceptron(input_dim : tuple[int, ...], 
-                                 output_layer:tf.keras.layers.Dense, 
-                                 hidden_layer:int = 2, 
-                                 hidden_size:int = 64, ) -> tf.keras.Sequential:
-    return tf.keras.Sequential([tf.keras.Input(shape=input_dim)] + 
-        [dense_layer(hidden_size) for i in range(hidden_layer)] + 
-        [output_layer])
-
-class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)   # old data falls off the end
-
-    def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)   # uniform random
-        state, action, reward, next_state, done = map(np.array, zip(*batch))
-        return (state.astype(np.float32), action.astype(np.int32), reward.astype(np.float32),
-                next_state.astype(np.float32), done.astype(np.float32))
-
-    def __len__(self):
-        return len(self.buffer)
-
-class DQN():
+class DoubleDQN():
     def __init__(self):
         # BUILD NEURAL NETWORK
         q_output = tf.keras.layers.Dense(DQNConfig.output_dim, activation=None)
@@ -47,10 +16,11 @@ class DQN():
         self.q_net = multi_layer_perceptron(DQNConfig.input_dim, q_output, DQNConfig.hidden_layer, DQNConfig.hidden_size)
         self.target_net = multi_layer_perceptron(DQNConfig.input_dim, target_output, DQNConfig.hidden_layer, DQNConfig.hidden_size)
         self.target_net.set_weights(self.q_net.get_weights()) # make target and q networks identical
-
+        # SET OPTIMISER
         self.optimiser = tf.keras.optimizers.SGD(DQNConfig.learning_rate)
-        self.discount_factor = tf.constant(DQNConfig.discount_factor)
-        
+        # LOSS FUNTION
+        self.loss_fn = tf.keras.losses.Huber()
+        # BUFFER
         self.experience_buffer = ReplayBuffer(DQNConfig.buffer_size)
 
     def _forward_pass(self, state):
@@ -62,34 +32,32 @@ class DQN():
 
     @tf.function
     def _back_propagation(self, state, action, reward, next_state, done):
-        # Bellman target from the slowly-updated target network
-        max_next_q_values = tf.reduce_max(self.target_net(next_state), axis=1)
-        temporal_difference_targets = reward + self.discount_factor * (1.0 - done) * max_next_q_values
+        # ONLINE NETWORK
+        best_action = tf.argmax(self.q_net(next_state, training=False, axis=1), output_type=tf.int32)
+        # TARGET NETWORK
+        next_q = tf.gather(self.target_net(next_state, training=False), best_action, DQNConfig.batch_size)
+         
+        td_target = reward + tf.constant(DQNConfig.discount_factor, shape=DQNConfig.batch_size) * (1.0 - done) * next_q
         with tf.GradientTape() as tape:
-            q_all = self._forward_pass(state) # Q(s, ·; θ), shape (batch_size, output_dim)
-            action_mask = tf.one_hot(action, DQNConfig.output_dim) # shape (batch_size, output_dim)
-            q_taken = tf.reduce_sum(q_all * action_mask, axis=1) # Q(s, a; θ), shape (batch_size,)
-            loss = tf.reduce_mean(tf.keras.losses.huber(temporal_difference_targets, q_taken))
+            q_all = self.q_net(state, training=True)
+            q_sa = tf.gather(q_all, action, DQNConfig.batch_size)
+            loss = self.loss_fn(td_target, q_sa)
         gradients = tape.gradient(loss, self.q_net.trainable_variables)
         self.optimiser.apply_gradients(zip(gradients, self.q_net.trainable_variables))
+        return loss
+
+    def sync_target(self):
+        self.target_net.set_weights(self.q_net.get_weights())
 
 def test_nn():
     # Quick smoke test on the gym environment
     env = RocketLeagueEnv()
-    net = DQN()
+    net = DoubleDQN()
     observation, info = env.reset()
     observation = np.asarray(observation, dtype=np.float32)
     episode_return = 0.0
 
     print("Q-values:", net._forward_pass(observation[np.newaxis, :]).numpy())
-
-    tf.keras.utils.plot_model(net.q_net,
-    to_file="model_architecture.png",
-    show_shapes=True,
-    show_layer_names=True,
-    expand_nested=True
-    )
-
     demo_steps = 5_000
     recent_episode_returns = deque(maxlen=20)
     for step in range(demo_steps):
