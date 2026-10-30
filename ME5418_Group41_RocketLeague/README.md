@@ -23,11 +23,12 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
-- 🧠 **[Dueling DQN Neural Network (`src/algorithms/dqn/model.py`)](./src/neural_nets/ddqn_torch.py)**: PyTorch `nn.Module` supporting standard and Dueling DQN streams, `LayerNorm` stabilization, and standalone forward/backward pass verification.
+- 🧠 **[Dueling DQN Neural Network (`src/neural_nets/ddqn_torch.py`)](./src/neural_nets/ddqn_torch.py)**: PyTorch `nn.Module` supporting standard and Dueling DQN streams, `LayerNorm` stabilization, and standalone forward/backward pass verification.
+- 🧠 **[Basic DQN Neural Network (`src/neural_nets/dqn_tf.py`)](./src/neural_nets/dqn_tf.py)**: tf.keras
 - 📚 **[System & RL Environment (`src/README.md`)](./src/README.md)**: Gymnasium observation/action spaces, reward shaping formulation, telemetry API, and control scheme.
-- ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](./src/sim/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
-- 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](./src/sim/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
-- 🎨 **[Visualization & HUD Telemetry (`src/visualization/README.md`)](./src/sim/visualization/README.md)**: Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and HUD layout.
+- ⚙️ **[Physics & Vehicle Kinematics (`src/sim/core/README.md`)](./src/sim/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
+- 🤖 **[Opponent AI Architecture (`src/sim/ai/README.md`)](./src/sim/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
+- 🎨 **[Visualization & HUD Telemetry (`src/sim/visualization/README.md`)](./src/sim/visualization/README.md)**: Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and HUD layout.
 
 ---
 
