@@ -74,7 +74,7 @@ class DQN(nn.Module):
             return self.fc3(x)
 
 
-def run_network():
+def run_network(enable_dueling_dqn = True):
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="heuristic_bot", discrete_action=True)
@@ -84,8 +84,8 @@ def run_network():
     hidden_dim = 256
 
     # 1. Create Policy and Target Dueling DQN Networks
-    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=True).to(device)
-    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=True).to(device)
+    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn).to(device)
+    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn).to(device)
     target_dqn.load_state_dict(policy_dqn.state_dict())
     target_dqn.eval()
 
