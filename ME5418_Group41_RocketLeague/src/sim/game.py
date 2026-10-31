@@ -1,19 +1,20 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
+
 import sys
 import os
 
 import pygame
-from src.config.sim_config import (
-    SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
-)
+from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
+from src.sim.visualization.event_handling import handle_event
 
 
 def play_interactive(enable_orange: bool = True):
     """Launch the Pygame interactive sandbox with 2D vector controls and Octane physics."""
+    blue_control = CarControl(control_type="human", team="blue")
     pygame.init()
     pygame.joystick.init()
 
@@ -29,81 +30,24 @@ def play_interactive(enable_orange: bool = True):
     clock = pygame.time.Clock()
 
     sim = Simulation(enable_orange=enable_orange)
+    blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
+    orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim)
+
     renderer = Renderer(screen)
 
     running = True
     while running:
         dt = 1.0 / SIM_HZ
 
-        # --- Event Handling ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key == pygame.K_r:
-                    sim.reset()
-                elif event.key == pygame.K_b:
-                    # Toggle Orange bot on/off
-                    sim.set_orange_enabled(not sim.enable_orange, is_bot=True)
-                elif event.key == pygame.K_l:
-                    # Toggle 45-degree boundary raycasts on/off
-                    renderer.show_raycasts = not renderer.show_raycasts
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    renderer.handle_click(event.pos)
+        running = handle_event(sim, renderer)
 
         # --- Input Mapping: 2D Direction Vector ---
-        action = CarAction()
-        keys = pygame.key.get_pressed()
-
-        dir_x = 0.0
-        dir_y = 0.0
-
-        # Keyboard directional input: WASD or Arrow Keys
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            dir_x += 1.0
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            dir_x -= 1.0
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
-            dir_y += 1.0
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            dir_y -= 1.0
-
-        # Gamepad analog stick input (if connected)
-        if gamepad is not None:
-            gx = gamepad.get_axis(0)
-            gy = -gamepad.get_axis(1)  # Invert stick Y so +Y is up
-            if abs(gx) > 0.15 or abs(gy) > 0.15:
-                dir_x = gx
-                dir_y = gy
-
-        action.dir_x = dir_x
-        action.dir_y = dir_y
-        action.clamp()
-
-        # Safe button query helper
-        def _gamepad_btn(pad, idx: int) -> bool:
-            if pad is None:
-                return False
-            try:
-                return pad.get_numbuttons() > idx and bool(pad.get_button(idx))
-            except (pygame.error, SystemError):
-                return False
-
-        # Jump: Space bar or Gamepad Button A (button 0)
-        action.jump = bool(keys[pygame.K_SPACE] or _gamepad_btn(gamepad, 0))
-
-        # Rocket Boost: Shift, O, J, or Gamepad Button B / Trigger (buttons 1, 5)
-        action.boost = bool(
-            keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or
-            keys[pygame.K_o] or keys[pygame.K_j] or
-            _gamepad_btn(gamepad, 1) or _gamepad_btn(gamepad, 5)
-        )
+        blue_action = blue_control.get_action()
+        orange_action = orange_control.get_action()
 
         # --- Simulation Step ---
-        sim.step(action, dt)
+        sim.step(action=blue_action, dt=dt, action_orange=orange_action)
+        sim.get_state_norm(as_flat_array=True)
 
         # --- Render ---
         renderer.render(sim)
@@ -133,4 +77,3 @@ def play_headless(steps: int = 300, enable_orange: bool = True):
             print(line)
 
     print("Headless simulation benchmark completed successfully!")
-
