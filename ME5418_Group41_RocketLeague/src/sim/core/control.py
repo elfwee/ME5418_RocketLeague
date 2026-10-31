@@ -10,7 +10,7 @@ class CarControl:
     """Controller wrapper dispatching car actions by control source.
 
     - control_type:
-        - none: returns empty action
+        - passive: returns empty action
         - human: enables keyboard control
         - random: samples a random action every 0.5s
         - heuristic_bot: uses HeuristicBot (HZISM)
