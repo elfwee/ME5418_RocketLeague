@@ -5,7 +5,8 @@ from src.sim.ai.heuristic_bot import HeuristicBot
 from src.sim.core.simulation import Simulation
 from typing import Dict, Any, Optional, Tuple
 
-class CarControl():
+
+class CarControl:
     """Controller wrapper dispatching car actions by control source.
 
     - control_type:
@@ -18,17 +19,17 @@ class CarControl():
         - blue
     - sim: Simulation needed for HeuristicBot
     """
+
     def __init__(self, control_type: str = "none", team: str = "blue", sim: Optional[Simulation] = None):
         self.control_type = control_type
         self.sim = sim
         self.team = team
-        self.random_action = CarAction()
         self.bot = HeuristicBot(team=self.team) if self.control_type == "heuristic_bot" else None
+        self.action = CarAction()
 
     def get_action(self):
-        action = CarAction()
-        if self.control_type == "none":
-            pass
+        if self.control_type == "passive":
+            self.action = CarAction(dir_x=0, dir_y=0, jump=False, boost=False)
 
         elif self.control_type == "human":
             # gets keyboard input into CarAction
@@ -47,16 +48,15 @@ class CarControl():
             if keys[pygame.K_s] or keys[pygame.K_DOWN]:
                 dir_y -= 1.0
 
-            action.dir_x = dir_x
-            action.dir_y = dir_y
+            self.action.dir_x = dir_x
+            self.action.dir_y = dir_y
 
             # Jump: Space bar or Gamepad Button A (button 0)
-            action.jump = bool(keys[pygame.K_SPACE])
+            self.action.jump = bool(keys[pygame.K_SPACE])
 
             # Rocket Boost: Shift, O, J, or Gamepad Button B / Trigger (buttons 1, 5)
-            action.boost = bool(
-                keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or
-                keys[pygame.K_o] or keys[pygame.K_j]
+            self.action.boost = bool(
+                keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or keys[pygame.K_o] or keys[pygame.K_j]
             )
 
         elif self.control_type == "random":
@@ -67,15 +67,16 @@ class CarControl():
                     jump={0: False, 1: True}[np.random.randint(2)],
                     boost={0: False, 1: True}[np.random.randint(2)],
                 )
-            action = self.random_action
+            self.action = self.random_action
 
         elif self.control_type == "heuristic_bot":
             if self.bot is None:
                 self.bot = HeuristicBot(team=self.team)
-            action = self.bot.compute_action(self.sim)
+            self.action = self.bot.compute_action(self.sim)
 
-        return action
+        return self.action
 
     def reset(self):
+        self.action = CarAction(dir_x=0, dir_y=0, jump=False, boost=False)
         if self.control_type == "heuristic_bot" and self.bot is not None:
             self.bot.reset()
