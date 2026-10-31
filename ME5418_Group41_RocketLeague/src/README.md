@@ -20,8 +20,8 @@ src/
 ├── gym_env/                  # Gymnasium RL environment
 │   └── rocket_league_env.py  # RocketLeagueEnv (action/observation space, reward, step, reset)
 │
-├── neural_nets/              # Deep Q-Network agents
-│   └── dueling_ddqn_torch.py # Dueling Double DQN implementation in PyTorch
+├── neural_nets/              # Deep Q-Network architecture & forward/backward pass demo
+│   └── dueling_ddqn_torch.py # DQN / Double DQN / Dueling Double DQN in PyTorch
 │
 └── sim/                      # 2D simulation (physics, AI opponent, rendering)
     ├── game.py               # Interactive & headless game loops (play_interactive, play_headless)
@@ -61,10 +61,11 @@ obs, info = env.reset()
 
 ### A. Action Space
 
-- `MultiDiscrete([9, 2, 2])`:
+- `Discrete(36)` (default when `discrete_action=True`) or `MultiDiscrete([9, 2, 2])` (when `discrete_action=False`):
     - Direction (9): `0`: None, `1`: Right, `2`: Left, `3`: Down, `4`: Up, `5`: Down-Right, `6`: Up-Right, `7`: Down-Left, `8`: Up-Left
     - Jump (2): `0`: Off, `1`: Jump / Dodge flip
     - Boost (2): `0`: Off, `1`: Rocket boost
+    - In flattened `Discrete(36)` mode, action index $a \in \{0, \dots, 35\}$ decodes as `direction = a // 4`, `jump = (a % 4) // 2`, `boost = a % 2`.
 
 ### B. Observation Space (52-Dimensional Flat Vector)
 
@@ -101,11 +102,10 @@ obs, info = env.reset()
     - Orange scores in Blue goal: $-20.0$
     - Terminates the episode upon goal event.
 - **Dense Intermediate Shaping**:
-    - **Ball Progress**: Positively rewards ball displacement toward the opponent's goal scaled by position proximity factors:
-      $$r_{progress} = \Delta x_{ball} \cdot e^{\frac{1}{1.2 - x_{ball}^2}} \cdot (1 - |y_{ball}|)^2 \quad (\text{for } y_{ball} > -0.55, \text{ else } 0)$$
-    - **Ball Distance Penalty**: $-0.01 \times d_{\text{norm}}(\text{car}, \text{ball})$ where $d_{\text{norm}} \in [0, 1]$ is the normalized relative distance
+    - **Ball Progress**: Positively rewards ball displacement toward the opponent's goal scaled by position proximity factors (retaining a $0.25$ baseline when ground-rolling at $y_{\text{ball}} \le -0.55$):
+      $$r_{\text{progress}} = \Delta x_{\text{ball}} \cdot e^{\frac{1}{1.2 - x_{\text{ball}}^2}} \cdot y_{\text{factor}}, \quad y_{\text{factor}} = \begin{cases} (1 - |y_{\text{ball}}|)^2 & \text{if } y_{\text{ball}} > -0.55 \\ 0.25 & \text{otherwise} \end{cases}$$
+    - **Potential-Based Ball Approach & Distance Shaping**: $+1.5 \times (d_{\text{prev}} - d_{\text{curr}}) - 0.005 \times d_{\text{curr}}$, where $d \in [0, 1]$ is the normalized car-to-ball distance
     - **Time Step Penalty**: $-0.001$ per step
-    - **Control Churn Penalty**: $-0.001$ on abrupt changes in commanded direction vector
 
 ---
 
