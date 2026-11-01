@@ -11,6 +11,7 @@ if ROOT_DIR not in sys.path:
 from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
 from src.neural_nets.dueling_ddqn_torch import run_dqn_network
+from src.neural_nets.a2c_torch import test_a2c_torch
 
 
 def main():
@@ -28,13 +29,16 @@ def main():
             run_dqn_network(enable_dueling_dqn=False, enable_double_dqn=True)
         elif "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
             run_dqn_network(enable_dueling_dqn=True, enable_double_dqn=True)
+        elif "--a2c" in sys.argv or "-a2c" in sys.argv:
+            test_a2c_torch()
         else:
             print(
                 "Please specify a demo target:\n"
                 "  python -m src --demo --gym           # Gymnasium environment demo\n"
                 "  python -m src --demo --dqn           # Vanilla DQN (PyTorch)\n"
                 "  python -m src --demo --double_dqn    # Double DQN (PyTorch)\n"
-                "  python -m src --demo --dueling_ddqn  # Dueling Double DQN (PyTorch) [alias: --ddqn]"
+                "  python -m src --demo --dueling_ddqn  # Dueling Double DQN (PyTorch) [alias: --ddqn]\n"
+                "  python -m src --demo --a2c           # Advantage Actor-Critic (PyTorch) [alias: -a2c]"
             )
     else:
         print(
