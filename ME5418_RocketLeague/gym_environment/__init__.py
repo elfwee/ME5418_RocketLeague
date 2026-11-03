@@ -1,1 +1,0 @@
-"""Gym Package for 2D Rocket League"""
