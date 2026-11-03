@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
+from src.gym_env.gif_saver import GifSaver
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 from src.config.gym_config import GymConfig
 
@@ -26,10 +27,29 @@ if GymConfig.gym_id not in gym.envs.registry:
 # (dir_x, dir_y): none, right, left, down, up, down-right, up-right, down-left, up-left
 
 
+def decode_action(action, discrete_action=True):
+    """Convert a gym action (index in [0, 36) or [dir, jump, boost]) into a CarAction."""
+    if discrete_action:
+        action = int(action)
+        direction = action // 4
+        jump = (action % 4) // 2
+        boost = action % 2
+    else:
+        direction, jump, boost = action
+    dir_x, dir_y = GymConfig.directions[direction]
+    return CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
+
+
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
+    def __init__(self, render_mode=None, bot_type="none", discrete_action=True, gif_path=None):
+        """
+        Args:
+            gif_path: If set, each episode is recorded from kickoff and saved as a GIF to this
+                path when a goal is scored. May contain "{episode}" to keep one file per episode,
+                otherwise the file is overwritten. Works with or without render_mode="human".
+        """
         if bot_type not in ("none", "heuristic_bot"):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
 
@@ -55,6 +75,14 @@ class RocketLeagueEnv(gym.Env):
             self.renderer = Renderer(pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT)))
             self.clock = pygame.time.Clock()
 
+        self.gif_path = gif_path
+        self.gif_saver = GifSaver() if gif_path else None
+        self.episode = 0
+        if self.gif_saver is not None and self.render_mode != "human":
+            # Offscreen surface: frames are rendered without opening a window
+            pygame.init()
+            self.renderer = Renderer(pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)))
+
     def _get_obs(self):
         return np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
 
@@ -70,22 +98,36 @@ class RocketLeagueEnv(gym.Env):
         self.dist_prev = None
         self.input_prev = None
         self.render()
+        if self.gif_saver is not None:
+            self.episode += 1
+            self.gif_saver.clear()
+            self._capture_frame(force=True)
         return self._get_obs(), {}
 
     def step(self, action):
-        if self.discrete_action:
-            direction = action // 4
-            jump = (action % 4) // 2
-            boost = action % 2
-        else:
-            direction, jump, boost = action
-        dir_x, dir_y = GymConfig.directions[direction]
-        car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
-
+        car_action = decode_action(action, self.discrete_action)
         self.sim.step(car_action, 1.0 / SIM_HZ)
         reward, terminated = self._calculate_reward()
         self.render()
-        return self._get_obs(), reward, terminated, not self.isopen, {}
+        info = {}
+        if self.gif_saver is not None:
+            if self.sim.goal_scored_this_step is not None:
+                # The sim resets to kickoff in the same step a goal is scored, so the
+                # current state is not captured; the last buffered frame is the goal.
+                path = self.gif_path.format(episode=self.episode)
+                if self.gif_saver.save(path):
+                    info["gif_path"] = path
+                self.gif_saver.clear()
+            else:
+                self._capture_frame()
+        return self._get_obs(), reward, terminated, not self.isopen, info
+
+    def _capture_frame(self, force=False):
+        if not self.isopen:
+            return
+        if self.render_mode != "human":
+            self.renderer.render(self.sim)  # human mode already drew this frame in render()
+        self.gif_saver.capture(self.renderer.screen, force=force)
 
     def _calculate_reward(self):
         state = self.sim.get_state_norm()
@@ -118,7 +160,7 @@ class RocketLeagueEnv(gym.Env):
         self.ball_prev = ball_x
 
         # Potential-based car-to-ball approach shaping + distance and time penalty
-        dist = abs(state["relations"]["agent_to_ball"]["magnitude"])
+        dist = abs(state["relations"]["blue_car_to_ball"]["magnitude"])
         if self.dist_prev is None:
             self.dist_prev = dist
         reward += (self.dist_prev - dist) * 1.5
@@ -150,7 +192,7 @@ class RocketLeagueEnv(gym.Env):
 
     def close(self):
         self.isopen = False
-        if self.render_mode == "human" and pygame.get_init():
+        if (self.render_mode == "human" or self.gif_saver is not None) and pygame.get_init():
             pygame.quit()
 
 
@@ -162,10 +204,10 @@ def my_check_env():
     print("Environment check passed successfully!")
 
 
-def demo_gym():
+def demo_gym(gif_path=None):
     my_check_env()
     bot_type = "heuristic_bot" if ENABLE_ORANGE_CAR else "none"
-    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type)
+    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type, gif_path=gif_path)
 
     obs, info = env.reset()
     total_reward = 0.0

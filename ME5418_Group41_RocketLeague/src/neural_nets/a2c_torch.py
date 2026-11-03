@@ -1,6 +1,7 @@
 """Actor-critic network and A2C agent."""
 
 import copy
+import os
 
 import torch
 from torch import nn
@@ -112,6 +113,17 @@ class A2C:
         """Return the greedy action for a single observation."""
         logits, _ = self._forwardpass(torch.as_tensor(observation, dtype=torch.float32))
         return int(logits.argmax())
+
+    def save(self, path):
+        """Save network and optimizer state to ``path``."""
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        torch.save({"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict()}, path)
+
+    def load(self, path):
+        """Load network and optimizer state saved by :meth:`save`."""
+        checkpoint = torch.load(path, map_location="cpu")
+        self.model.load_state_dict(checkpoint["model"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
 
 
 def test_a2c_torch(num_updates=3000, num_envs=8, rollout_length=16):

@@ -663,7 +663,7 @@ class Simulation:
                     co["is_boosting"],
                 ]
             )
-            opp_rel = rel.get("opponent_to_ball")
+            opp_rel = rel.get("orange_car_to_ball")
             if opp_rel is not None:
                 vec.extend([opp_rel["magnitude"], opp_rel["direction"][0], opp_rel["direction"][1]])
             else:
