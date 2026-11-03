@@ -1,50 +1,38 @@
 import numpy as np
 
 from src.config.gym_config import GymConfig
-from src.config.sim_config import (
-    FIELD_HEIGHT,
-    FIELD_WIDTH,
-    GOAL_DEPTH,
-    CAR_MAX_SPEED,
-    CAR_MAX_ANGULAR_SPEED,
-    BALL_MAX_SPEED,
-    CAR_MAX_BOOST,
-)
 from src.sim.core.actions import CarAction
 
 
-def sim_state_to_gym_observation(sim_state: dict) -> np.ndarray:
+def _car_features(car: dict) -> list:
+    """[pos_x, pos_y, sin, cos, vel_x, vel_y, ang_vel] from a get_state_norm() car dict."""
+    sin, cos = car["orientation"]
+    return [
+        car["position"][0],
+        car["position"][1],
+        sin,
+        cos,
+        car["velocity"][0],
+        car["velocity"][1],
+        car["angular_velocity"],
+    ]
+
+
+def sim_state_to_gym_observation(state_norm: dict) -> np.ndarray:
     """
-    takes the sim_state returns the pose and twist of the blue car, orange car and ball as a np.ndarray with shape (17,)
+    takes the normalised state from sim.get_state_norm() and returns the pose and twist of the blue car,
+    orange car and ball as a np.ndarray with shape (19,), every value in [-1, 1]
+
+    layout: blue car [pos_x, pos_y, sin, cos, vel_x, vel_y, ang_vel, boost] (8),
+            orange car [pos_x, pos_y, sin, cos, vel_x, vel_y, ang_vel] (7, zeros if absent),
+            ball [pos_x, pos_y, vel_x, vel_y] (4)
     """
-    obs = [0.0] * 17
-    # blue car
-    obs[0] = sim_state["blue_car"]["position"][0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) * 2 - 1
-    obs[1] = sim_state["blue_car"]["position"][1] / FIELD_HEIGHT * 2 - 1
-    obs[2] = sim_state["blue_car"]["angle"] / np.pi
-    obs[2] = obs[2] % 2
-    if 1.0 < abs(obs[2]):
-        obs[2] = obs[2] - 2 * np.sign(obs[2])
-    obs[3] = sim_state["blue_car"]["velocity"][0] / CAR_MAX_SPEED
-    obs[4] = sim_state["blue_car"]["velocity"][1] / CAR_MAX_SPEED
-    obs[5] = sim_state["blue_car"]["angular_velocity"] / CAR_MAX_ANGULAR_SPEED
-    obs[6] = sim_state["blue_car"]["boost"] / CAR_MAX_BOOST
-    # car_orange
-    if "car_orange" in sim_state.keys():
-        obs[7] = sim_state["car_orange"]["position"][0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) * 2 - 1
-        obs[8] = sim_state["car_orange"]["position"][1] / FIELD_HEIGHT * 2 - 1
-        obs[9] = sim_state["car_orange"]["angle"] / np.pi
-        obs[9] = obs[9] % 2
-        if 1.0 < abs(obs[9]):
-            obs[9] = obs[9] - 2 * np.sign(obs[9])
-        obs[10] = sim_state["car_orange"]["velocity"][0] / CAR_MAX_SPEED
-        obs[11] = sim_state["car_orange"]["velocity"][1] / CAR_MAX_SPEED
-        obs[12] = sim_state["car_orange"]["angular_velocity"] / CAR_MAX_ANGULAR_SPEED
-    # ball
-    obs[13] = sim_state["ball"]["position"][0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) * 2 - 1
-    obs[14] = sim_state["ball"]["position"][1] / FIELD_HEIGHT * 2 - 1
-    obs[15] = sim_state["ball"]["velocity"][0] / BALL_MAX_SPEED
-    obs[16] = sim_state["ball"]["velocity"][1] / BALL_MAX_SPEED
+    blue = state_norm["blue_car"]
+    obs = _car_features(blue) + [blue["boost"]]
+    orange = state_norm.get("car_orange")
+    obs += _car_features(orange) if orange is not None else [0.0] * 7
+    ball = state_norm["ball"]
+    obs += [ball["position"][0], ball["position"][1], ball["velocity"][0], ball["velocity"][1]]
     return np.asarray(obs, dtype=np.float32)
 
 

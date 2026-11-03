@@ -1,8 +1,6 @@
-from math import dist
-
 import numpy as np
+
 from src.config.gym_config import BentjhGymConfig
-from src.config.sim_config import FIELD_HEIGHT, FIELD_WIDTH, GOAL_DEPTH
 from src.sim.core.simulation import Simulation
 
 
@@ -18,90 +16,25 @@ class GymReward:
         """
         self.sim = sim
         self.target_goal = np.array(self.sim.arena.goal_right_center, dtype=np.float32)
-        self.own_goal = np.array(self.sim.arena.goal_left_center, dtype=np.float32)
         self.reset()
 
     def reset(self):
-        self.prev_car_pos = np.array([0, 0], dtype=np.float32)
-        self.prev_car_vel = np.array([0, 0], dtype=np.float32)
-        self.prev_ball_pos = np.array([0, 0], dtype=np.float32)
-        self.prev_ball_vel = np.array([0, 0], dtype=np.float32)
+        pass
 
     def calculate_reward(self):
         """
-        Calculates a potential-based, alignment-aware shaped reward.
-        State dict requirements:
-        state['car']['position'], state['car']['velocity']
-        state['ball']['position'], state['ball']['velocity']
-        state['score']['blue'], state['score']['orange']
+        Ball moving towards the opponent goal:
+        dot product of the unit vector from the ball to the target goal and the ball velocity (m/s),
+        plus BentjhGymConfig.score_gain on the step blue scores (minus it if orange scores).
         """
-
         state = self.sim.get_state()
-        # Extract kinematics as NumPy arrays
-        car_pos = np.array(state["blue_car"]["position"], dtype=np.float32)
-        car_vel = np.array(state["blue_car"]["velocity"], dtype=np.float32)
         ball_pos = np.array(state["ball"]["position"], dtype=np.float32)
         ball_vel = np.array(state["ball"]["velocity"], dtype=np.float32)
-        target_goal = np.array(self.sim.arena.goal_right_center, dtype=np.float32)
-        own_goal = np.array(self.sim.arena.goal_left_center, dtype=np.float32)
 
-        # ------------------------------------------------------------------
-        # 1. Terminal Reward
-        # ------------------------------------------------------------------
-        score_reward = state["score"]["blue"] - state["score"]["orange"]
-        score_reward = BentjhGymConfig.score_gain * score_reward
+        ball2goal = self.target_goal - ball_pos
+        progress_reward = float(np.dot(calculate_unit_vector(ball2goal), ball_vel))
 
-        # ------------------------------------------------------------------
-        # 2. Shaped Reward
-        # ------------------------------------------------------------------
-        ball2goal = target_goal - ball_pos
-        y_ball_reward = 2 * ball_pos[1] / FIELD_HEIGHT - 1
-        y_ball_reward *= 1.0
+        score_reward = {"blue": 1.0, "orange": -1.0}.get(state["goal_scored_step"], 0.0)
+        score_reward *= BentjhGymConfig.score_gain
 
-        x_ball_reward = (ball_pos[0] / (FIELD_WIDTH + 2 * GOAL_DEPTH) - 0.5) * 2
-        x_ball_reward *= 0.0
-
-        dist2goal = np.linalg.norm(ball2goal)
-        reward = 1 / dist2goal**2
-
-        # ------------------------------------------------------------------
-        # 2. Agent Moving Towards Ball
-        # ------------------------------------------------------------------
-        # Action reward is to encourage moving towards ball
-        # dot product of the velocity of the car and the vector of the car to the ball
-        car2ball = ball_pos - car_pos
-        action_reward = np.dot(car_vel, calculate_unit_vector(car2ball))
-        # print(f"car_vel: ({car_vel[0]:.1f}, {car_vel[1]:.1f}), car2ball: ({car2ball[0]:.1f}, {car2ball[1]:.1f}), reward: {action_reward:.1f}")
-        action_reward = BentjhGymConfig.action_gain * action_reward
-
-        # ------------------------------------------------------------------
-        # 3. Ball Moving Towards Goal
-        # ------------------------------------------------------------------
-        ball2goal = target_goal - ball_pos
-        progress_reward = np.dot(calculate_unit_vector(ball2goal), ball_vel)
-        # progress_reward = max(progress_reward, 0.0)
-        # print(f"ball_vel: ({ball_vel[0]:.1f}, {ball_vel[1]:.1f}), ball2goal: ({ball2goal[0]:.1f}, {ball2goal[1]:.1f}), reward: {progress_reward:.1f}")
-        progress_reward = BentjhGymConfig.progress_gain * progress_reward
-
-        # ------------------------------------------------------------------
-        # 4. Agent Facing the Ball
-        # ------------------------------------------------------------------
-        car_orientation = state["blue_car"]["angle"]
-        car_orientation = car_orientation / np.pi
-        car_orientation = car_orientation % 2
-        if 1.0 < abs(car_orientation):
-            car_orientation = car_orientation - 2 * np.sign(car_orientation)
-        car_orientation = car_orientation * np.pi
-        car_orientaion_vector = (np.cos(car_orientation), np.sin(car_orientation))
-        orientation_reward = np.dot(car2ball, car_orientaion_vector)
-        orientation_reward = BentjhGymConfig.orientation_gain * orientation_reward
-
-        # ------------------------------------------------------------------
-        # Ball Near Goal
-        # ------------------------------------------------------------------
-        time_penalty = BentjhGymConfig.time_penalty
-
-        # return x_ball_reward + y_ball_reward + score_reward
-        # return reward + score_reward + action_reward
-        return score_reward + action_reward + progress_reward + orientation_reward + time_penalty
-        # return near_ball + 1 / np.linalg.norm(car2ball) + action_reward
+        return progress_reward + score_reward

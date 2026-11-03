@@ -17,8 +17,4 @@ class BentjhGymConfig:
     gym_id: str = "bentjh01_2d_rocketleague_v1"
     max_steps: int = 3_000
     normalize_reward: bool = False
-    time_penalty: float = -0.000
-    action_gain: float = 0.007
-    progress_gain: float = 0.01
     score_gain: float = 100.0
-    orientation_gain: float = 0.0

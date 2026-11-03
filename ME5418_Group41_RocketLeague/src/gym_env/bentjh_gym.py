@@ -65,7 +65,7 @@ class RocketLeagueSideSwipeGym(gym.Env):
             self.renderer = Renderer(pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)))
 
         # Setting up Environment
-        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(17,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(19,), dtype=np.float32)
         # direction (9) x jump (2) x boost (2), decoded by rocket_league_env.decode_action
         self.action_space = gym.spaces.Discrete(36)
         self.gym_reward = GymReward(self.sim)
@@ -73,7 +73,7 @@ class RocketLeagueSideSwipeGym(gym.Env):
     @staticmethod
     def observe(sim: Simulation) -> np.ndarray:
         """Observation of ``sim`` as this env sees it (used by the agent to play on any sim)."""
-        return sim_state_to_gym_observation(sim.get_state())
+        return sim_state_to_gym_observation(sim.get_state_norm())
 
     def _get_obs(self):
         return self.observe(self.sim)
@@ -100,7 +100,7 @@ class RocketLeagueSideSwipeGym(gym.Env):
         self.step_count += 1
 
         # Updating State
-        sim_state = self.sim.get_state()
+        sim_state = self.sim.get_state_norm()
         self.observed_state = sim_state_to_gym_observation(sim_state)
         reward = self.gym_reward.calculate_reward()
 

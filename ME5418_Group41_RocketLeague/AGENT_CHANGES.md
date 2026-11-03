@@ -87,9 +87,9 @@ Tests were run in `me5418_projenv` with episodes capped at 100–150 steps:
 
 | | `rocketleague_v1` | `bentjh01_2d_rocketleague_v1` |
 |---|---|---|
-| Observation | `sim.get_state_norm(as_flat_array=True)` | 17-dim, from `gym_env/sim2gym_layer.py` |
+| Observation | `sim.get_state_norm(as_flat_array=True)` | 19-dim from `sim.get_state_norm()` (car orientation as sin, cos), built in `gym_env/sim2gym_layer.py` |
 | Action | `Discrete(36)` via `decode_action` | same |
-| Reward | `RocketLeagueEnv._calculate_reward` | `gym_env/reward.py` (`GymReward`), gains in `BentjhGymConfig` |
+| Reward | `RocketLeagueEnv._calculate_reward` | `gym_env/reward.py` (`GymReward`): ball velocity towards the opponent goal, ±`BentjhGymConfig.score_gain` on a goal |
 
 - Both envs take `render_mode`, `bot_type` and `gif_path`. Both expose `observe(sim)`, which `RocketLeagueAgent.play()` uses so the observation matches the env the model was trained on.
 - `RocketLeagueAgent`, `train_agent` and `play_agent` take `env_id`.
