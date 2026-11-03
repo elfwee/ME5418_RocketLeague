@@ -19,7 +19,7 @@ Each training run writes these files to the folder that holds `model.pt`:
 | `model.pt` | Network and optimizer state |
 | `metrics.csv` | One row per episode: `episode, total_steps, reward, length, outcome, mean_loss` |
 | `tensorboard/` | TensorBoard event files |
-| `gifs/episode_<N>.gif` | One greedy-policy episode, recorded every `visualise_n_episodes` episodes |
+| `gifs/episode_<N>.gif` | Every `visualise_n_episodes`-th training episode (default 100), recorded while it runs in a window |
 | `plots/kpi.png` | Episode reward, episode length, blue goal rate and A2C loss, plotted by episode |
 
 ## Code changes
@@ -27,7 +27,7 @@ Each training run writes these files to the folder that holds `model.pt`:
 ### `src/agent/agent.py` (completed)
 The file was a pseudocode skeleton. It now has a working implementation that keeps the skeleton's method names.
 
-- **`RocketLeagueAgent(model_filepath, visualise_n_episodes=1_000, bot_type="none", rollout_length=16, seed=None, **a2c_kwargs)`**
+- **`RocketLeagueAgent(model_filepath, visualise_n_episodes=100, bot_type="none", rollout_length=16, seed=None, **a2c_kwargs)`**
   - Creates the env with `gym.make(GymConfig.gym_id, ...)`, which ends episodes at 3000 steps. The A2C model's input and output sizes are read from the env.
   - If a `metrics.csv` already exists in the run folder, episode and step numbers continue from it. Resumed runs append to the log without overlapping the earlier episodes.
 - **`reset(seed=None)`** resets the env and the per-episode counters.
@@ -35,13 +35,13 @@ The file was a pseudocode skeleton. It now has a working implementation that kee
   - Collects `rollout_length` steps, then computes discounted returns backwards. The return is bootstrapped from V(s_last), using the same scheme as `test_a2c_torch`.
   - Calls `A2C._backprop` once per rollout.
   - When an episode ends because of the time limit rather than a goal, γ·V(s′) is added to the last reward. A timeout is not a true terminal state.
-  - Every `visualise_n_episodes` episodes, it saves a checkpoint and a GIF. At the end it saves the model, writes the plots and closes the TensorBoard writer.
+  - Every `visualise_n_episodes` episodes (default 100), that training episode runs in its own env with `render_mode="human"` and `gif_path=...`. It's a normal training episode: actions are sampled and updates continue. The episode plays in a window in real time (60 Hz, so up to 50 s for 3000 steps). When it ends, the GIF is saved even on a timeout, the window closes and a checkpoint is saved. All other episodes run in the headless env.
+  - At the end it saves the model, writes the plots and closes the TensorBoard writer.
 - **`tensorboard_logging(stats)`** logs `episode/reward`, `episode/length`, `episode/outcome` (−1 orange goal, 0 timeout, 1 blue goal) and `train/loss`.
   - Tensorboard is imported the first time this method runs, not at the top of the file. If TensorFlow is installed, tensorboard loads it, and loading it before torch has finished loading crashes with an LLVM error.
   - If tensorboard isn't installed, the method prints one notice and skips logging.
 - **`csv_logging(stats)`** appends one row per episode to `metrics.csv`.
 - **`save_plots(window=100)`** draws a 2×2 chart from `metrics.csv` to `plots/kpi.png`. It uses matplotlib's Agg backend, so no display is needed.
-- **`save_visual_episode(episode)`** runs one episode using the model's best action at each step (`A2C.predict`). It runs in a separate off-screen env created with `gif_path=...`. If the episode times out without a goal, the recorded frames are still saved.
 - **`play(sim)`** returns a greedy `CarAction` for the blue car from `sim.get_state_norm(as_flat_array=True)`.
 - **`train_agent(...)`** runs training. The default output path is `runs/a2c_<timestamp>/model.pt`.
 - **`play_agent(model_filepath, bot_type="none")`** loads a checkpoint and shows the agent playing in a window.
@@ -76,7 +76,7 @@ Empty file that makes `src.agent` a package.
 
 ## Verification
 Tests were run in `me5418_projenv` with episodes capped at 100–150 steps:
-- Training produced `model.pt`, `metrics.csv`, `plots/kpi.png`, a GIF and TensorBoard event files. All four TensorBoard metrics were logged for every episode.
+- Training produced `model.pt`, `metrics.csv`, `plots/kpi.png`, a GIF and TensorBoard event files. Every N-th episode trained in a `human` render env and saved its GIF. Each of those episodes opened exactly one window, and no window was left open after `learn()` returned. All four TensorBoard metrics were logged for every episode.
 - Resuming with `pretrain_model_filepath` loaded the checkpoint and continued episode numbering in the CSV.
 - `play(Simulation())` returned a valid `CarAction`.
 - The gym env checker (`my_check_env`), `test_a2c_torch` and the `python -m src` usage text still work.

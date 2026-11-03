@@ -24,7 +24,8 @@ class RocketLeagueAgent:
 
     Args:
         model_filepath: Where the model checkpoint is saved.
-        visualise_n_episodes: Save a checkpoint and a GIF of a greedy episode every N episodes.
+        visualise_n_episodes: Every N episodes, run that training episode in a
+            ``render_mode="human"`` window, save it as a GIF and save a checkpoint.
         bot_type: Opponent, ``"none"`` or ``"heuristic_bot"``.
         rollout_length: Steps per A2C update.
         seed: Seed for the first env reset.
@@ -34,7 +35,7 @@ class RocketLeagueAgent:
     def __init__(
         self,
         model_filepath,
-        visualise_n_episodes=1_000,
+        visualise_n_episodes=100,
         bot_type="none",
         rollout_length=16,
         seed=None,
@@ -47,13 +48,15 @@ class RocketLeagueAgent:
         self.bot_type = bot_type
         self.rollout_length = rollout_length
 
-        self.gym = gym.make(GymConfig.gym_id, bot_type=bot_type)
+        self.gym = gym.make(GymConfig.gym_id, bot_type=bot_type)  # headless training env
+        self.env = self.gym  # env used for the current episode (headless or rendered)
         self.model = A2C(
             obs_dim=self.gym.observation_space.shape[0], n_actions=int(self.gym.action_space.n), **a2c_kwargs
         )
         self.writer = None
         self.episode = 0
         self.total_steps = 0
+        self.target_episode = float("inf")
         if os.path.exists(self.csv_path):  # continue numbering from an earlier run in this dir
             with open(self.csv_path) as f:
                 rows = list(csv.DictReader(f))
@@ -64,7 +67,18 @@ class RocketLeagueAgent:
         self.reset(seed)
 
     def reset(self, seed=None):
-        self.obs, _ = self.gym.reset(seed=seed)
+        if self.env is not self.gym:  # discard an unused rendered env (e.g. reset() called twice)
+            self.env.close()
+        next_episode = self.episode + 1
+        if next_episode % self.visualise_n_episodes == 0:
+            # Visualised episode: train in a window and record it as a GIF
+            self.gif_path = os.path.join(self.run_dir, "gifs", f"episode_{next_episode}.gif")
+            self.env = gym.make(
+                GymConfig.gym_id, render_mode="human", bot_type=self.bot_type, gif_path=self.gif_path
+            )
+        else:
+            self.env = self.gym
+        self.obs, _ = self.env.reset(seed=seed)
         self.episode_reward = 0.0
         self.episode_length = 0
         self.episode_losses = []
@@ -166,25 +180,33 @@ class RocketLeagueAgent:
             f"episode {self.episode:6d} | steps {self.episode_length:5d} | "
             f"reward {self.episode_reward:8.2f} | {outcome}"
         )
-        if self.episode % self.visualise_n_episodes == 0:
+        if self.env is not self.gym:
             self.model.save(self.model_filepath)
-            self.save_visual_episode(self.episode)
-        self.reset()
+            self._close_visual_env(goal_scored=outcome != "timeout")
+        if self.episode < self.target_episode:  # learn() resets again on its next call
+            self.reset()
+
+    def _close_visual_env(self, goal_scored):
+        """Close the rendered env, saving its GIF if the env didn't (no goal scored)."""
+        if not goal_scored:  # the env only writes the GIF itself when a goal is scored
+            self.env.unwrapped.gif_saver.save(self.gif_path)
+        self.env.close()
+        self.env = self.gym
 
     def learn(self, number_of_episodes: int = 100_000, pretrain_model_filepath=None):
         if pretrain_model_filepath is not None:
             self.model.load(pretrain_model_filepath)
         self.reset()
         gamma = self.model.discount_factor
-        target_episode = self.episode + number_of_episodes
+        self.target_episode = self.episode + number_of_episodes
 
-        while self.episode < target_episode:
+        while self.episode < self.target_episode:
             states, actions, rewards, dones = [], [], [], []
             for _ in range(self.rollout_length):
                 state = torch.as_tensor(self.obs, dtype=torch.float32)
                 action, _ = self.model.act(state.unsqueeze(0))
                 action = int(action.item())
-                next_obs, reward, terminated, truncated, _ = self.gym.step(action)
+                next_obs, reward, terminated, truncated, _ = self.env.step(action)
                 self.episode_reward += reward
                 self.episode_length += 1
                 self.total_steps += 1
@@ -200,9 +222,9 @@ class RocketLeagueAgent:
                 dones.append(float(terminated or truncated))
 
                 if terminated or truncated:
-                    goal = self.gym.unwrapped.sim.goal_scored_this_step
+                    goal = self.env.unwrapped.sim.goal_scored_this_step
                     self._end_episode(goal if goal is not None else "timeout")
-                    if self.episode >= target_episode:
+                    if self.episode >= self.target_episode:
                         break
                 else:
                     self.obs = next_obs
@@ -226,18 +248,6 @@ class RocketLeagueAgent:
         self.save_plots()
         if self.writer is not None:
             self.writer.close()
-
-    def save_visual_episode(self, episode):
-        """Run one greedy episode offscreen and save it as a GIF."""
-        gif_path = os.path.join(self.run_dir, "gifs", f"episode_{episode}.gif")
-        env = gym.make(GymConfig.gym_id, bot_type=self.bot_type, gif_path=gif_path)
-        obs, _ = env.reset()
-        terminated = truncated = False
-        while not (terminated or truncated):
-            obs, _, terminated, truncated, _ = env.step(self.model.predict(obs))
-        if not terminated:  # timed out without a goal: the env didn't save, so save what was buffered
-            env.unwrapped.gif_saver.save(gif_path)
-        env.close()
 
     # ------------------------------------------------------------------ playing
     def play(self, sim):
