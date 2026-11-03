@@ -1,6 +1,7 @@
 """
-Proximal Policy Optimization (PPO) Actor-Critic Architecture & Forward/Backward Pass Demo.
+Actor-Critic Architecture
 """
+
 import sys
 from pathlib import Path
 import gymnasium as gym
@@ -8,214 +9,320 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
+import copy
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+from src.neural_nets.a2c_torch import ActorCritic
 
 
-from src.gym_env.rocket_league_env import RocketLeagueEnv
-from src.config.gym_config import GymConfig
+# ---------------------------------------------------------------
+# PPO: actor-critic, on-policy, n-step returns
+# ---------------------------------------------------------------
+class PPO:
+    """Proximal Policy Optimization
 
-class ActorCritic(nn.Module):
-    """Actor-Critic network for PPO over a discrete action space.
+    Wraps an :class:`ActorCritic` network, an Adam optimiser and an on-policy
+    rollout buffer. Training loop::
 
-    Architecture:
-        - Input Layer: 52-dimensional normalized state vector in [-1, 1].
-        - Shared Feature Extractor: 2 fully-connected layers with LayerNorm and ReLU.
-        - Two Heads:
-            1. Actor (Policy) Head pi(a | s): outputs logits over each discrete action a.
-            2. Critic (Value) Head V(s): estimates scalar value of being in state s.
+        while not agent.buffer_full:
+            actions, values, log_probs = agent.act(obs)
+            next_obs, rewards, dones = env.step(actions)
+            agent.store(obs, actions, rewards, dones, values, log_probs)
+            obs = next_obs
+        _, last_value, _ = agent.act(obs)
+        agent.update(last_value)  # GAE -> n_epochs of minibatch updates -> clear buffer
+
+    The buffer holds ``rollout_length`` steps for ``num_envs`` parallel envs.
+    Advantages use GAE (Schulman et al., 2016)::
+
+        delta_t = r_t + gamma * V(s_{t+1}) * (1 - done_t) - V(s_t)
+        A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
+        R_t     = A_t + V(s_t)
+
+    where ``done_t`` marks that the episode ended *after* taking ``a_t``.
+
+    The loss minimised is::
+
+        loss = actor_loss + value_loss_coef * critic_loss - entropy_coef * entropy
+
+    where ``actor_loss = -mean(min(r * A, clip(r, 1-eps, 1+eps) * A))`` with ``r = pi/pi_old`` and GAE advantages ``A``,
+    ``critic_loss = MSE(V(s), R)``, and ``entropy`` is the mean policy entropy.
+
+    Args:
+        obs_dim (int): Dimension of the observation vector. Defaults to 52.
+        n_actions (int): Number of discrete actions. Defaults to 36.
+        hidden_size (int): Hidden layer width of the network. Defaults to 256.
+        learning_rate (float): Adam learning rate. Defaults to 7e-4.
+        discount_factor (float): Discount factor gamma. Defaults to 0.99.
+        gae_lambda (float): GAE lambda; 1.0 gives Monte-Carlo-style n-step
+            returns, 0.0 gives one-step TD. Defaults to 0.95.
+        clip_range (float): PPO clip epsilon on the probability ratio. Defaults to 0.2.
+        value_loss_coef (float): Weight of the critic loss. Defaults to 0.5.
+        entropy_coef (float): Weight of the entropy bonus (encourages
+            exploration). Defaults to 0.01.
+        max_norm (float): Max global gradient norm for clipping. Defaults to 0.5.
+        trunk_type (str): ``"independent"`` or ``"shared"``; see
+            :class:`ActorCritic`. Defaults to ``"independent"``.
+        rollout_length (int): Steps collected per env before an update. Defaults to 16.
+        num_envs (int): Number of parallel environments. Defaults to 8.
+        n_epochs (int): Passes over the rollout per update. Defaults to 4.
+        batch_size (int | None): Minibatch size; ``None`` uses the whole
+            rollout as one batch. Defaults to 32.
+
+    Attributes:
+        model (ActorCritic): The actor-critic network.
+        optimizer (torch.optim.Adam): Optimiser over ``model`` parameters.
+        discount_factor (float): Discount factor gamma.
+        value_loss_coef (float): Critic loss weight.
+        entropy_coef (float): Entropy bonus weight.
+        max_norm (float): Gradient clipping threshold.
     """
 
-    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256):
-        super(ActorCritic, self).__init__()
+    def __init__(
+        self,
+        obs_dim=52,
+        n_actions=36,
+        hidden_size=256,
+        learning_rate=7e-4,
+        discount_factor=0.99,
+        clip_range=0.2,
+        value_loss_coef=0.5,
+        entropy_coef=0.01,
+        max_norm=0.5,
+        trunk_type="independent",
+        gae_lambda=0.95,
+        rollout_length=16,
+        num_envs=8,
+        n_epochs=4,
+        batch_size=32,
+    ):
+        self.model = ActorCritic(obs_dim, n_actions, hidden_size, trunk_type)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.discount_factor = discount_factor
+        self.value_loss_coef, self.entropy_coef = value_loss_coef, entropy_coef
+        self.max_norm = max_norm
+        self.clip_range = clip_range
+        self.gae_lambda = gae_lambda
+        self.obs_dim, self.rollout_length, self.num_envs = obs_dim, rollout_length, num_envs
+        self.n_epochs, self.batch_size = n_epochs, batch_size
+        self.reset_buffer()
 
-        # Shared feature backbone with LayerNorm to stabilize hidden activations across varying scales
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.ln1 = nn.LayerNorm(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.ln2 = nn.LayerNorm(hidden_dim)
+    # ---------------- rollout buffer ----------------
+    def reset_buffer(self):
+        """Clear the rollout buffer and set the write pointer to 0."""
+        shape = (self.rollout_length, self.num_envs)
+        self.buf_states = torch.zeros(*shape, self.obs_dim)
+        self.buf_actions = torch.zeros(shape, dtype=torch.long)
+        self.buf_rewards = torch.zeros(shape)
+        self.buf_dones = torch.zeros(shape)
+        self.buf_values = torch.zeros(shape)
+        self.buf_log_probs = torch.zeros(shape)
+        self.buf_advantages = torch.zeros(shape)
+        self.buf_returns = torch.zeros(shape)
+        self.buf_pos = 0
 
-        # Actor stream pi(a | s): R^(hidden_dim) -> R^(action_dim) logits
-        self.fc_actor = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.actor = nn.Linear(hidden_dim // 2, action_dim)
+    @property
+    def buffer_full(self):
+        """bool: True once ``rollout_length`` steps have been stored."""
+        return self.buf_pos == self.rollout_length
 
-        # Critic stream V(s): R^(hidden_dim) -> R^1
-        self.fc_critic = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.critic = nn.Linear(hidden_dim // 2, 1)
+    def store(self, state, action, reward, done, value, log_prob):
+        """Store one vectorised transition; every argument has leading dim ``num_envs``.
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute action logits and state value V(s) for input state tensor x."""
-        # Shared feature extraction
-        x = F.relu(self.ln1(self.fc1(x)))
-        x = F.relu(self.ln2(self.fc2(x)))
+        Args:
+            state: Observation s_t, shape ``(num_envs, obs_dim)``.
+            action: Action a_t, shape ``(num_envs,)``.
+            reward: Reward r_t received after a_t, shape ``(num_envs,)``.
+            done: 1.0 if the episode ended after a_t, shape ``(num_envs,)``.
+            value: Critic estimate V(s_t), shape ``(num_envs,)``.
+            log_prob: log pi_old(a_t | s_t) at collection time, shape ``(num_envs,)``.
+        """
+        if self.buffer_full:
+            raise RuntimeError("Rollout buffer is full; call update() before storing more.")
+        t = self.buf_pos
+        self.buf_states[t] = torch.as_tensor(state, dtype=torch.float32)
+        self.buf_actions[t] = torch.as_tensor(action, dtype=torch.long)
+        self.buf_rewards[t] = torch.as_tensor(reward, dtype=torch.float32)
+        self.buf_dones[t] = torch.as_tensor(done, dtype=torch.float32)
+        self.buf_values[t] = torch.as_tensor(value, dtype=torch.float32)
+        self.buf_log_probs[t] = torch.as_tensor(log_prob, dtype=torch.float32)
+        self.buf_pos += 1
 
-        # Compute action logits for pi(a | s)
-        a = F.relu(self.fc_actor(x))
-        logits = self.actor(a)
+    @torch.no_grad()
+    def _compute_returns_and_advantages(self, last_value):
+        """Fill the advantage and return buffers with GAE, working backwards in time.
 
-        # Compute state value V(s)
-        v = F.relu(self.fc_critic(x))
-        V = self.critic(v).squeeze(-1)
-        return logits, V
+        Args:
+            last_value: V(s_T) for the observation following the final stored
+                step, shape ``(num_envs,)``. Bootstraps envs whose episode did
+                not end on the last step.
+        """
+        next_value = torch.as_tensor(last_value, dtype=torch.float32)
+        gae = torch.zeros(self.num_envs)
+        for t in reversed(range(self.rollout_length)):
+            not_done = 1.0 - self.buf_dones[t]
+            delta = self.buf_rewards[t] + self.discount_factor * next_value * not_done - self.buf_values[t]
+            gae = delta + self.discount_factor * self.gae_lambda * not_done * gae
+            self.buf_advantages[t] = gae
+            next_value = self.buf_values[t]
+        self.buf_returns = self.buf_advantages + self.buf_values
 
-    def get_action_and_value(self, x: torch.Tensor, action: torch.Tensor | None = None):
-        """Sample (or evaluate a given) action, returning (action, log pi(a | s), entropy, V(s))."""
-        logits, V = self(x)
-        dist = Categorical(logits=logits)
-        if action is None:
-            action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), V
+    def _minibatches(self):
+        """Yield shuffled minibatches over the flattened ``rollout_length * num_envs`` samples.
+
+        Yields:
+            tuple[torch.Tensor, ...]: ``(states, actions, returns, old_log_probs,
+            advantages)`` in the argument order of :meth:`_backprop`.
+        """
+        n = self.rollout_length * self.num_envs
+        flat = (
+            self.buf_states.reshape(n, self.obs_dim),
+            self.buf_actions.reshape(n),
+            self.buf_returns.reshape(n),
+            self.buf_log_probs.reshape(n),
+            self.buf_advantages.reshape(n),
+        )
+        batch_size = self.batch_size or n
+        indices = torch.randperm(n)
+        for start in range(0, n, batch_size):
+            idx = indices[start : start + batch_size]
+            yield tuple(x[idx] for x in flat)
+
+    def update(self, last_value):
+        """Run a full PPO update on the stored rollout, then clear the buffer.
+
+        Computes GAE advantages and returns, runs ``n_epochs`` passes of
+        shuffled minibatch updates via :meth:`_backprop`, and resets the buffer.
+
+        Args:
+            last_value: V(s_T) for the observation after the final stored step,
+                shape ``(num_envs,)`` (the ``values`` output of :meth:`act`).
+
+        Returns:
+            float: Mean loss over all minibatch updates.
+        """
+        if not self.buffer_full:
+            raise RuntimeError(f"Rollout incomplete ({self.buf_pos}/{self.rollout_length} steps).")
+        self._compute_returns_and_advantages(last_value)
+        losses = [self._backprop(*batch) for _ in range(self.n_epochs) for batch in self._minibatches()]
+        self.reset_buffer()
+        return sum(losses) / len(losses)
+
+    # ---------------- network ----------------
+
+    def _forwardpass(self, states):
+        """Run the network.
+
+        Args:
+            states (torch.Tensor): Observations of shape ``(..., obs_dim)``.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: ``(logits, values)`` as returned
+            by :meth:`ActorCritic.forward`.
+        """
+        return self.model(states)  # (policy logits, V(s))
+
+    @torch.no_grad()
+    def act(self, observations):
+        """Sample actions from the current policy (no gradients tracked).
+
+        Used during rollout collection and to bootstrap returns from V(s_last).
+
+        Args:
+            observations (torch.Tensor): Float tensor of shape
+                ``(batch, obs_dim)``.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                - actions: shape ``(batch,)``, int64 actions sampled from
+                  ``Categorical(logits)``.
+                - values: shape ``(batch,)``, critic estimates V(s).
+                - log_probs: shape ``(batch,)``, log pi(a|s) of the sampled
+                  actions (stored in the rollout buffer as pi_old).
+        """
+        logits, values = self._forwardpass(observations)
+        dist = Categorical(logits=logits)  # applies softmax i.e. all values are between 0,1 and add up to 1.
+        actions = dist.sample()
+        return actions, values, dist.log_prob(actions)
+
+    def _backprop(self, states, actions, returns, old_log_probs, advantages):
+        """Perform one PPO gradient update on a minibatch (called by :meth:`update`).
+
+        Uses the clipped surrogate objective::
+
+            ratio      = pi(a|s) / pi_old(a|s) = exp(log pi(a|s) - log pi_old(a|s))
+            actor_loss = -mean(min(ratio * A, clamp(ratio, 1 - eps, 1 + eps) * A))
+
+        Advantages come from the buffer (GAE, computed once with the network
+        that collected the rollout) and are normalised per minibatch. Actor,
+        critic and entropy terms are combined into a single loss, the global
+        gradient norm is clipped to ``max_norm`` and one optimiser step is taken.
+
+        Args:
+            states (torch.Tensor): Observations, shape ``(N, obs_dim)``.
+            actions (torch.Tensor): Actions taken in those states, shape ``(N,)``.
+            returns (torch.Tensor): Critic targets R = A + V_old(s), shape ``(N,)``.
+            old_log_probs (torch.Tensor): log pi_old(a|s) recorded at collection
+                time, shape ``(N,)``.
+            advantages (torch.Tensor): GAE advantages from the buffer, shape ``(N,)``.
+
+        Returns:
+            float: The total scalar loss for this update.
+        """
+        logits, values = self._forwardpass(states)
+        policy_distribution = Categorical(
+            logits=logits
+        )  # applies softmax i.e. all values are between 0,1 and add up to 1.
+        # Normalise advantages per minibatch (keeps the actor gradient scale stable)
+        if advantages.numel() > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        log_probs = policy_distribution.log_prob(actions)
+        ratio = torch.exp(log_probs - old_log_probs)  # pi(a|s) / pi_old(a|s)
+        clipped_ratio = torch.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)  # PPO
+        # Pessimistic bound: take the smaller objective so large policy steps aren't rewarded
+        actor_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
+        critic_loss = F.mse_loss(values, returns)  # mean square error between estimated value and actual value
+        entropy_bonus = policy_distribution.entropy().mean()  # exploration
+        loss = actor_loss + self.value_loss_coef * critic_loss - self.entropy_coef * entropy_bonus
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(
+            self.model.parameters(), self.max_norm
+        )  # Clip the gradient norm of an iterable of parameters.
+        self.optimizer.step()
+        return loss.item()
+
+    @torch.no_grad()
+    def predict(self, observation):
+        """Return the greedy (argmax-logit) action for evaluation/deployment.
+
+        Args:
+            observation (array-like | torch.Tensor): A single observation of
+                shape ``(obs_dim,)``; converted to a float32 tensor.
+
+        Returns:
+            int: Index of the highest-scoring action.
+        """
+        return int(self._forwardpass(torch.as_tensor(observation, dtype=torch.float32))[0].argmax())
 
 
-def compute_gae(rewards, values, dones, next_value, gamma=0.99, gae_lambda=0.95):
-    """Generalized Advantage Estimation over a single rollout of length T.
-
-    delta_t = r_t + gamma * (1 - done_t) * V(s_{t+1}) - V(s_t)
-    A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
-    """
-    T = rewards.shape[0]
-    advantages = torch.zeros_like(rewards)
-    last_gae = 0.0
-    for t in reversed(range(T)):
-        next_v = next_value if t == T - 1 else values[t + 1]
-        not_done = 1.0 - dones[t]
-        delta = rewards[t] + gamma * not_done * next_v - values[t]
-        last_gae = delta + gamma * gae_lambda * not_done * last_gae
-        advantages[t] = last_gae
-    returns = advantages + values
-    return advantages, returns
-
-
-def run_ppo_network():
-    """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = gym.make(GymConfig.gym_id, render_mode=None, bot_type="heuristic_bot", discrete_action=True)
-
-    num_states = env.observation_space.shape[0]
-    num_actions = env.action_space.n
-    hidden_dim = 256
-
-    # 1. Create Actor-Critic Network
-    agent = ActorCritic(num_states, num_actions, hidden_dim).to(device)
-
-    optimizer = torch.optim.Adam(agent.parameters(), lr=3e-4, eps=1e-5)
-    gamma = 0.99
-    gae_lambda = 0.95
-    clip_coef = 0.2     # PPO surrogate clipping range epsilon
-    vf_coef = 0.5       # Value loss weight
-    ent_coef = 0.01     # Entropy bonus weight
-    rollout_steps = 32
-
-    print("=" * 65)
-    print("1. NETWORK ARCHITECTURE (PPO ACTOR-CRITIC)")
-    print("=" * 65)
-    print(f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions} | Hidden Dim: {hidden_dim}")
-    print(agent)
-
-    # 2. Forward Pass with Environment Observation
-    obs, info = env.reset()
-    state_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)  # Shape: (1, 52)
-
-    logits, value = agent(state_tensor)  # Shapes: (1, 36), (1,)
-    probs = F.softmax(logits, dim=-1)
-    action_idx = probs.argmax(dim=-1).item()
-
-    # Decode discrete action index (0..35) into (direction, jump, boost)
-    dir_idx, jump_bit, boost_bit = action_idx // 4, (action_idx % 4) // 2, action_idx % 2
-
-    print("\n" + "=" * 65)
-    print("2. FORWARD PASS (INPUT -> OUTPUT)")
-    print("=" * 65)
-    print(f"Input State Shape : {state_tensor.shape}")
-    print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
-    print(f"Output Logits Shape : {logits.shape}")
-    print(f"Output pi(.|s) Sample (first 6 actions): {probs[0, :6].detach().cpu().numpy().round(4)}")
-    print(f"Output V(s)         : {value.item():.6f}")
-    print(f"Greedy Action     : {action_idx} -> dir={GymConfig.directions[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
-
-    # Collect a short on-policy rollout of transitions (s, a, log pi_old(a|s), r, done, V(s))
-    states, actions, log_probs, rewards, dones, values = [], [], [], [], [], []
-    with torch.no_grad():
-        for _ in range(rollout_steps):
-            action, log_prob, _, v = agent.get_action_and_value(state_tensor)
-            next_state, reward, terminated, truncated, _ = env.step(action.item())
-            done = terminated or truncated
-
-            states.append(state_tensor.squeeze(0))
-            actions.append(action.squeeze(0))
-            log_probs.append(log_prob.squeeze(0))
-            values.append(v.squeeze(0))
-            rewards.append(float(reward))
-            dones.append(float(done))
-
-            if done:
-                next_state, _ = env.reset()
-            state_tensor = torch.tensor(next_state, dtype=torch.float32, device=device).unsqueeze(0)
-
-        _, next_value = agent(state_tensor)
-
-    states = torch.stack(states)                                                # Shape: (T, 52)
-    actions = torch.stack(actions)                                              # Shape: (T,)
-    old_log_probs = torch.stack(log_probs)                                      # Shape: (T,)
-    values = torch.stack(values)                                                # Shape: (T,)
-    rewards = torch.tensor(rewards, dtype=torch.float32, device=device)         # Shape: (T,)
-    dones = torch.tensor(dones, dtype=torch.float32, device=device)             # Shape: (T,)
-
-    # 3. Backward Pass (GAE, Clipped Surrogate Loss & Gradient Backpropagation)
-    advantages, returns = compute_gae(rewards, values, dones, next_value.squeeze(0), gamma, gae_lambda)
-    norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-    # Re-evaluate rollout actions under the current policy
-    _, new_log_probs, entropy, new_values = agent.get_action_and_value(states, actions)
-    ratio = torch.exp(new_log_probs - old_log_probs)
-
-    # Clipped surrogate objective: L^CLIP = E[min(r_t * A_t, clip(r_t, 1 - eps, 1 + eps) * A_t)]
-    pg_loss1 = -norm_advantages * ratio
-    pg_loss2 = -norm_advantages * torch.clamp(ratio, 1.0 - clip_coef, 1.0 + clip_coef)
-    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-    v_loss = F.mse_loss(new_values, returns)
-    entropy_loss = entropy.mean()
-
-    # Total loss: policy loss + weighted value loss - weighted entropy bonus
-    loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss
-    optimizer.zero_grad()
-    loss.backward()
-
-    print("\n" + "=" * 65)
-    print("3. BACKWARD PASS (LOSS & GRADIENTS)")
-    print("=" * 65)
-    print(f"Rollout Steps       : {rollout_steps} | Total Reward: {rewards.sum().item():.4f} | Episodes Done: {int(dones.sum().item())}")
-    print(f"Mean Advantage (raw): {advantages.mean().item():.6f}")
-    print(f"Mean Return         : {returns.mean().item():.6f}")
-    print(f"Mean Ratio          : {ratio.mean().item():.6f} (should be ~1.0 before update)")
-    print(f"Policy (Clip) Loss  : {pg_loss.item():.6f}")
-    print(f"Value MSE Loss      : {v_loss.item():.6f}")
-    print(f"Entropy             : {entropy_loss.item():.6f}")
-    print(f"Total Loss          : {loss.item():.6f}")
-
-    print("\nLayer Gradient Norms (L2):")
-    for name, param in agent.named_parameters():
-        if param.grad is not None:
-            print(f"  {name:<22} | shape={str(list(param.shape)):<12} | grad_norm={param.grad.norm().item():.6f}")
-
-    # Apply optimizer step and verify parameter update changes the policy ratio and value estimates
-    nn.utils.clip_grad_norm_(agent.parameters(), max_norm=0.5)
-    optimizer.step()
-    with torch.no_grad():
-        _, log_probs_after, _, values_after = agent.get_action_and_value(states, actions)
-        ratio_after = torch.exp(log_probs_after - old_log_probs)
-        approx_kl = (old_log_probs - log_probs_after).mean()
-    print(f"\nMean Ratio          : {ratio_after.mean().item():.6f} (after 1 optimizer step)")
-    print(f"Approx KL           : {approx_kl.item():.6f}")
-    print(f"Value MSE Loss      : {F.mse_loss(values_after, returns).item():.6f} (after 1 optimizer step)")
-    print("=" * 65)
-
-    env.close()
+# AGENT
+def test_ppo_torch(num_updates=300, num_envs=8, rollout_length=16):
+    agent = PPO(obs_dim=52, n_actions=36, rollout_length=rollout_length, num_envs=num_envs)
+    obs = torch.randn(num_envs, 52)
+    for update in range(1, num_updates + 1):
+        while not agent.buffer_full:
+            actions, values, log_probs = agent.act(obs)
+            # Dummy env step: reward always 1.0, random next obs, ~5% chance of episode end
+            next_obs = torch.randn(num_envs, 52)
+            rewards = torch.ones(num_envs)
+            dones = (torch.rand(num_envs) < 0.05).float()
+            agent.store(obs, actions, rewards, dones, values, log_probs)
+            obs = next_obs
+        _, last_value, _ = agent.act(obs)  # bootstrap from V(s_T)
+        loss = agent.update(last_value)
+        if update % 30 == 0:
+            print(f"  update: {update:5d}  loss: {loss:6.1f}")
 
 
 if __name__ == "__main__":
-    run_network()
+    test_ppo_torch()
