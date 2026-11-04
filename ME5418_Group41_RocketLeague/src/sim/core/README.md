@@ -1,4 +1,4 @@
-# Core Simulation & Physics Engine (`src/core/`)
+# Core Simulation & Physics Engine (`src/sim/core/`)
 
 This directory contains the rigid-body dynamical simulation, vehicle kinematics, ball ballistics, arena collision boundaries, and action definitions for Rocket League 2D.
 
@@ -12,6 +12,7 @@ This directory contains the rigid-body dynamical simulation, vehicle kinematics,
 | [`arena.py`](arena.py) | Enclosed boundary geometry, corner fillets, and elevated goal mouths with vertical deflection walls. |
 | [`ball.py`](ball.py) | Rigid-body ball with restitution, mass scaling, aerodynamic drag, spin decay, and velocity capping. |
 | [`car.py`](car.py) | Vehicle chassis dynamics, independent raycast suspension, AWD Coulomb traction, attitude control, two-stage jump-dodge ballistics, rocket boost, and turtle recovery. |
+| [`control.py`](control.py) | `CarControl` dispatcher supporting `"none"`, `"human"`, `"random"`, and `"heuristic_bot"` control modes. |
 | [`simulation.py`](simulation.py) | Pymunk space coordinator, $240\text{ Hz}$ sub-stepping loop, collision arbiters, goal detection, and state dictionary generation. |
 
 ---

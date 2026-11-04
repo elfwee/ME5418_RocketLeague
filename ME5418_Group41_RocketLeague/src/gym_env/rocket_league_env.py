@@ -118,7 +118,7 @@ class RocketLeagueEnv(gym.Env):
         self.ball_prev = ball_x
 
         # Potential-based car-to-ball approach shaping + distance and time penalty
-        dist = abs(state["relations"]["agent_to_ball"]["magnitude"])
+        dist = abs(state["relations"]["blue_car_to_ball"]["magnitude"])
         if self.dist_prev is None:
             self.dist_prev = dist
         reward += (self.dist_prev - dist) * 1.5

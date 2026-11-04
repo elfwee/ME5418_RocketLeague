@@ -39,43 +39,43 @@ The project represents a generational evolution from **V1** (a top-down planar s
 
 The codebase is organized modularly under `src/`. For ease of navigation and specialized context, each subsystem includes its own comprehensive technical documentation:
 
-* 📚 **[System & RL Environment (`src/README.md`)](ME5418_Group41_RocketLeague/src/README.md)**: Gymnasium environment API, 52-dimensional flat observation space, action spaces, reward shaping formulation, and control scheme.
-* ⚙️ **[Physics & Vehicle Kinematics (`src/core/README.md`)](ME5418_Group41_RocketLeague/src/core/README.md)**: 240 Hz sub-stepping solver, raycast spring-damper suspension, Coulomb traction, attitude control, two-stage jump-dodge ballistics, rocket boost, ball aerodynamics, and elevated goal arena geometry.
-* 🤖 **[Opponent AI Architecture (`src/ai/README.md`)](ME5418_Group41_RocketLeague/src/ai/README.md)**: Hierarchical Zone & Intercept State Machine (HZISM), kickoff tactics, shadow defense, zone goalie routine, and aerial save intercepts.
-* 🎨 **[Visualization & HUD Telemetry (`src/visualization/README.md`)](ME5418_Group41_RocketLeague/src/visualization/README.md)**: 40 PPM Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and live telemetry HUD.
+* 📚 **[System & RL Environment (`src/README.md`)](src/README.md)**: Gymnasium environment API, 52-dimensional flat observation space, action spaces, reward shaping formulation, and control scheme.
+* ⚙️ **[Physics & Vehicle Kinematics (`src/sim/core/README.md`)](src/sim/core/README.md)**: 240 Hz sub-stepping solver, raycast spring-damper suspension, Coulomb traction, attitude control, two-stage jump-dodge ballistics, rocket boost, ball aerodynamics, and elevated goal arena geometry.
+* 🤖 **[Opponent AI Architecture (`src/sim/ai/README.md`)](src/sim/ai/README.md)**: Hierarchical Zone & Intercept State Machine (HZISM), kickoff tactics, shadow defense, zone goalie routine, and aerial save intercepts.
+* 🎨 **[Visualization & HUD Telemetry (`src/sim/visualization/README.md`)](src/sim/visualization/README.md)**: 40 PPM Pygame rendering pipeline, procedural Octane chassis, vector debug visualizers, and live telemetry HUD.
 
 ```
 ME5418_Group41_RocketLeague/
 ├── README.md                     # High-level project overview & quickstart
-├── demo.py                       # Top-level Gymnasium demo script
 ├── environment.yml               # Conda environment configuration
 └── src/
+    ├── __main__.py               # Package CLI entry point (`python -m src`)
     ├── README.md                 # System architecture & Gymnasium RL documentation
-    ├── main.py                   # branching into play, and demos
-    ├── config
-        ├── sim_config.py         # Global physical constants, geometry, and simulation tunings
-        ├── gym_config.py         # Global gym config
+    ├── main.py                   # Branching into play, gym demo, and neural net demos
+    ├── config/
+    │   ├── sim_config.py         # Global physical constants, geometry, and simulation tunings
+    │   ├── gym_config.py         # Global gym config
     │   └── nn_config.py          # Global neural network config
-    ├── gym_env
-    │   └── rocket_league_env.py      # Gymnasium Environment wrapper
-    ├── neural_nets
-    │   └── dqn_tf.py             # Basic DQN implementation
-    ├── sim
-        ├── game.py                   # Interactive Pygame sandbox and headless benchmark runner
+    ├── gym_env/
+    │   └── rocket_league_env.py  # Gymnasium Environment wrapper
+    ├── neural_nets/
+    │   └── dueling_ddqn_torch.py # DQN, Double DQN & Dueling Double DQN (PyTorch)
+    └── sim/
+        ├── game.py               # Interactive Pygame sandbox and headless benchmark runner
         ├── core/
-        │   ├── README.md             # Subsystem technical summary: Physics & mechanics
-        │   ├── actions.py            # Unified 2D directional input & action dataclass
-        │   ├── control.py            # Switching controllers for game i.e. interactive, heuristic, nn
-        │   ├── arena.py              # Bounded arena geometry, corner fillets, and elevated goals
-        │   ├── ball.py               # Rigid-body ball with aerodynamic drag and spin decay
-        │   ├── car.py                # Chassis dynamics, raycast suspension, AWD, attitude control
-        │   └── simulation.py         # Physics manager, contact callbacks, scoring, sub-stepping
+        │   ├── README.md         # Subsystem technical summary: Physics & mechanics
+        │   ├── actions.py        # Unified 2D directional input & action dataclass
+        │   ├── control.py        # Switching controllers for game (interactive, heuristic, random)
+        │   ├── arena.py          # Bounded arena geometry, corner fillets, and elevated goals
+        │   ├── ball.py           # Rigid-body ball with aerodynamic drag and spin decay
+        │   ├── car.py            # Chassis dynamics, raycast suspension, AWD, attitude control
+        │   └── simulation.py     # Physics manager, contact callbacks, scoring, sub-stepping
         ├── ai/
-        │   ├── README.md             # Subsystem technical summary: HZISM state machine
-        │   └── heuristic_bot.py      # Hierarchical Zone & Intercept State Machine (HZISM) AI
+        │   ├── README.md         # Subsystem technical summary: HZISM state machine
+        │   └── heuristic_bot.py  # Hierarchical Zone & Intercept State Machine (HZISM) AI
         └── visualization/
-            ├── README.md             # Subsystem technical summary: Pygame renderer & HUD
-            └── renderer.py           # Pygame 2D renderer, vector visualizer, HUD, and effects
+            ├── README.md         # Subsystem technical summary: Pygame renderer & HUD
+            └── renderer.py       # Pygame 2D renderer, vector visualizer, HUD, and effects
 ```
 
 ---

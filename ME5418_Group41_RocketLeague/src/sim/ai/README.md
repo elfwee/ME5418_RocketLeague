@@ -1,4 +1,4 @@
-# Artificial Intelligence & Bot Architecture (`src/ai/`)
+# Artificial Intelligence & Bot Architecture (`src/sim/ai/`)
 
 This directory houses the rule-based automated opponent, modeled as a baseline controller and sparring partner for adversarial Reinforcement Learning.
 

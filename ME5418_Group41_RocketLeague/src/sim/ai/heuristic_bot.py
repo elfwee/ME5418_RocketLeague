@@ -1,11 +1,9 @@
 """Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
+
 import math
 from typing import Tuple
 from src.sim.core.actions import CarAction
-from src.config.sim_config import (
-    CAR_MAX_GROUND_SPEED, GRAVITY_MAG,
-    BOT_AERIAL_MIN_BOOST
-)
+from src.config.sim_config import CAR_MAX_GROUND_SPEED, GRAVITY_MAG, BOT_AERIAL_MIN_BOOST
 
 
 class HeuristicBot:
@@ -39,7 +37,7 @@ class HeuristicBot:
         floor_y = sim.ball_spawn_y
 
         pred_x = bx + vx * dt_ahead
-        pred_y = by + vy * dt_ahead - 0.5 * GRAVITY_MAG * (dt_ahead ** 2)
+        pred_y = by + vy * dt_ahead - 0.5 * GRAVITY_MAG * (dt_ahead**2)
 
         # Floor bounce approximation: inverts penetration below floor scaled by restitution factor e = 0.65
         if pred_y < floor_y:
@@ -125,7 +123,7 @@ class HeuristicBot:
 
     def compute_action(self, sim) -> CarAction:
         """Generate the control action (steering, throttle, jump, boost) for the bot car."""
-        car = sim.car_orange if self.team == "orange" else sim.car
+        car = sim.orange_car if self.team == "orange" else sim.blue_car
         if car is None:
             return CarAction()
 
@@ -155,7 +153,7 @@ class HeuristicBot:
             action.boost = True
             return action
         elif (car.is_grounded or car.can_ground_jump or car.wheel_contact_count >= 1) and abs(car.velocity[0]) < 0.20:
-            self._stuck_timer += (1.0 / 60.0)
+            self._stuck_timer += 1.0 / 60.0
             if self._stuck_timer > 0.5:
                 self._stuck_timer = 0.0
                 self._unstick_active = 0.35
@@ -404,7 +402,12 @@ class HeuristicBot:
             action.dir_y = 0.40
             action.jump = True
             self._jump_cooldown = 0.6
-        elif dist_to_ball < 1.4 and abs(car.velocity[0]) > 6.0 and car.both_wheels_grounded and self._jump_cooldown <= 0.0:
+        elif (
+            dist_to_ball < 1.4
+            and abs(car.velocity[0]) > 6.0
+            and car.both_wheels_grounded
+            and self._jump_cooldown <= 0.0
+        ):
             action.jump = True
             action.dir_y = 0.50
             self._jump_cooldown = 0.6
