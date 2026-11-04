@@ -142,7 +142,8 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
         else:
             # Vanilla DQN target: target network both selects and evaluates max_a' Q_target(s', a')
             next_q_value = target_dqn(next_state_tensor).max(dim=-1)[0]
-        q_target = torch.tensor([reward], dtype=torch.float32, device=device) + gamma * (1.0 - float(done)) * next_q_value
+        # Bootstrap on time-limit truncation; only zero out future value on true goal termination
+        q_target = torch.tensor([reward], dtype=torch.float32, device=device) + gamma * (1.0 - float(terminated)) * next_q_value
 
     # Predicted Q(s, a) for the executed action
     q_pred = q_values.gather(1, torch.tensor([[action_idx]], dtype=torch.long, device=device)).squeeze(1)

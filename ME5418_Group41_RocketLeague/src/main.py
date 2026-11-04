@@ -1,4 +1,4 @@
-"""Main entry point for interactive 2D Rocket League simulation, Gym demo, and Neural Network demos."""
+"""Main entry point for interactive 2D Rocket League simulation, Gym demo, Neural Network tests, and Learning Agents."""
 
 import os
 import sys
@@ -12,6 +12,9 @@ from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
 from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 from src.neural_nets.a2c_torch import test_a2c_torch
+from src.neural_nets.ppo_torch import run_ppo_network
+from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
+from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 
 
 def main():
@@ -31,24 +34,73 @@ def main():
             run_dqn_network(enable_dueling_dqn=True, enable_double_dqn=True)
         elif "--a2c" in sys.argv or "-a2c" in sys.argv:
             test_a2c_torch()
+        elif "--ppo" in sys.argv or "-ppo" in sys.argv:
+            run_ppo_network()
         else:
             print(
                 "Please specify a demo target:\n"
                 "  python -m src --demo --gym           # Gymnasium environment demo\n"
-                "  python -m src --demo --dqn           # Vanilla DQN (PyTorch)\n"
-                "  python -m src --demo --double_dqn    # Double DQN (PyTorch)\n"
-                "  python -m src --demo --dueling_ddqn  # Dueling Double DQN (PyTorch) [alias: --ddqn]\n"
-                "  python -m src --demo --a2c           # Advantage Actor-Critic (PyTorch) [alias: -a2c]"
+                "  python -m src --demo --dqn           # Vanilla DQN network test (PyTorch)\n"
+                "  python -m src --demo --double_dqn    # Double DQN network test (PyTorch)\n"
+                "  python -m src --demo --dueling_ddqn  # Dueling Double DQN network test (PyTorch) [alias: --ddqn]\n"
+                "  python -m src --demo --a2c           # Advantage Actor-Critic network test (PyTorch) [alias: -a2c]\n"
+                "  python -m src --demo --ppo           # Proximal Policy Optimization network test (PyTorch) [alias: -ppo]"
+            )
+    elif "--train" in sys.argv:
+        if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
+            train_dueling_ddqn(enable_dueling_dqn=True, enable_double_dqn=True, hyperparameter_set="dueling_ddqn")
+        elif "--double_dqn" in sys.argv:
+            train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=True, hyperparameter_set="double_dqn")
+        elif "--dqn" in sys.argv:
+            train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
+        elif "--ppo" in sys.argv or "-ppo" in sys.argv:
+            train_ppo(hyperparameter_set="ppo")
+        else:
+            print(
+                "Please specify a learning agent to train:\n"
+                "  python -m src --train --dueling_ddqn  # Train Dueling Double DQN agent [alias: --ddqn]\n"
+                "  python -m src --train --double_dqn    # Train Double DQN agent\n"
+                "  python -m src --train --dqn           # Train Vanilla DQN agent\n"
+                "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]"
+            )
+    elif "--eval" in sys.argv:
+        render = "--render" in sys.argv
+        if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
+            metrics = evaluate_dueling_ddqn(
+                render=render, enable_dueling_dqn=True, enable_double_dqn=True, hyperparameter_set="dueling_ddqn"
+            )
+            print(f"[Dueling Double DQN Evaluation] {metrics}")
+        elif "--double_dqn" in sys.argv:
+            metrics = evaluate_dueling_ddqn(
+                render=render, enable_dueling_dqn=False, enable_double_dqn=True, hyperparameter_set="double_dqn"
+            )
+            print(f"[Double DQN Evaluation] {metrics}")
+        elif "--dqn" in sys.argv:
+            metrics = evaluate_dueling_ddqn(
+                render=render, enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn"
+            )
+            print(f"[Vanilla DQN Evaluation] {metrics}")
+        elif "--ppo" in sys.argv or "-ppo" in sys.argv:
+            metrics = evaluate_ppo(render=render, hyperparameter_set="ppo")
+            print(f"[PPO Evaluation] {metrics}")
+        else:
+            print(
+                "Please specify a learning agent to evaluate:\n"
+                "  python -m src --eval --dueling_ddqn [--render]  # Evaluate Dueling Double DQN [alias: --ddqn]\n"
+                "  python -m src --eval --double_dqn [--render]    # Evaluate Double DQN\n"
+                "  python -m src --eval --dqn [--render]           # Evaluate Vanilla DQN\n"
+                "  python -m src --eval --ppo [--render]           # Evaluate PPO [alias: -ppo]"
             )
     else:
         print(
             "Usage:\n"
-            "  python -m src --play                 # Play interactively\n"
-            "  python -m src --play --headless      # Run headless physics benchmark\n"
-            "  python -m src --demo --gym           # Demo Gymnasium environment\n"
-            "  python -m src --demo --dqn           # Demo Vanilla DQN (PyTorch)\n"
-            "  python -m src --demo --double_dqn    # Demo Double DQN (PyTorch)\n"
-            "  python -m src --demo --dueling_ddqn  # Demo Dueling Double DQN (PyTorch) [alias: --ddqn]"
+            "  python -m src --play                              # Play interactively\n"
+            "  python -m src --play --headless                   # Run headless physics benchmark\n"
+            "  python -m src --demo --gym                        # Demo Gymnasium environment\n"
+            "  python -m src --demo --dqn|--double_dqn|--ddqn    # Test DQN neural network variants\n"
+            "  python -m src --demo --a2c|--ppo                  # Test A2C / PPO neural networks\n"
+            "  python -m src --train --dueling_ddqn|--ppo        # Train Dueling Double DQN or PPO agent\n"
+            "  python -m src --eval --dueling_ddqn|--ppo         # Evaluate Dueling Double DQN or PPO (add --render for GUI)"
         )
 
 

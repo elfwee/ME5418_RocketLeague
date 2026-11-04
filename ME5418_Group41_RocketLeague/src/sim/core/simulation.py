@@ -501,12 +501,12 @@ class Simulation:
         - Ego blue_car (21): [pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts,
                          has_jump2, is_flipping, is_turtling, is_boost_recovery, 8x raycast_distances]
         - Ball (5): [pos_x, pos_y, vel_x, vel_y, ang_vel]
-        - Relations (9): [agent_to_ball (mag, dir_x, dir_y),
+        - Relations (9): [blue_car_to_ball (mag, dir_x, dir_y),
                           ball_to_opp_goal (mag, dir_x, dir_y),
                           ball_to_own_goal (mag, dir_x, dir_y)]
         - Opponent Present Flag (1): [1.0 if opponent exists else 0.0]
         - Opponent-Dependent Features (16):
-            - If opponent present: opponent blue_car (13) + opponent_to_ball (3)
+            - If opponent present: opponent blue_car (13) + orange_car_to_ball (3)
             - If no opponent: 16 zero-filled floats ([0.0] * 16)
 
         Args:
@@ -643,7 +643,7 @@ class Simulation:
             state_norm["opponent_present"],
         ]
 
-        # 5. Opponent-dependent features (23 floats: 20 blue_car features + 3 opponent_to_ball features)
+        # 5. Opponent-dependent features (23 floats: 20 blue_car features + 3 orange_car_to_ball features)
         if has_opp and state_norm.get("car_orange") is not None:
             co = state_norm["car_orange"]
             vec.extend(
@@ -663,7 +663,7 @@ class Simulation:
                     co["is_boosting"],
                 ]
             )
-            opp_rel = rel.get("opponent_to_ball")
+            opp_rel = rel.get("orange_car_to_ball")
             if opp_rel is not None:
                 vec.extend([opp_rel["magnitude"], opp_rel["direction"][0], opp_rel["direction"][1]])
             else:
