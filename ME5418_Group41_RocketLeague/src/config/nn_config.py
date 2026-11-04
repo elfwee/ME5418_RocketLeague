@@ -61,6 +61,7 @@ class PPOConfig:
     rollout_steps = 2048
     update_epochs = 4
     minibatch_size = 64
+    target_kl = None  # early-stop PPO.update epochs when approx KL exceeds this (None = disabled)
     demo_rollout_steps = 32
 
     # Environment, Stopping & Checkpointing
