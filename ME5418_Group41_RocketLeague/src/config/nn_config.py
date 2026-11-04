@@ -64,7 +64,7 @@ class PPOConfig:
     demo_rollout_steps = 32
 
     # Environment, Stopping & Checkpointing
-    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
+    bot_type = "none"  # "none" or "heuristic_bot"
     stop_on_reward = 100_000
     eval_episodes = 5
     runs_dir = "runs"

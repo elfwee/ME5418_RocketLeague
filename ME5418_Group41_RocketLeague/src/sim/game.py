@@ -2,14 +2,18 @@
 
 import sys
 import os
+from pathlib import Path
 
 import pygame
+from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 from src.sim.visualization.event_handling import handle_event
+
+AGENT_MODEL_PATH = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir / "model_ppo_curriculum_heuristic_bot.pt"
 
 
 def play_interactive(enable_orange: bool = True):
@@ -30,8 +34,8 @@ def play_interactive(enable_orange: bool = True):
     clock = pygame.time.Clock()
 
     sim = Simulation(enable_orange=enable_orange)
-    blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
-    orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim)
+    blue_control = CarControl(control_type="agent", team="blue", sim=sim, model_path=AGENT_MODEL_PATH)
+    orange_control = CarControl(control_type="human", team="orange", sim=sim)
 
     renderer = Renderer(screen)
 

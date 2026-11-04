@@ -14,6 +14,7 @@ import itertools
 import os
 from pathlib import Path
 import sys
+from typing import Callable
 
 import gymnasium as gym
 import matplotlib
@@ -91,6 +92,7 @@ class PPOAgent:
         self.stop_on_reward = hyperparameters.get("stop_on_reward", PPOConfig.stop_on_reward)
 
         self.optimizer = None
+        self.policy_net = None  # persisted across training run() calls (e.g. curriculum stages)
 
         self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
@@ -229,8 +231,17 @@ class PPOAgent:
         max_episode_steps: int | None = None,
         num_episodes: int | None = None,
         model_path: str | Path | None = None,
+        bot_type: str | None = None,
+        stop_fn: Callable[[list[int]], bool] | None = None,
     ) -> dict[str, float]:
-        """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
+        """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`).
+
+        Args:
+            bot_type: Overrides the configured opponent ("none" or "heuristic_bot") for this run.
+            stop_fn: Training only. Called after every episode with the per-episode goal history
+                     (1 = scored); returning True ends the run early.
+        """
+        bot_type = bot_type if bot_type is not None else ("heuristic_bot" if self.bot else "none")
         make_kwargs = {}
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
@@ -238,7 +249,7 @@ class PPOAgent:
         env = gym.make(
             self.env_id,
             render_mode="human" if render else None,
-            bot_type="heuristic_bot" if self.bot else "none",
+            bot_type=bot_type,
             discrete_action=True,
             **make_kwargs,
         )
@@ -249,11 +260,17 @@ class PPOAgent:
         rewards_per_episode = []
         goals_per_episode = []
 
-        policy_net = ActorCritic(num_states, num_actions, self.fcl_nodes).to(device)
+        if is_training and self.policy_net is not None:
+            policy_net = self.policy_net  # continue training the same weights (e.g. next curriculum stage)
+        else:
+            policy_net = ActorCritic(num_states, num_actions, self.fcl_nodes).to(device)
+            if is_training:
+                self.policy_net = policy_net
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
-            self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
+            if self.optimizer is None:
+                self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
             current_entropy = float(np.log(num_actions))
@@ -266,7 +283,7 @@ class PPOAgent:
 
             print(
                 f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-                f"Minibatch={self.mini_batch_size} | Bot={'heuristic_bot' if self.bot else 'none'} | Model={ckpt_file}"
+                f"Minibatch={self.mini_batch_size} | Bot={bot_type} | Model={ckpt_file}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -410,6 +427,10 @@ class PPOAgent:
 
                     if not env.unwrapped.isopen:
                         print("Exiting environment.")
+                        break
+
+                    if stop_fn is not None and stop_fn(goals_per_episode):
+                        print(f"[PPO Train] stop_fn triggered at episode {episode}.")
                         break
         finally:
             env.close()

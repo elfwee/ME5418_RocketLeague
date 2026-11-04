@@ -15,6 +15,7 @@ from src.neural_nets.a2c_torch import test_a2c_torch
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
+from src.learning_agents.curriculum_learning import curriculum_learning
 
 
 def main():
@@ -55,13 +56,16 @@ def main():
             train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
             train_ppo(hyperparameter_set="ppo")
+        elif "--curriculum_ppo" in sys.argv:
+            curriculum_learning()
         else:
             print(
                 "Please specify a learning agent to train:\n"
                 "  python -m src --train --dueling_ddqn  # Train Dueling Double DQN agent [alias: --ddqn]\n"
                 "  python -m src --train --double_dqn    # Train Double DQN agent\n"
                 "  python -m src --train --dqn           # Train Vanilla DQN agent\n"
-                "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]"
+                "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]\n"
+                "  python -m src --train --curriculum_ppo # Train PPO with curriculum_learning"
             )
     elif "--eval" in sys.argv:
         render = "--render" in sys.argv
