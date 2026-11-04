@@ -35,7 +35,7 @@ def play_interactive(enable_orange: bool = True):
 
     sim = Simulation(enable_orange=enable_orange)
     blue_control = CarControl(control_type="agent", team="blue", sim=sim, model_path=AGENT_MODEL_PATH)
-    orange_control = CarControl(control_type="human", team="orange", sim=sim)
+    orange_control = CarControl(control_type="agent", team="orange", sim=sim, model_path=AGENT_MODEL_PATH)
 
     renderer = Renderer(screen)
 

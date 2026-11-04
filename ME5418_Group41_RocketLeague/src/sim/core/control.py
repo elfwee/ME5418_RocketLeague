@@ -7,6 +7,7 @@ from src.config.nn_config import PPOConfig
 from src.sim.core.actions import CarAction
 from src.sim.ai.heuristic_bot import HeuristicBot
 from src.sim.core.simulation import Simulation
+from src.sim.core.orange_perspective import get_orange_perspective_obs, mirror_action
 from typing import Dict, Any, Optional, Tuple
 
 
@@ -21,7 +22,8 @@ class CarControl:
         - agent: greedy inference from a trained PPO / (Dueling) DQN checkpoint (no training)
     - team:
         - orange
-        - blue (only blue for agent: observations are built from the blue car's perspective)
+        - blue
+        (agent on orange uses a blue-trained model via the mirrored perspective in orange_perspective.py)
     - sim: Simulation needed for HeuristicBot and agent
     - model_path: .pt state_dict needed for agent
     - action_repeat: decision interval for agent; must match training (PPOConfig/DQNConfig action_repeat)
@@ -46,8 +48,8 @@ class CarControl:
         self._agent_frame = 0
         self._agent_action_idx = 0
         if self.control_type == "agent":
-            if self.team != "blue":
-                raise ValueError("control_type='agent' only supports team='blue' (observations are blue-perspective).")
+            if self.team not in ("blue", "orange"):
+                raise ValueError(f"Invalid team for agent: {self.team}. Must be 'blue' or 'orange'.")
             if self.sim is None or model_path is None:
                 raise ValueError("control_type='agent' requires both sim and model_path.")
             self.policy = self._load_policy(model_path)
@@ -89,18 +91,29 @@ class CarControl:
 
     def _agent_action(self) -> CarAction:
         """Greedy policy action, re-decided every `action_repeat` frames like in training. The jump
-        bit is only held on the decision frame so edge-triggered jumping can re-fire."""
+        bit is only held on the decision frame so edge-triggered jumping can re-fire. On orange, the
+        observation and action are mirrored so a blue-trained model plays from its own perspective."""
         import torch
+
+        if self.team == "orange" and self.sim.orange_car is None:  # orange toggled off in-game
+            self._agent_frame = 0
+            return CarAction()
 
         is_decision_frame = self._agent_frame % self.action_repeat == 0
         if is_decision_frame:
-            obs = np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
+            raw_obs = (
+                get_orange_perspective_obs(self.sim)
+                if self.team == "orange"
+                else self.sim.get_state_norm(as_flat_array=True)
+            )
+            obs = np.asarray(raw_obs, dtype=np.float32)
             with torch.no_grad():
                 out = self.policy(torch.from_numpy(obs).unsqueeze(0))
                 scores = out[0] if isinstance(out, tuple) else out  # PPO -> (logits, V); DQN -> Q
                 self._agent_action_idx = int(scores.squeeze(0).argmax().item())
         self._agent_frame += 1
-        return self._decode_discrete_action(self._agent_action_idx, allow_jump=is_decision_frame)
+        action = self._decode_discrete_action(self._agent_action_idx, allow_jump=is_decision_frame)
+        return mirror_action(action) if self.team == "orange" else action
 
     def get_action(self):
         if self.control_type == "passive":
