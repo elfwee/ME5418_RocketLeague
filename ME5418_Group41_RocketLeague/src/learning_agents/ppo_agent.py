@@ -233,12 +233,14 @@ class PPOAgent:
 
         plt.figure(figsize=(10, 4))
         plt.subplot(1, 2, 1)
+        plt.title(f"{self.hyperparameter_set} - Mean Reward (Last 100 Episodes)")
         plt.xlabel("Episodes")
         plt.ylabel("Mean Reward (Last 100 Episodes)")
         plt.plot(mean_rewards, label="Mean Reward")
         plt.grid(True, alpha=0.3)
 
         plt.subplot(1, 2, 2)
+        plt.title(f"{self.hyperparameter_set} - Policy Entropy")
         plt.xlabel("Episodes")
         plt.ylabel("Policy Entropy")
         plt.plot(entropy_history, label="Entropy", color="orange")
@@ -389,9 +391,7 @@ class PPOAgent:
                             rewards_t = torch.stack(buf_rewards)
                             dones_t = torch.stack(buf_dones)
 
-                            advantages_t, returns_t = self._compute_gae(
-                                rewards_t, values_t, next_values_t, dones_t
-                            )
+                            advantages_t, returns_t = self._compute_gae(rewards_t, values_t, next_values_t, dones_t)
                             if self.anneal_lr:
                                 frac = max(self.lr_min_frac, 1.0 - self.total_steps / self.lr_anneal_steps)
                                 for group in self.optimizer.param_groups:

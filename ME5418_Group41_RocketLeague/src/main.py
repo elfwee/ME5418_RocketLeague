@@ -72,7 +72,7 @@ def main():
         elif "--dqn" in sys.argv:
             train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
-            train_ppo(hyperparameter_set="ppo")
+            train_ppo(hyperparameter_set="ppo", num_episodes=15_000)
         elif "--curriculum_ppo" in sys.argv:
             curriculum_learning()
         elif "--self_play" in sys.argv:
