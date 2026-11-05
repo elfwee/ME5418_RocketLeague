@@ -123,7 +123,7 @@ class RocketLeagueEnv(gym.Env):
             import torch
 
             state_dict = torch.load(self.opponent_model_path, map_location="cpu", weights_only=True)
-            self.opponent.policy.load_state_dict(state_dict)
+            self.opponent.agent.policy.load_state_dict(state_dict)
             self._opponent_mtime = mtime
 
     def _calculate_reward(self):

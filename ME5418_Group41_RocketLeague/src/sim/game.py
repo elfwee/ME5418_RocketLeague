@@ -1,24 +1,16 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
 
-import sys
-import os
-from pathlib import Path
-
 import pygame
-from src.config.nn_config import PPOConfig
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 from src.sim.visualization.event_handling import handle_event
 
-AGENT_MODEL_PATH = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir / "model_ppo_curriculum_heuristic_bot.pt"
-
 
 def play_interactive(enable_orange: bool = True):
-    """Launch the Pygame interactive sandbox with 2D vector controls and Octane physics."""
-    blue_control = CarControl(control_type="human", team="blue")
+    """Launch the Pygame interactive sandbox: human drives blue, heuristic bot drives orange."""
     pygame.init()
     pygame.joystick.init()
 
@@ -34,8 +26,8 @@ def play_interactive(enable_orange: bool = True):
     clock = pygame.time.Clock()
 
     sim = Simulation(enable_orange=enable_orange)
-    blue_control = CarControl(control_type="agent", team="blue", sim=sim, model_path=AGENT_MODEL_PATH)
-    orange_control = CarControl(control_type="agent", team="orange", sim=sim, model_path=AGENT_MODEL_PATH)
+    blue_control = CarControl(control_type="human", team="blue")
+    orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim)
 
     renderer = Renderer(screen)
 
@@ -51,7 +43,6 @@ def play_interactive(enable_orange: bool = True):
 
         # --- Simulation Step ---
         sim.step(action=blue_action, dt=dt, action_orange=orange_action)
-        sim.get_state_norm(as_flat_array=True)
 
         # --- Render ---
         renderer.render(sim)
@@ -72,12 +63,12 @@ def play_headless(steps: int = 300, enable_orange: bool = True):
         if step % 60 == 0:
             state = sim.get_state()
             line = (
-                f"Step {step:03d} | Blue Pos: ({state['car']['position'][0]:.2f}, {state['car']['position'][1]:.2f}) | "
+                f"Step {step:03d} | Blue Pos: ({state['blue_car']['position'][0]:.2f}, {state['blue_car']['position'][1]:.2f}) | "
                 f"Ball Pos: ({state['ball']['position'][0]:.2f}, {state['ball']['position'][1]:.2f}) | "
                 f"Ball Spin: {state['ball']['angular_velocity']:+5.1f} rad/s"
             )
             if "car_orange" in state:
-                line += f" | Orange Pos: ({state['car_orange']['position'][0]:.2f}, {state['car_orange']['position'][1]:.2f}) [{state['car_orange']['bot_state']}]"
+                line += f" | Orange Pos: ({state['car_orange']['position'][0]:.2f}, {state['car_orange']['position'][1]:.2f})"
             print(line)
 
     print("Headless simulation benchmark completed successfully!")

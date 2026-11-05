@@ -16,6 +16,17 @@ from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.learning_agents.curriculum_learning import continue_with_self_play, curriculum_learning
+from src.learning_agents.head_to_head import DEFAULT_BLUE_MODEL, DEFAULT_ORANGE_MODEL, play_head_to_head
+
+
+def _arg_value(flag: str, default):
+    """Return the value following `flag` in sys.argv, or `default` if absent."""
+    if flag in sys.argv:
+        idx = sys.argv.index(flag)
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+        raise SystemExit(f"{flag} requires a value")
+    return default
 
 
 def main():
@@ -24,6 +35,12 @@ def main():
             play_headless(steps=300, enable_orange=True)
         else:
             play_interactive(enable_orange=True)
+    elif "--head_to_head" in sys.argv:
+        play_head_to_head(
+            blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
+            orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
+            render="--headless" not in sys.argv,
+        )
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
             demo_gym()
@@ -103,6 +120,7 @@ def main():
             "Usage:\n"
             "  python -m src --play                              # Play interactively\n"
             "  python -m src --play --headless                   # Run headless physics benchmark\n"
+            "  python -m src --head_to_head [--headless] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
             "  python -m src --demo --gym                        # Demo Gymnasium environment\n"
             "  python -m src --demo --dqn|--double_dqn|--ddqn    # Test DQN neural network variants\n"
             "  python -m src --demo --a2c|--ppo                  # Test A2C / PPO neural networks\n"

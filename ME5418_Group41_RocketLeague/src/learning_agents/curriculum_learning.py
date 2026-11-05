@@ -1,10 +1,10 @@
 """
-    Curriculum Learning
+Curriculum Learning
 
-    PPO first learns against no opponent (bot_type="none") until its success rate
-    (rolling goal rate) plateaus, then continues training the same weights against
-    the heuristic bot (bot_type="heuristic_bot") until it plateaus again, and finally
-    plays against frozen snapshots of itself (bot_type="self_play") for a fixed budget.
+PPO first learns against no opponent (bot_type="none") until its success rate
+(rolling goal rate) plateaus, then continues training the same weights against
+the heuristic bot (bot_type="heuristic_bot") until it plateaus again, and finally
+plays against frozen snapshots of itself (bot_type="self_play") for a fixed budget.
 """
 
 import os
@@ -35,7 +35,9 @@ class SuccessRatePlateau:
     improved by more than `min_delta` for `patience` episodes.
     """
 
-    def __init__(self, window: int = 100, patience: int = 500, min_delta: float = 0.02, max_episodes: int | None = None):
+    def __init__(
+        self, window: int = 100, patience: int = 500, min_delta: float = 0.02, max_episodes: int | None = None
+    ):
         self.window = window
         self.patience = patience
         self.min_delta = min_delta
@@ -77,7 +79,9 @@ class SelfPlaySnapshot:
     """stop_fn for self-play: every `every` episodes, freeze the current policy as the new
     opponent (the env reloads it on its next reset). Stops after `max_episodes`."""
 
-    def __init__(self, agent: PPOAgent, opponent_path: Path, every: int = SNAPSHOT_EVERY, max_episodes: int = SELF_PLAY_EPISODES):
+    def __init__(
+        self, agent: PPOAgent, opponent_path: Path, every: int = SNAPSHOT_EVERY, max_episodes: int = SELF_PLAY_EPISODES
+    ):
         self.agent = agent
         self.opponent_path = opponent_path
         self.every = every
