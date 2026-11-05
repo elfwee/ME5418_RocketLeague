@@ -4,7 +4,8 @@ Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Eval
 Designed for a controlled, head-to-head comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
-- Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`, `minibatch_size = 64`).
+- Shared learning rate (`lr = 3e-4`); PPO uses its own `gamma`, minibatch size, reward scaling,
+  target-KL early stopping and LR annealing (see `PPOConfig`).
 - Identical logging, checkpointing (`runs/model_ppo.pt`), and 100-episode rolling metrics (`runs/graph_ppo.png`).
 """
 
@@ -84,6 +85,11 @@ class PPOAgent:
         self.value_loss_coef = hyperparameters.get("value_loss_coef", PPOConfig.value_loss_coef)
         self.entropy_coef = hyperparameters.get("entropy_coef", PPOConfig.entropy_coef)
         self.max_grad_norm = hyperparameters.get("max_grad_norm", PPOConfig.max_grad_norm)
+        self.reward_scale = hyperparameters.get("reward_scale", PPOConfig.reward_scale)
+        self.target_kl = hyperparameters.get("target_kl", PPOConfig.target_kl)
+        self.anneal_lr = hyperparameters.get("anneal_lr", PPOConfig.anneal_lr)
+        self.lr_anneal_steps = hyperparameters.get("lr_anneal_steps", PPOConfig.lr_anneal_steps)
+        self.lr_min_frac = hyperparameters.get("lr_min_frac", PPOConfig.lr_min_frac)
 
         self.action_repeat = hyperparameters.get("action_repeat", PPOConfig.action_repeat)
         self.rollout_steps = hyperparameters.get("rollout_steps", PPOConfig.rollout_steps)
@@ -93,6 +99,7 @@ class PPOAgent:
 
         self.optimizer = None
         self.policy_net = None  # persisted across training run() calls (e.g. curriculum stages)
+        self.total_steps = 0  # decisions across all run() calls; drives LR annealing
 
         self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
@@ -133,15 +140,25 @@ class PPOAgent:
         returns: torch.Tensor,
         advantages: torch.Tensor,
         policy_net: ActorCritic,
-    ) -> tuple[float, float]:
-        """Run `update_epochs` of shuffled minibatch PPO clipped surrogate updates."""
+    ) -> tuple[float, float, float]:
+        """Run up to `update_epochs` of shuffled minibatch PPO clipped surrogate updates.
+
+        Advantages are normalized once over the whole rollout. If `target_kl` is set, updates stop
+        early once the approximate KL to the rollout policy exceeds `1.5 * target_kl`.
+        Returns (mean loss, mean entropy, last approx KL).
+        """
         batch_size = states.size(0)
         total_loss_sum = 0.0
         entropy_sum = 0.0
         num_mb = 0
+        approx_kl = 0.0
+
+        if advantages.numel() > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         for _ in range(self.update_epochs):
             perm = torch.randperm(batch_size, device=device)
+            stop_early = False
             for start in range(0, batch_size, self.mini_batch_size):
                 idx = perm[start : start + self.mini_batch_size]
                 mb_states = states[idx]
@@ -149,11 +166,16 @@ class PPOAgent:
                 mb_old_log_probs = old_log_probs[idx]
                 mb_returns = returns[idx]
                 mb_adv = advantages[idx]
-                if mb_adv.numel() > 1:
-                    mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
 
                 _, new_log_probs, entropy, new_values = policy_net.get_action_and_value(mb_states, mb_actions)
-                ratio = torch.exp(new_log_probs - mb_old_log_probs)
+                log_ratio = new_log_probs - mb_old_log_probs
+                ratio = torch.exp(log_ratio)
+
+                with torch.no_grad():
+                    approx_kl = float(((ratio - 1.0) - log_ratio).mean().item())
+                if self.target_kl is not None and approx_kl > 1.5 * self.target_kl:
+                    stop_early = True
+                    break
 
                 # Clipped surrogate objective
                 pg_loss1 = -mb_adv * ratio
@@ -173,9 +195,11 @@ class PPOAgent:
                 total_loss_sum += float(loss.item())
                 entropy_sum += float(entropy_loss.item())
                 num_mb += 1
+            if stop_early:
+                break
 
         denom = max(num_mb, 1)
-        return total_loss_sum / denom, entropy_sum / denom
+        return total_loss_sum / denom, entropy_sum / denom, approx_kl
 
     def _step_with_action_repeat(self, env: gym.Env, action_idx: int):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
@@ -276,6 +300,7 @@ class PPOAgent:
             step_count = 0
             entropy_history = []
             current_entropy = float(np.log(num_actions))
+            current_kl = 0.0
             best_mean_reward = float("-inf")
             last_graph_update_time = datetime.now()
 
@@ -348,10 +373,11 @@ class PPOAgent:
                         buf_log_probs.append(log_prob.squeeze(0))
                         buf_values.append(value.squeeze(0))
                         buf_next_values.append(next_val)
-                        buf_rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
+                        buf_rewards.append(torch.tensor(reward * self.reward_scale, dtype=torch.float32, device=device))
                         buf_dones.append(torch.tensor(float(done), dtype=torch.float32, device=device))
 
                         step_count += 1
+                        self.total_steps += 1
 
                         # Perform PPO multi-epoch minibatch update once rollout horizon is reached
                         if len(buf_states) >= self.rollout_steps:
@@ -366,7 +392,11 @@ class PPOAgent:
                             advantages_t, returns_t = self._compute_gae(
                                 rewards_t, values_t, next_values_t, dones_t
                             )
-                            _, current_entropy = self.optimize(
+                            if self.anneal_lr:
+                                frac = max(self.lr_min_frac, 1.0 - self.total_steps / self.lr_anneal_steps)
+                                for group in self.optimizer.param_groups:
+                                    group["lr"] = self.learning_rate * frac
+                            _, current_entropy, current_kl = self.optimize(
                                 states_t,
                                 actions_t,
                                 old_log_probs_t,
@@ -396,7 +426,8 @@ class PPOAgent:
                 print(
                     f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
                     f"Mean(100) = {mean_reward_100:7.2f} | GoalRate(100) = {goal_rate_100:5.1f}% | "
-                    f"Ent = {current_entropy:.3f} | Steps = {step_count}"
+                    f"Ent = {current_entropy:.3f} | KL = {current_kl:.4f} | "
+                    f"LR = {self.optimizer.param_groups[0]['lr']:.2e} | Steps = {step_count}"
                     if is_training
                     else f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
                     f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
