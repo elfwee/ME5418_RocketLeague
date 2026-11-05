@@ -3,7 +3,7 @@ import numpy as np
 from src.sim.core.actions import CarAction
 from src.sim.ai.heuristic_bot import HeuristicBot
 from src.sim.core.simulation import Simulation
-from typing import Dict, Any, Optional, Tuple
+from typing import Optional
 
 
 class CarControl:
@@ -26,6 +26,7 @@ class CarControl:
         self.team = team
         self.bot = HeuristicBot(team=self.team) if self.control_type == "heuristic_bot" else None
         self.action = CarAction()
+        self.random_action = CarAction()
 
     def get_action(self):
         if self.control_type == "passive":

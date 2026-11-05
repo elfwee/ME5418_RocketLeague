@@ -10,6 +10,7 @@ import pygame
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.sim.core.actions import CarAction
+from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
@@ -29,12 +30,24 @@ if GymConfig.gym_id not in gym.envs.registry:
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": SIM_HZ}
 
+    BOT_TYPES = ("none", "heuristic_bot")
+
     def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
-        if bot_type not in ("none", "heuristic_bot"):
-            raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
+        """
+        bot_type:
+            - "none": no orange car
+            - "heuristic_bot": orange driven by HeuristicBot
+        """
+        if bot_type not in self.BOT_TYPES:
+            raise ValueError(f"Invalid bot_type: {bot_type}. Must be one of {self.BOT_TYPES}.")
 
         self.render_mode = render_mode
-        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
+        self.sim = Simulation(enable_orange=(bot_type != "none"), random_spawn=True)
+
+        if bot_type == "heuristic_bot":
+            self.opponent = CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
+        else:
+            self.opponent = None
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
@@ -66,6 +79,8 @@ class RocketLeagueEnv(gym.Env):
 
         random_spawn = options.get("random_spawn", None) if options else None
         self.sim.reset(reset_scores=True, random_spawn=random_spawn)
+        if self.opponent is not None:
+            self.opponent.reset()
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
@@ -82,7 +97,8 @@ class RocketLeagueEnv(gym.Env):
         dir_x, dir_y = GymConfig.directions[direction]
         car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
 
-        self.sim.step(car_action, 1.0 / SIM_HZ)
+        action_orange = self.opponent.get_action() if self.opponent is not None else CarAction()
+        self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=action_orange)
         reward, terminated = self._calculate_reward()
         self.render()
         return self._get_obs(), reward, terminated, not self.isopen, {}
