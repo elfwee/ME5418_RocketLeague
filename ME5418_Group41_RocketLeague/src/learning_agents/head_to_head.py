@@ -18,8 +18,8 @@ from src.learning_agents.agent_control import AgentControl
 from src.sim.core.simulation import Simulation
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
-DEFAULT_BLUE_MODEL = RUNS_DIR / "model_ppo_curriculum_self_play.pt"
-DEFAULT_ORANGE_MODEL = RUNS_DIR / "model_ppo_curriculum_heuristic_bot.pt"
+DEFAULT_BLUE_MODEL = RUNS_DIR / "model_ppo.pt"
+DEFAULT_ORANGE_MODEL = RUNS_DIR / "model_ppo.pt"
 
 
 def play_head_to_head(

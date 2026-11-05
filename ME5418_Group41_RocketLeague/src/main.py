@@ -78,9 +78,7 @@ def main():
                 "  python -m src --train --dueling_ddqn  # Train Dueling Double DQN agent [alias: --ddqn]\n"
                 "  python -m src --train --double_dqn    # Train Double DQN agent\n"
                 "  python -m src --train --dqn           # Train Vanilla DQN agent\n"
-                "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]\n"
-                "  python -m src --train --curriculum_ppo # Train PPO with curriculum_learning\n"
-                "  python -m src --train --self_play      # Continue curriculum PPO against itself"
+                "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]"
             )
     elif "--eval" in sys.argv:
         render = "--render" in sys.argv
