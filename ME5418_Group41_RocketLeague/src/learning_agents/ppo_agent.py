@@ -259,7 +259,6 @@ class PPOAgent:
         model_path: str | Path | None = None,
         bot_type: str | None = None,
         stop_fn: Callable[[list[int]], bool] | None = None,
-        env_kwargs: dict | None = None,
     ) -> dict[str, float]:
         """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`).
 
@@ -267,10 +266,9 @@ class PPOAgent:
             bot_type: Overrides the configured opponent ("none" or "heuristic_bot") for this run.
             stop_fn: Training only. Called after every episode with the per-episode goal history
                      (1 = scored); returning True ends the run early.
-            env_kwargs: Extra keyword arguments for the environment (e.g. `opponent_model_path` for self-play).
         """
         bot_type = bot_type if bot_type is not None else ("heuristic_bot" if self.bot else "none")
-        make_kwargs = dict(env_kwargs or {})
+        make_kwargs = {}
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
 
