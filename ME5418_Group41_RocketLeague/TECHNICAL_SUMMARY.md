@@ -350,8 +350,8 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
         ]
     },
     "relations": {
-        "agent_to_ball": {"magnitude": 4.12, "direction": (0.92, 0.39)},
-        "opponent_to_ball": {"magnitude": 5.84, "direction": (-0.85, 0.52)},
+        "blue_car_to_ball": {"magnitude": 4.12, "direction": (0.92, 0.39)},
+        "orange_car_to_ball": {"magnitude": 5.84, "direction": (-0.85, 0.52)},
         "ball_to_opponent_goal": {"magnitude": 19.38, "direction": (1.0, 0.0)},
         "ball_to_own_goal": {"magnitude": 10.38, "direction": (-1.0, 0.0)}
     },
@@ -387,12 +387,12 @@ Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list 
 1. **Ego Car (20 floats)**: `[pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts, has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]`
 2. **Ball (5 floats)**: `[pos_x, pos_y, vel_x, vel_y, ang_vel]`
 3. **Ego Relations (9 floats)**:
-   - `agent_to_ball`: `[mag, dir_x, dir_y]` (3)
+   - `blue_car_to_ball`: `[mag, dir_x, dir_y]` (3)
    - `ball_to_opponent_goal`: `[mag, dir_x, dir_y]` (3)
    - `ball_to_own_goal`: `[mag, dir_x, dir_y]` (3)
 4. **Opponent Present Flag (1 float)**: `[1.0 if opponent exists else 0.0]`
 5. **Opponent-Dependent Features (23 floats)**:
-   - If opponent present: `car_orange` features (20 floats, identical format to ego car) + `opponent_to_ball` relation (`[mag, dir_x, dir_y]`, 3 floats).
+   - If opponent present: `car_orange` features (20 floats, identical format to ego car) + `orange_car_to_ball` relation (`[mag, dir_x, dir_y]`, 3 floats).
    - If no opponent: strictly zero-filled with 23 zeros (`[0.0] * 23`).
 
 ```python

@@ -1,6 +1,6 @@
-# Simulation Source Package (`src/`)
+# Simulation & RL Source Package (`src/`)
 
-This directory contains the complete simulation engine, Gymnasium RL environment wrapper, AI controller, and rendering pipeline for Rocket League 2D.
+This directory contains the complete simulation engine, Gymnasium RL environment wrapper, neural network definitions, learning agent training/evaluation pipelines, AI controller, and rendering pipeline for Rocket League 2D.
 
 ---
 
@@ -9,44 +9,64 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 ```text
 src/
 ├── __init__.py
-├── __main__.py               # Enables `python -m src` (delegates to main.py)
-├── main.py                   # Entry point: interactive sandbox, headless benchmark, gym demo
+├── __main__.py                  # Enables `python -m src` (delegates to main.py)
+├── main.py                      # Unified CLI entry point (--play, --demo, --train, --eval)
 │
-├── config/                   # Centralised configuration
-│   ├── sim_config.py         # Physics rates, field geometry, car/ball tunings, display settings
-│   ├── gym_config.py         # GymConfig: env id, episode/training step limits, action directions
-│   └── nn_config.py          # DQNConfig: network sizes, learning rate, replay buffer, batch size
+├── config/                      # Centralised configuration
+│   ├── sim_config.py            # Physics rates, field geometry, car/ball tunings, display settings
+│   ├── gym_config.py            # GymConfig: env id, episode/training step limits, action directions
+│   └── nn_config.py             # DQNConfig & PPOConfig: matched architectures & RL hyperparameters
 │
-├── gym_env/                  # Gymnasium RL environment
-│   └── rocket_league_env.py  # RocketLeagueEnv (action/observation space, reward, step, reset)
+├── gym_env/                     # Gymnasium RL environment
+│   └── rocket_league_env.py     # RocketLeagueEnv (action/observation space, reward, step, reset)
 │
-├── neural_nets/              # Deep Q-Network architecture & forward/backward pass demo
-│   └── dueling_ddqn_torch.py # DQN / Double DQN / Dueling Double DQN in PyTorch
+├── neural_nets/                 # Neural network architectures & forward/backward pass demos
+│   ├── dueling_ddqn_torch.py    # DQN / Double DQN / Dueling Double DQN in PyTorch
+│   └── ppo_torch.py             # PPO Actor-Critic network (Policy + Value heads) in PyTorch
 │
-└── sim/                      # 2D simulation (physics, AI opponent, rendering)
-    ├── game.py               # Interactive & headless game loops (play_interactive, play_headless)
+├── learning_agents/             # Complete RL learning agents (training, evaluation, checkpointing)
+│   ├── __init__.py
+│   ├── experience_replay.py     # ReplayMemory FIFO circular transition buffer for off-policy DQN
+│   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent (--train / --eval for Dueling DDQN, DDQN, DQN)
+│   └── ppo_agent.py             # PPOAgent (--train / --eval with RolloutBuffer, GAE, clipped PPO)
+│
+└── sim/                         # 2D simulation (physics, AI opponent, rendering)
+    ├── game.py                  # Interactive & headless game loops (play_interactive, play_headless)
     │
-    ├── core/                 # 2D physics engine & entities (Pymunk)
-    │   ├── actions.py        # Unified 2D CarAction dataclass
-    │   ├── arena.py          # Field walls, elevated goals, and deflection ramps
-    │   ├── ball.py           # Rigid-body ball with aerodynamic drag and spin decay
-    │   ├── car.py            # Chassis dynamics, raycast suspension, boost, jump-dodge
-    │   ├── control.py        # CarControl: none / human (keyboard) / heuristic bot input sources
-    │   ├── simulation.py     # Physics manager, contact callbacks, sub-stepping loop
-    │   └── README.md         # Deep-dive physics & mathematical formulation
+    ├── core/                    # 2D physics engine & entities (Pymunk)
+    │   ├── actions.py           # Unified 2D CarAction dataclass
+    │   ├── arena.py             # Field walls, elevated goals, and deflection ramps
+    │   ├── ball.py              # Rigid-body ball with aerodynamic drag and spin decay
+    │   ├── car.py               # Chassis dynamics, raycast suspension, boost, jump-dodge
+    │   ├── control.py           # CarControl: none / human (keyboard) / heuristic bot input sources
+    │   ├── simulation.py        # Physics manager, contact callbacks, sub-stepping loop
+    │   └── README.md            # Deep-dive physics & mathematical formulation
     │
-    ├── ai/                   # Scripted adversarial baseline bot
-    │   ├── heuristic_bot.py  # Hierarchical Zone & Intercept State Machine (HZISM)
-    │   └── README.md         # State machine architecture & decision logic
+    ├── ai/                      # Scripted adversarial baseline bot
+    │   ├── heuristic_bot.py     # Hierarchical Zone & Intercept State Machine (HZISM)
+    │   └── README.md            # State machine architecture & decision logic
     │
-    └── visualization/        # Graphic visualization & HUD (Pygame)
-        ├── renderer.py       # Procedural Octane vehicle, vector debug, telemetry HUD
-        └── README.md         # Coordinate mapping, HUD specs, and visual features
+    └── visualization/           # Graphic visualization & HUD (Pygame)
+        ├── renderer.py          # Procedural Octane vehicle, vector debug, telemetry HUD
+        └── README.md            # Coordinate mapping, HUD specs, and visual features
 ```
 
 ---
 
-## 2. Gymnasium Environment API (`gym_env/rocket_league_env.py`)
+## 2. Learning Agents (`learning_agents/`)
+
+Both learning agents share an identical feature trunk (`LayerNorm`-stabilized 2-layer MLP of width $256$, totaling $150,949$ trainable parameters), `Adam` learning rate ($3 \times 10^{-4}$), discount factor ($\gamma = 0.99$), minibatch size ($64$), and $4\times$ action repeat ($15\text{ Hz}$ decision frequency with edge-triggered jump release):
+
+- **Dueling Double DQN (`learning_agents/dueling_ddqn_agent.py`)**:
+  - **Off-Policy Replay**: Stores transitions $(s_t, a_t, r_t, s_{t+1}, \text{terminated}_t)$ in `ReplayMemory` (`experience_replay.py`, capacity $100,000$, warm-up $2,000$ steps) and updates every `train_freq = 4` decisions.
+  - **Target Decoupling**: Uses the online network to select the greedy next action $a^* = \arg\max_{a'} Q_\theta(s_{t+1}, a')$ and the periodic target network $Q_{\theta^-}$ (synced every $1,000$ steps) to evaluate it, trained via Huber loss (`SmoothL1Loss`) and global gradient norm clipping ($10.0$).
+- **Proximal Policy Optimization (`learning_agents/ppo_agent.py`)**:
+  - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 2048$ macro-steps) in a `RolloutBuffer`, bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
+  - **Clipped Surrogate Optimization**: Normalizes advantages per rollout and performs $K = 4$ epochs of shuffled minibatch ($64$) updates using the clipped surrogate objective ($\epsilon = 0.2$), Huber critic loss ($c_1 = 0.5$), and entropy bonus ($c_2 = 0.01$).
+
+---
+
+## 3. Gymnasium Environment API (`gym_env/rocket_league_env.py`)
 
 The environment implements the standard `gymnasium.Env` interface:
 
@@ -109,7 +129,7 @@ obs, info = env.reset()
 
 ---
 
-## 3. Control Scheme
+## 4. Control Scheme
 
 | Action                  | Keyboard Mapping                | Gamepad       | Description                                         |
 | :---------------------- | :------------------------------ | :------------ | :-------------------------------------------------- |
@@ -123,7 +143,7 @@ obs, info = env.reset()
 
 ---
 
-## 4. Module Deep Dives
+## 5. Module Deep Dives
 
 For exhaustive mathematical equations and subsystem specifications, see:
 

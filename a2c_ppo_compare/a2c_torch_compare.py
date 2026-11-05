@@ -1,14 +1,25 @@
 """
-Advantage Actor-Critic (A2C) — Pure Algorithm Comparison Version.
+Advantage Actor-Critic (A2C) — Algorithm & Training Loop Comparison Version.
 Compare this file directly with `ppo_torch_compare.py` to see the exact
 few-line differences that turn A2C into PPO (marked with [DIFF #1] to [DIFF #4]).
 """
 
 import copy
+import sys
+from pathlib import Path
+import gymnasium as gym
+import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.gym_env.rocket_league_env import RocketLeagueEnv
+from src.config.gym_config import GymConfig
 
 
 class ActorCritic(nn.Module):
@@ -106,7 +117,7 @@ class A2C:
 
 
 def compute_returns_and_advantages(rewards, values, dones, next_value, gamma=0.99, gae_lambda=0.95, use_gae=True):
-    """Compute rollout returns and advantages via GAE (use_gae=True) or n-step returns (use_gae=False)."""
+    """Phase 1 (Sequential): Compute rollout returns and advantages backwards in time via GAE or n-step returns."""
     T = rewards.shape[0]
     if use_gae:
         advantages = torch.zeros_like(rewards)
@@ -126,3 +137,65 @@ def compute_returns_and_advantages(rewards, values, dones, next_value, gamma=0.9
             returns[t] = discounted_return
         advantages = returns - values
     return returns, advantages
+
+
+def train_a2c(total_timesteps=500_000, num_envs=8, rollout_steps=16, bot_type="heuristic_bot", use_gae=True):
+    """Train A2C by collecting on-policy rollouts, computing GAE/returns, and running 1 update per rollout."""
+    envs = gym.vector.SyncVectorEnv(
+        [
+            lambda: gym.make(GymConfig.gym_id, render_mode=None, bot_type=bot_type, discrete_action=True)
+            for _ in range(num_envs)
+        ]
+    )
+    agent = A2C(obs_dim=envs.single_observation_space.shape[0], n_actions=envs.single_action_space.n)
+
+    obs, _ = envs.reset()
+    obs_t = torch.as_tensor(obs, dtype=torch.float32)
+    num_updates = max(1, total_timesteps // (num_envs * rollout_steps))
+
+    for update in range(1, num_updates + 1):
+        # === [DIFF #2 (cont.): Rollout Buffer] ===
+        # A2C does not need to store `rollout_log_probs`.
+        rollout_states, rollout_actions, rollout_rewards, rollout_dones, rollout_values = [], [], [], [], []
+
+        for _ in range(rollout_steps):
+            states = obs_t
+            actions, values = agent.act(states)
+            next_obs, rewards, terminateds, truncateds, _ = envs.step(actions.numpy())
+            dones = np.logical_or(terminateds, truncateds).astype(np.float32)
+
+            rollout_states.append(states)
+            rollout_actions.append(actions)
+            rollout_values.append(values)
+            rollout_rewards.append(torch.as_tensor(rewards, dtype=torch.float32))
+            rollout_dones.append(torch.as_tensor(dones, dtype=torch.float32))
+
+            obs_t = torch.as_tensor(next_obs, dtype=torch.float32)
+
+        # Phase 1: Bootstrap from V(s_last) and compute returns & advantages sequentially in time
+        _, next_value = agent.act(obs_t)
+        returns_t, advantages_t = compute_returns_and_advantages(
+            torch.stack(rollout_rewards),
+            torch.stack(rollout_values),
+            torch.stack(rollout_dones),
+            next_value,
+            gamma=agent.discount_factor,
+            use_gae=use_gae,
+        )
+
+        # Phase 2: Perform 1 gradient update on the flattened rollout batch
+        loss = agent._backprop(
+            torch.cat(rollout_states),
+            torch.cat(rollout_actions),
+            returns_t.reshape(-1),
+            advantages=advantages_t.reshape(-1),
+        )
+        if update % 5 == 0 or update == num_updates:
+            print(f"[A2C] Update {update}/{num_updates} | Loss: {loss:.4f}")
+
+    envs.close()
+    return agent
+
+
+if __name__ == "__main__":
+    train_a2c(total_timesteps=1_280, num_envs=4, rollout_steps=16)
