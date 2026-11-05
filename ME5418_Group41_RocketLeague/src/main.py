@@ -15,7 +15,6 @@ from src.neural_nets.a2c_torch import test_a2c_torch
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.learning_agents.curriculum_learning import continue_with_self_play, curriculum_learning
 from src.learning_agents.head_to_head import DEFAULT_BLUE_MODEL, DEFAULT_ORANGE_MODEL, play_head_to_head
 
 
@@ -73,10 +72,6 @@ def main():
             train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
             train_ppo(hyperparameter_set="ppo", num_episodes=15_000)
-        elif "--curriculum_ppo" in sys.argv:
-            curriculum_learning()
-        elif "--self_play" in sys.argv:
-            continue_with_self_play()
         else:
             print(
                 "Please specify a learning agent to train:\n"
