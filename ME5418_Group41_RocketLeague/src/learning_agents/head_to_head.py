@@ -20,8 +20,6 @@ from src.learning_agents.orange_perspective import OrangePerspectiveBot
 from src.sim.core.simulation import Simulation
 from src.sim.core.control import CarControl
 
-
-
 def play_head_to_head(
     blue_model: Optional[str | Path] = None,
     orange_model: Optional[str | Path] = None,
