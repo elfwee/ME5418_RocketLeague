@@ -8,6 +8,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+
 from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
 from src.neural_nets.dueling_ddqn_torch import run_dqn_network
@@ -15,8 +16,15 @@ from src.neural_nets.a2c_torch import test_a2c_torch
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.learning_agents.head_to_head import DEFAULT_BLUE_MODEL, play_head_to_head
+from src.learning_agents.head_to_head import play_head_to_head
+from src.config.nn_config import PPOConfig
 
+RUNS_DIR = f"{ROOT_DIR}/runs"
+
+DEFAULT_BLUE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
+# DEFAULT_BLUE_MODEL = None # defaults to heuristics bot
+DEFAULT_ORANGE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
+# DEFAULT_ORANGE_MODEL = None # defaults to heuristics bot
 
 def _arg_value(flag: str, default):
     """Return the value following `flag` in sys.argv, or `default` if absent."""
@@ -37,7 +45,7 @@ def main():
     elif "--head_to_head" in sys.argv:
         play_head_to_head(
             blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
-            orange_model=_arg_value("--orange", None),
+            orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
             render="--headless" not in sys.argv,
             random_spawn="--random_spawn" in sys.argv,
             seed=int(seed) if (seed := _arg_value("--seed", None)) is not None else None,

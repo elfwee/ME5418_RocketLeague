@@ -18,13 +18,12 @@ from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
 from src.learning_agents.orange_perspective import OrangePerspectiveBot
 from src.sim.core.simulation import Simulation
+from src.sim.core.control import CarControl
 
-RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
-DEFAULT_BLUE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
 
 
 def play_head_to_head(
-    blue_model: str | Path = DEFAULT_BLUE_MODEL,
+    blue_model: Optional[str | Path] = None,
     orange_model: Optional[str | Path] = None,
     render: bool = True,
     max_goals: Optional[int] = None,
@@ -41,13 +40,24 @@ def play_head_to_head(
 
     if seed is not None:
         random.seed(seed)
-    sim = Simulation(enable_orange=True, random_spawn=random_spawn)
+
+    if random_spawn:
+        sim = Simulation(enable_orange=True, random_spawn=random_spawn)
+    else:
+        sim = Simulation(enable_orange=True)
+
     if orange_model is None:
-        orange = OrangePerspectiveBot(sim)
+        # orange = OrangePerspectiveBot(sim)
+        orange = CarControl(control_type="heuristic_bot", team = "orange", sim=sim)
     else:
         orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
-    blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
-    print(f"[HeadToHead] Blue:   {Path(blue_model).name}")
+
+    if orange_model is None:
+        blue = CarControl(control_type="heuristic_bot", team = "blue", sim=sim)
+    else:
+        blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
+
+    print(f"[HeadToHead] Blue:   {'heuristic bot' if blue_model is None else Path(blue_model).name}")
     print(f"[HeadToHead] Orange: {'heuristic bot' if orange_model is None else Path(orange_model).name}")
 
     if render:
