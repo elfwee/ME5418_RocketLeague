@@ -39,6 +39,8 @@ def main():
             blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
             orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
             render="--headless" not in sys.argv,
+            random_spawn="--random_spawn" in sys.argv,
+            seed=int(seed) if (seed := _arg_value("--seed", None)) is not None else None,
         )
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
@@ -113,7 +115,7 @@ def main():
             "Usage:\n"
             "  python -m src --play                              # Play interactively\n"
             "  python -m src --play --headless                   # Run headless physics benchmark\n"
-            "  python -m src --head_to_head [--headless] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
+            "  python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
             "  python -m src --demo --gym                        # Demo Gymnasium environment\n"
             "  python -m src --demo --dqn|--double_dqn|--ddqn    # Test DQN neural network variants\n"
             "  python -m src --demo --a2c|--ppo                  # Test A2C / PPO neural networks\n"
