@@ -15,7 +15,7 @@ from src.neural_nets.a2c_torch import test_a2c_torch
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.learning_agents.head_to_head import DEFAULT_BLUE_MODEL, DEFAULT_ORANGE_MODEL, play_head_to_head
+from src.learning_agents.head_to_head import DEFAULT_BLUE_MODEL, play_head_to_head
 
 
 def _arg_value(flag: str, default):
@@ -37,7 +37,7 @@ def main():
     elif "--head_to_head" in sys.argv:
         play_head_to_head(
             blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
-            orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
+            orange_model=_arg_value("--orange", None),
             render="--headless" not in sys.argv,
             random_spawn="--random_spawn" in sys.argv,
             seed=int(seed) if (seed := _arg_value("--seed", None)) is not None else None,

@@ -1,9 +1,9 @@
 """
-Head-to-Head: pit two trained agents against each other (blue vs orange).
+Head-to-Head: pit a trained blue agent against orange (blue vs orange).
 
-Both cars are driven by AgentControl. The orange agent uses the mirrored perspective, so any
-blue-trained checkpoint can play either side. Run it with a Pygame window (render=True) or
-headlessly as fast as possible for a quick score tally.
+Orange is the heuristic bot by default, or a trained agent if given a model. Either way it plays
+through the mirrored perspective, so it only sees what a blue car would see. Run it with a Pygame
+window (render=True) or headlessly as fast as possible for a quick score tally.
 
     python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]
 """
@@ -16,16 +16,16 @@ from typing import Dict, Optional
 from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
+from src.learning_agents.orange_perspective import OrangePerspectiveBot
 from src.sim.core.simulation import Simulation
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
 DEFAULT_BLUE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
-DEFAULT_ORANGE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
 
 
 def play_head_to_head(
     blue_model: str | Path = DEFAULT_BLUE_MODEL,
-    orange_model: str | Path = DEFAULT_ORANGE_MODEL,
+    orange_model: Optional[str | Path] = None,
     render: bool = True,
     max_goals: Optional[int] = None,
     max_seconds: Optional[float] = 600.0,
@@ -33,7 +33,8 @@ def play_head_to_head(
     seed: Optional[int] = None,
 ) -> Dict[str, float]:
     """Play blue agent vs orange agent until `max_goals` total goals or `max_seconds` of sim time
-    (either may be None; headless needs at least one limit). `random_spawn` randomises every kickoff;
+    (either may be None; headless needs at least one limit). `orange_model=None` plays the heuristic
+    bot on orange. `random_spawn` randomises every kickoff;
     `seed` makes those spawns repeatable and has no effect without it. Returns the final score."""
     if not render and max_goals is None and max_seconds is None:
         raise ValueError("Headless head-to-head needs max_goals or max_seconds, otherwise it never ends.")
@@ -41,10 +42,13 @@ def play_head_to_head(
     if seed is not None:
         random.seed(seed)
     sim = Simulation(enable_orange=True, random_spawn=random_spawn)
-    orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
+    if orange_model is None:
+        orange = OrangePerspectiveBot(sim)
+    else:
+        orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
     blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
     print(f"[HeadToHead] Blue:   {Path(blue_model).name}")
-    print(f"[HeadToHead] Orange: {Path(orange_model).name}")
+    print(f"[HeadToHead] Orange: {'heuristic bot' if orange_model is None else Path(orange_model).name}")
 
     if render:
         import pygame
