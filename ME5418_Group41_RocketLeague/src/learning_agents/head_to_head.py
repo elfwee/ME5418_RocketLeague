@@ -15,11 +15,12 @@ from typing import Dict, Optional
 from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
+from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
-DEFAULT_BLUE_MODEL = RUNS_DIR / "model_ppo.pt"
-DEFAULT_ORANGE_MODEL = RUNS_DIR / "model_ppo.pt"
+DEFAULT_BLUE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
+DEFAULT_ORANGE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
 
 
 def play_head_to_head(
@@ -27,7 +28,7 @@ def play_head_to_head(
     orange_model: str | Path = DEFAULT_ORANGE_MODEL,
     render: bool = True,
     max_goals: Optional[int] = None,
-    max_seconds: Optional[float] = 300.0,
+    max_seconds: Optional[float] = 3000.0,
 ) -> Dict[str, float]:
     """Play blue agent vs orange agent until `max_goals` total goals or `max_seconds` of sim time
     (either may be None; headless needs at least one limit). Returns the final score."""
@@ -36,7 +37,9 @@ def play_head_to_head(
 
     sim = Simulation(enable_orange=True)
     blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
+    # blue = CarControl(control_type="heuristic_bot", team = "blue", sim=sim)
     orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
+    # orange = CarControl(control_type="heuristic_bot", team = "orange", sim=sim)
     print(f"[HeadToHead] Blue:   {Path(blue_model).name}")
     print(f"[HeadToHead] Orange: {Path(orange_model).name}")
 
