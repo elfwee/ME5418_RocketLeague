@@ -1,8 +1,9 @@
 """
 Dueling Double DQN (D3QN) Learning Agent — Training & Validation/Evaluation Pipeline.
 
-Adapted from the proven `src/algorithms/dqn` implementation and integrated with
-`src/neural_nets/dueling_ddqn_torch.py`, `src/config/nn_config.py`, and `src/gym_env/rocket_league_env.py`.
+Adapted from johnnycode8's PyTorch DQN tutorial (https://github.com/johnnycode8/dqn_pytorch)
+and integrated with `src/neural_nets/dueling_ddqn_torch.py`, `src/config/nn_config.py`, and
+`src/gym_env/rocket_league_env.py`.
 """
 
 import argparse
@@ -60,46 +61,31 @@ class DuelingDDQNAgent:
     def __init__(
         self,
         hyperparameter_set: str = DQNConfig.hyperparameter_set,
-        yaml_path: str | Path | None = None,
         enable_dueling_dqn: bool | None = None,
         enable_double_dqn: bool | None = None,
     ):
-        # Load from YAML if explicitly provided and exists; otherwise use DQNConfig defaults
-        hyperparameters = {}
-        if yaml_path is not None and Path(yaml_path).exists():
-            import yaml
-
-            with open(yaml_path, "r") as file:
-                all_sets = yaml.safe_load(file) or {}
-                hyperparameters = all_sets.get(hyperparameter_set, {})
-
         self.hyperparameter_set = hyperparameter_set
         self.env_id = GymConfig.gym_id
-        self.bot = hyperparameters.get("bot", DQNConfig.bot_type == "heuristic_bot")
-        self.replay_memory_size = hyperparameters.get("replay_memory_size", DQNConfig.buffer_size)
-        self.mini_batch_size = hyperparameters.get("mini_batch_size", DQNConfig.batch_size)
-        self.learning_starts = hyperparameters.get("learning_starts", DQNConfig.learning_start)
-        self.train_freq = hyperparameters.get("train_freq", DQNConfig.train_freq)
-        self.action_repeat = hyperparameters.get("action_repeat", DQNConfig.action_repeat)
-        self.epsilon_init = hyperparameters.get("epsilon_init", DQNConfig.epsilon_init)
-        self.epsilon_decay = hyperparameters.get("epsilon_decay", DQNConfig.epsilon_decay)
-        self.epsilon_min = hyperparameters.get("epsilon_min", DQNConfig.epsilon_min)
-        self.network_sync_rate = hyperparameters.get("network_sync_rate", DQNConfig.target_update_interval)
-        self.learning_rate_a = hyperparameters.get("learning_rate_a", DQNConfig.learning_rate)
-        self.discount_factor_g = hyperparameters.get("discount_factor_g", DQNConfig.discount_factor)
-        self.stop_on_reward = hyperparameters.get("stop_on_reward", DQNConfig.stop_on_reward)
-        self.fcl_nodes = hyperparameters.get("fcl_nodes", DQNConfig.hidden_size)
-        self.max_grad_norm = hyperparameters.get("max_grad_norm", DQNConfig.max_grad_norm)
+        self.bot_type = DQNConfig.bot_type
+        self.replay_memory_size = DQNConfig.buffer_size
+        self.mini_batch_size = DQNConfig.batch_size
+        self.learning_starts = DQNConfig.learning_start
+        self.train_freq = DQNConfig.train_freq
+        self.action_repeat = DQNConfig.action_repeat
+        self.epsilon_init = DQNConfig.epsilon_init
+        self.epsilon_decay = DQNConfig.epsilon_decay
+        self.epsilon_min = DQNConfig.epsilon_min
+        self.network_sync_rate = DQNConfig.target_update_interval
+        self.learning_rate_a = DQNConfig.learning_rate
+        self.discount_factor_g = DQNConfig.discount_factor
+        self.fcl_nodes = DQNConfig.hidden_size
+        self.max_grad_norm = DQNConfig.max_grad_norm
 
         self.enable_double_dqn = (
-            enable_double_dqn
-            if enable_double_dqn is not None
-            else hyperparameters.get("enable_double_dqn", DQNConfig.enable_double_dqn)
+            enable_double_dqn if enable_double_dqn is not None else DQNConfig.enable_double_dqn
         )
         self.enable_dueling_dqn = (
-            enable_dueling_dqn
-            if enable_dueling_dqn is not None
-            else hyperparameters.get("enable_dueling_dqn", DQNConfig.enable_dueling_dqn)
+            enable_dueling_dqn if enable_dueling_dqn is not None else DQNConfig.enable_dueling_dqn
         )
 
         # SmoothL1Loss (Huber loss) prevents exploding gradients from large +/-20 goal rewards
@@ -203,7 +189,7 @@ class DuelingDDQNAgent:
         env = gym.make(
             self.env_id,
             render_mode="human" if render else None,
-            bot_type="heuristic_bot" if self.bot else "none",
+            bot_type=self.bot_type,
             discrete_action=True,
             **make_kwargs,
         )
@@ -244,8 +230,7 @@ class DuelingDDQNAgent:
             last_graph_update_time = datetime.now()
             print(
                 f"[DuelingDDQN Train] Device={device} | Dueling={self.enable_dueling_dqn} | "
-                f"Double={self.enable_double_dqn} | Bot={'heuristic_bot' if self.bot else 'none'} | "
-                f"Model={ckpt_file}"
+                f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={ckpt_file}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -273,7 +258,7 @@ class DuelingDDQNAgent:
                 episode_reward = 0.0
                 scored_goal = 0
 
-                while (not (terminated or truncated)) and episode_reward < self.stop_on_reward:
+                while not (terminated or truncated):
                     if is_training and random.random() < epsilon:
                         action_idx = env.action_space.sample()
                         action = torch.tensor(action_idx, dtype=torch.int64, device=device)
@@ -285,7 +270,6 @@ class DuelingDDQNAgent:
                     next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_idx)
 
                     episode_reward += reward
-                    # Blue goal is scored when episode terminates with positive goal reward (or info["is_success"])
                     if info.get("is_success", False) or (terminated and reward > 0.0):
                         scored_goal = 1
 
@@ -331,7 +315,7 @@ class DuelingDDQNAgent:
                     epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
                     epsilon_history.append(epsilon)
 
-                    # Save best model based on 100-episode rolling mean reward (after 20-episode warmup, or on final episode of short runs)
+                    # Save best model based on 100-episode rolling mean reward
                     should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
                         num_episodes is not None and episode == num_episodes - 1 and best_mean_reward == float("-inf")
                     )
@@ -406,7 +390,6 @@ def evaluate_dueling_ddqn(
         enable_dueling_dqn=enable_dueling_dqn,
         enable_double_dqn=enable_double_dqn,
     )
-    # When rendering interactively without an explicit episode count, run until window is closed
     episodes = None if (render and num_episodes is None) else num_episodes
     return agent.run(
         is_training=False,
@@ -432,9 +415,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
     args = parser.parse_args()
 
-    agent = DuelingDDQNAgent(hyperparameter_set=args.hyperparameter_set)
     if args.train:
-        agent.run(is_training=True, render=args.render, num_episodes=args.episodes, model_path=args.model_path)
+        train_dueling_ddqn(
+            num_episodes=args.episodes,
+            hyperparameter_set=args.hyperparameter_set,
+        )
     else:
         eval_eps = args.episodes if args.episodes is not None else (None if args.render else DQNConfig.eval_episodes)
-        agent.run(is_training=False, render=args.render, num_episodes=eval_eps, model_path=args.model_path)
+        evaluate_dueling_ddqn(
+            num_episodes=eval_eps,
+            render=args.render,
+            model_path=args.model_path,
+            hyperparameter_set=args.hyperparameter_set,
+        )

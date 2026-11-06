@@ -1,7 +1,7 @@
 import pygame
 
 
-def handle_event(sim, renderer):
+def handle_event(sim, renderer, blue_control=None, orange_control=None):
     running = True
     # --- Event Handling ---
     for event in pygame.event.get():
@@ -12,6 +12,10 @@ def handle_event(sim, renderer):
                 running = False
             elif event.key == pygame.K_r:
                 sim.reset()
+                if blue_control is not None:
+                    blue_control.reset()
+                if orange_control is not None:
+                    orange_control.reset()
             elif event.key == pygame.K_b:
                 # Toggle Orange bot on/off
                 sim.set_orange_enabled(not sim.enable_orange, is_bot=True)

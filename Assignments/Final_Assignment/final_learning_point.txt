@@ -60,5 +60,13 @@ The agent frequently discovered unintended physical and mathematical shortcuts (
 | **Episode Horizon** | Match-based continuous clock | Goal-based episodic termination (terminated=True) + timeout (truncated=True) | Accelerates PPO credit assignment and enables correct critic value bootstrapping |
 | **Control Regularization** | None | Direction change penalty (-0.001) | Suppresses high-frequency action chattering and promotes smooth vehicular trajectory |
 
+### 1.3 Curriculum Learning
+- The Agent and Opponent are spawned into the gym environment where the opponent's controller is changed to increase the difficulty for the agent. The objective is for the agent to learn features of the environment gradually. Between stages, the agent has to "graduate" before moving on to the next stage of the curriculum.
+- **Stages:**
+  1. **Passive Opponent:** The agent and opponent are spawned into the gym environment where the opponent is set to do nothing (i.e. no input commands). The objective of this is for the agent to learn basic ball control to score goals without having to learn how to defend or perform complex attacks. Additionally, the agent is able to interact with the opponent's body and learns that it occupies space (pushing, bumping into it, ball bouncing off it).
+  2. **Finite State Machine:** The agent then plays against the finite state machine (`HeuristicBot` HZISM) which uses a heuristic to determine actions. The objective here is for the agent to learn to plan attacks and to defend against attacks.
+  3. **Multi-Agent (Self-Play):** Finally the agent plays against itself.
+- **Graduation:** The agent is deemed to have graduated once it is unable to learn anything else in the environment (i.e., learning plateau). This plateau is defined as no new "best model" (100-episode rolling mean reward) being obtained for 100 consecutive episodes.
+
 
 Other: Have to make car and balls to random spawn to increase domain randomization

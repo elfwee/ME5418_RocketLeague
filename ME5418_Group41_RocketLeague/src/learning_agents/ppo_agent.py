@@ -1,10 +1,13 @@
 """
 Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Evaluation Pipeline.
 
-Designed for a controlled, head-to-head comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
+Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
+comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
-- Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`, `minibatch_size = 64`).
+- Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
+- On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
+  and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
 - Identical logging, checkpointing (`runs/model_ppo.pt`), and 100-episode rolling metrics (`runs/graph_ppo.png`).
 """
 
@@ -55,40 +58,28 @@ class PPOAgent:
            Terminal goal states (`terminated=True`) bootstrap to 0.0, whereas timeout states
            (`truncated=True`) bootstrap from the critic's value estimate `V(s_timeout)` before reset.
         4. Clipped Surrogate Objective (`optimize`):
-           Performs `update_epochs` of shuffled minibatch updates with ratio clipping `clip_coef`,
-           value MSE loss, entropy bonus, and global gradient norm clipping.
+           Normalizes advantages across the entire 4,096-step rollout batch and performs `update_epochs` (6)
+           of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value MSE loss,
+           entropy bonus, and global gradient norm clipping.
     """
 
-    def __init__(
-        self,
-        hyperparameter_set: str = PPOConfig.hyperparameter_set,
-        yaml_path: str | Path | None = None,
-    ):
-        hyperparameters = {}
-        if yaml_path is not None and Path(yaml_path).exists():
-            import yaml
-
-            with open(yaml_path, "r") as file:
-                all_sets = yaml.safe_load(file) or {}
-                hyperparameters = all_sets.get(hyperparameter_set, {})
-
+    def __init__(self, hyperparameter_set: str = PPOConfig.hyperparameter_set):
         self.hyperparameter_set = hyperparameter_set
         self.env_id = GymConfig.gym_id
-        self.bot = hyperparameters.get("bot", PPOConfig.bot_type == "heuristic_bot")
-        self.fcl_nodes = hyperparameters.get("fcl_nodes", PPOConfig.hidden_size)
-        self.learning_rate = hyperparameters.get("learning_rate", PPOConfig.learning_rate)
-        self.discount_factor_g = hyperparameters.get("discount_factor_g", PPOConfig.discount_factor)
-        self.gae_lambda = hyperparameters.get("gae_lambda", PPOConfig.gae_lambda)
-        self.clip_coef = hyperparameters.get("clip_coef", PPOConfig.clip_coef)
-        self.value_loss_coef = hyperparameters.get("value_loss_coef", PPOConfig.value_loss_coef)
-        self.entropy_coef = hyperparameters.get("entropy_coef", PPOConfig.entropy_coef)
-        self.max_grad_norm = hyperparameters.get("max_grad_norm", PPOConfig.max_grad_norm)
+        self.bot_type = PPOConfig.bot_type
+        self.fcl_nodes = PPOConfig.hidden_size
+        self.learning_rate = PPOConfig.learning_rate
+        self.discount_factor_g = PPOConfig.discount_factor
+        self.gae_lambda = PPOConfig.gae_lambda
+        self.clip_coef = PPOConfig.clip_coef
+        self.value_loss_coef = PPOConfig.value_loss_coef
+        self.entropy_coef = PPOConfig.entropy_coef
+        self.max_grad_norm = PPOConfig.max_grad_norm
 
-        self.action_repeat = hyperparameters.get("action_repeat", PPOConfig.action_repeat)
-        self.rollout_steps = hyperparameters.get("rollout_steps", PPOConfig.rollout_steps)
-        self.update_epochs = hyperparameters.get("update_epochs", PPOConfig.update_epochs)
-        self.mini_batch_size = hyperparameters.get("mini_batch_size", PPOConfig.minibatch_size)
-        self.stop_on_reward = hyperparameters.get("stop_on_reward", PPOConfig.stop_on_reward)
+        self.action_repeat = PPOConfig.action_repeat
+        self.rollout_steps = PPOConfig.rollout_steps
+        self.update_epochs = PPOConfig.update_epochs
+        self.mini_batch_size = PPOConfig.minibatch_size
 
         self.optimizer = None
 
@@ -138,6 +129,10 @@ class PPOAgent:
         entropy_sum = 0.0
         num_mb = 0
 
+        # Normalize advantages across the entire 4,096-sample rollout batch before minibatch sampling
+        if advantages.numel() > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
         for _ in range(self.update_epochs):
             perm = torch.randperm(batch_size, device=device)
             for start in range(0, batch_size, self.mini_batch_size):
@@ -147,8 +142,6 @@ class PPOAgent:
                 mb_old_log_probs = old_log_probs[idx]
                 mb_returns = returns[idx]
                 mb_adv = advantages[idx]
-                if mb_adv.numel() > 1:
-                    mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
 
                 _, new_log_probs, entropy, new_values = policy_net.get_action_and_value(mb_states, mb_actions)
                 ratio = torch.exp(new_log_probs - mb_old_log_probs)
@@ -238,7 +231,7 @@ class PPOAgent:
         env = gym.make(
             self.env_id,
             render_mode="human" if render else None,
-            bot_type="heuristic_bot" if self.bot else "none",
+            bot_type=self.bot_type,
             discrete_action=True,
             **make_kwargs,
         )
@@ -266,7 +259,7 @@ class PPOAgent:
 
             print(
                 f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-                f"Minibatch={self.mini_batch_size} | Bot={'heuristic_bot' if self.bot else 'none'} | Model={ckpt_file}"
+                f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={ckpt_file}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -294,7 +287,7 @@ class PPOAgent:
                 episode_reward = 0.0
                 scored_goal = 0
 
-                while (not (terminated or truncated)) and episode_reward < self.stop_on_reward:
+                while not (terminated or truncated):
                     with torch.no_grad():
                         if is_training:
                             action, log_prob, _, value = policy_net.get_action_and_value(state.unsqueeze(0))
@@ -386,7 +379,7 @@ class PPOAgent:
                 if is_training:
                     entropy_history.append(current_entropy)
 
-                    # Save best model based on 100-episode rolling mean reward (after 20-episode warmup, or on final episode of short runs)
+                    # Save best model based on 100-episode rolling mean reward
                     should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
                         num_episodes is not None and episode == num_episodes - 1 and best_mean_reward == float("-inf")
                     )
@@ -470,9 +463,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
     args = parser.parse_args()
 
-    agent = PPOAgent(hyperparameter_set=args.hyperparameter_set)
     if args.train:
-        agent.run(is_training=True, render=args.render, num_episodes=args.episodes, model_path=args.model_path)
+        train_ppo(
+            num_episodes=args.episodes,
+            hyperparameter_set=args.hyperparameter_set,
+        )
     else:
         eval_eps = args.episodes if args.episodes is not None else (None if args.render else PPOConfig.eval_episodes)
-        agent.run(is_training=False, render=args.render, num_episodes=eval_eps, model_path=args.model_path)
+        evaluate_ppo(
+            num_episodes=eval_eps,
+            render=args.render,
+            model_path=args.model_path,
+            hyperparameter_set=args.hyperparameter_set,
+        )

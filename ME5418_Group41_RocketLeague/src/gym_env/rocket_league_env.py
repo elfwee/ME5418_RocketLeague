@@ -10,6 +10,7 @@ import pygame
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.sim.core.actions import CarAction
+from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
@@ -34,7 +35,13 @@ class RocketLeagueEnv(gym.Env):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
 
         self.render_mode = render_mode
+        self.bot_type = bot_type
         self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
+        self.orange_control = (
+            CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
+            if bot_type == "heuristic_bot"
+            else None
+        )
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
@@ -66,6 +73,8 @@ class RocketLeagueEnv(gym.Env):
 
         random_spawn = options.get("random_spawn", None) if options else None
         self.sim.reset(reset_scores=True, random_spawn=random_spawn)
+        if self.orange_control is not None:
+            self.orange_control.reset()
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
@@ -82,7 +91,12 @@ class RocketLeagueEnv(gym.Env):
         dir_x, dir_y = GymConfig.directions[direction]
         car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
 
-        self.sim.step(car_action, 1.0 / SIM_HZ)
+        action_orange = (
+            self.orange_control.get_action()
+            if (self.orange_control is not None and self.sim.orange_car is not None)
+            else CarAction()
+        )
+        self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=action_orange)
         reward, terminated = self._calculate_reward()
         self.render()
         return self._get_obs(), reward, terminated, not self.isopen, {}

@@ -91,8 +91,15 @@ python -m src --eval --ppo --render
 #### Play the game interactively
 
 ```bash
-# Play interactively with keyboard controls
+# Play interactively as Blue car vs Orange Heuristic Bot (default)
 python -m src --play
+python -m src --play --blue
+
+# Play interactively as Orange car vs Blue Heuristic Bot
+python -m src --play --orange
+
+# Watch bot-vs-bot match (Blue Heuristic Bot vs Orange Heuristic Bot)
+python -m src --play --bot-vs-bot
 
 # Run headless simulation benchmark
 python -m src --play --headless
