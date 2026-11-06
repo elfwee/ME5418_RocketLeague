@@ -16,7 +16,6 @@ from typing import Dict, Optional
 from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
-from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
@@ -70,7 +69,6 @@ def play_head_to_head(
                     break
 
             sim.step(action=blue.get_action(), dt=dt, action_orange=orange.get_action())
-            # sim.step(action=CarAction(), dt=dt, action_orange=orange.get_action())
             sim_time += dt
 
             if sim.goal_scored_this_step is not None:
