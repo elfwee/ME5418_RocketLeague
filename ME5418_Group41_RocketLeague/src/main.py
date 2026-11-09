@@ -82,41 +82,70 @@ def main():
             )
     elif "--eval" in sys.argv:
         render = "--render" in sys.argv
+        save_gif = "--gif" in sys.argv or "--save_gif" in sys.argv
+        gif_path = None
+        if "--gif_path" in sys.argv:
+            idx = sys.argv.index("--gif_path")
+            if idx + 1 < len(sys.argv):
+                gif_path = sys.argv[idx + 1]
+
         model_path = None
         if "--model_path" in sys.argv:
             idx = sys.argv.index("--model_path")
             if idx + 1 < len(sys.argv):
                 model_path = sys.argv[idx + 1]
 
+        num_episodes = None
+        if "--episodes" in sys.argv:
+            idx = sys.argv.index("--episodes")
+            if idx + 1 < len(sys.argv):
+                num_episodes = int(sys.argv[idx + 1])
+
         if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
             metrics = evaluate_dueling_ddqn(
+                num_episodes=num_episodes,
                 render=render,
                 enable_dueling_dqn=True,
                 enable_double_dqn=True,
                 hyperparameter_set="dueling_ddqn",
                 model_path=model_path,
+                save_gif=save_gif,
+                gif_path=gif_path,
             )
             print(f"[Dueling Double DQN Evaluation] {metrics}")
         elif "--double_dqn" in sys.argv:
             metrics = evaluate_dueling_ddqn(
+                num_episodes=num_episodes,
                 render=render,
                 enable_dueling_dqn=False,
                 enable_double_dqn=True,
                 hyperparameter_set="double_dqn",
                 model_path=model_path,
+                save_gif=save_gif,
+                gif_path=gif_path,
             )
             print(f"[Double DQN Evaluation] {metrics}")
         elif "--dqn" in sys.argv:
             metrics = evaluate_dueling_ddqn(
+                num_episodes=num_episodes,
                 render=render,
                 enable_dueling_dqn=False,
                 enable_double_dqn=False,
                 hyperparameter_set="dqn",
                 model_path=model_path,
+                save_gif=save_gif,
+                gif_path=gif_path,
             )
             print(f"[Vanilla DQN Evaluation] {metrics}")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
-            metrics = evaluate_ppo(render=render, hyperparameter_set="ppo", model_path=model_path)
+            metrics = evaluate_ppo(
+                num_episodes=num_episodes,
+                render=render,
+                hyperparameter_set="ppo",
+                model_path=model_path,
+                save_gif=save_gif,
+                gif_path=gif_path,
+            )
             print(f"[PPO Evaluation] {metrics}")
         else:
             print(
@@ -139,7 +168,7 @@ def main():
             "  python -m src --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants\n"
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"
             "  python -m src --train --dueling_ddqn|--ppo          # Train Dueling Double DQN or PPO agent\n"
-            "  python -m src --eval --dueling_ddqn|--ppo [--render] # Evaluate Dueling Double DQN or PPO agent\n"
+            "  python -m src --eval --dueling_ddqn|--ppo [--render] [--gif] # Evaluate agent [optional: --gif]\n"
             "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
 

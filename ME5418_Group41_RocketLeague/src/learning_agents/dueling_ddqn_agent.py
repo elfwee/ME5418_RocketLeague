@@ -149,6 +149,28 @@ class DuelingDDQNAgent:
 
         return next_state, total_reward, terminated, truncated, info
 
+    def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
+        """Compile and save a list of RGB frames as an optimized animated GIF."""
+        from PIL import Image
+
+        if not frames:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Downscale by 50% (700x360) for smooth playback and lightweight GIF file size
+        pil_images = [
+            Image.fromarray(f).resize((700, 360), Image.Resampling.BILINEAR)
+            for f in frames
+        ]
+        pil_images[0].save(
+            str(path),
+            save_all=True,
+            append_images=pil_images[1:],
+            duration=int(1000 / fps),
+            loop=0,
+            optimize=True,
+        )
+        print(f"[DQN Eval] Saved evaluation GIF ({len(pil_images)} frames, {fps} FPS) to: {path}")
+
     def save_graph(
         self,
         rewards_per_episode: list[float],
@@ -251,15 +273,24 @@ class DuelingDDQNAgent:
         max_episode_steps: int | None = None,
         num_episodes: int | None = None,
         model_path: str | Path | None = None,
+        save_gif: bool = False,
+        gif_path: str | Path | None = None,
     ) -> dict[str, float]:
         """Run training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         make_kwargs = {}
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
 
+        if render:
+            render_mode = "human"
+        elif save_gif:
+            render_mode = "rgb_array"
+        else:
+            render_mode = None
+
         env = gym.make(
             self.env_id,
-            render_mode="human" if render else None,
+            render_mode=render_mode,
             bot_type=self.bot_type,
             discrete_action=True,
             **make_kwargs,
@@ -327,6 +358,9 @@ class DuelingDDQNAgent:
             step_count = 0
             epsilon = 0.0
 
+        gif_frames = []
+        gif_saved = False
+
         episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
 
         try:
@@ -352,6 +386,11 @@ class DuelingDDQNAgent:
                             action_idx = int(action.item())
 
                     next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_idx)
+
+                    if not is_training and save_gif and not gif_saved and len(gif_frames) < 1200:
+                        frame = env.unwrapped.get_frame()
+                        if frame is not None:
+                            gif_frames.append(frame)
 
                     episode_reward += reward
                     if info.get("is_success", False) or (terminated and reward > 0.0):
@@ -383,6 +422,13 @@ class DuelingDDQNAgent:
 
                 rewards_per_episode.append(episode_reward)
                 goals_per_episode.append(scored_goal)
+
+                if not is_training and save_gif and not gif_saved and len(gif_frames) > 0:
+                    out_gif = (
+                        gif_path if gif_path is not None else os.path.join(RUNS_DIR, f"eval_{self.hyperparameter_set}.gif")
+                    )
+                    self._save_gif(gif_frames, out_gif)
+                    gif_saved = True
                 mean_reward_100 = float(np.mean(rewards_per_episode[-100:]))
                 goal_rate_100 = float(np.mean(goals_per_episode[-100:])) * 100.0
 
@@ -495,6 +541,8 @@ def evaluate_dueling_ddqn(
     enable_dueling_dqn: bool = True,
     enable_double_dqn: bool = True,
     hyperparameter_set: str = DQNConfig.hyperparameter_set,
+    save_gif: bool = False,
+    gif_path: str | Path | None = None,
 ) -> dict[str, float]:
     """Evaluate/validate a trained Dueling Double DQN agent."""
     agent = DuelingDDQNAgent(
@@ -502,13 +550,15 @@ def evaluate_dueling_ddqn(
         enable_dueling_dqn=enable_dueling_dqn,
         enable_double_dqn=enable_double_dqn,
     )
-    episodes = None if (render and num_episodes is None) else num_episodes
+    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
     return agent.run(
         is_training=False,
         render=render,
         max_episode_steps=max_episode_steps,
         num_episodes=episodes,
         model_path=model_path,
+        save_gif=save_gif,
+        gif_path=gif_path,
     )
 
 
@@ -525,6 +575,8 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true", help="Render the environment in a Pygame window")
     parser.add_argument("--episodes", type=int, default=None, help="Maximum number of episodes to run")
     parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
+    parser.add_argument("--gif", action="store_true", help="Record and save an animated GIF of the evaluation episode")
+    parser.add_argument("--gif_path", type=str, default=None, help="Optional custom output path for the GIF")
     args = parser.parse_args()
 
     if args.train:
@@ -540,4 +592,6 @@ if __name__ == "__main__":
             render=args.render,
             model_path=args.model_path,
             hyperparameter_set=args.hyperparameter_set,
+            save_gif=args.gif,
+            gif_path=args.gif_path,
         )
