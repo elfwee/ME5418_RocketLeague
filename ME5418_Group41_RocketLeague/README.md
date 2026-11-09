@@ -86,6 +86,16 @@ python -m src --eval --ppo
 python -m src --eval --ppo --render
 ```
 
+#### Plot Learning Curves & Dashboards
+
+```bash
+# Auto-discover runs/ metrics and generate multi-algorithm comparative curves
+python -m src --plot
+
+# Generate a 4-panel dashboard for a specific agent run
+python -m src --plot --dashboard runs/metrics_ppo.csv
+```
+
 ### Step 4: Interactive Play & Component Demos
 
 #### Play the game interactively

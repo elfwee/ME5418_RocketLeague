@@ -95,6 +95,7 @@ class DuelingDDQNAgent:
         self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
 
     def optimize(self, mini_batch, policy_dqn: DQN, target_dqn: DQN) -> float:
         """Perform a single Double/Dueling DQN gradient step on a sampled minibatch."""
@@ -148,29 +149,99 @@ class DuelingDDQNAgent:
 
         return next_state, total_reward, terminated, truncated, info
 
-    def save_graph(self, rewards_per_episode: list[float], epsilon_history: list[float]):
-        """Plot and save 100-episode rolling mean reward and epsilon decay curves."""
+    def save_graph(
+        self,
+        rewards_per_episode: list[float],
+        epsilon_history: list[float],
+        steps_per_episode: list[int] | None = None,
+        goals_per_episode: list[int] | None = None,
+        loss_history: list[float] | None = None,
+    ):
+        """Plot and save a comprehensive 2x2 training dashboard.
+
+        Subplots:
+            1. Sample Efficiency: 100-episode rolling mean reward & episodic return vs. Environment Steps.
+            2. Task Competency: 100-episode rolling goal conversion rate (%) vs. Environment Steps.
+            3. Exploration Schedule: Epsilon decay (ε) vs. Environment Steps.
+            4. Bellman Optimization Health: TD / Huber Loss (with 50-ep smoothing) vs. Environment Steps.
+        """
         import matplotlib.pyplot as plt
 
-        mean_rewards = np.zeros(len(rewards_per_episode))
-        for i in range(len(rewards_per_episode)):
+        n = len(rewards_per_episode)
+        if n == 0:
+            return
+
+        x = np.array(
+            steps_per_episode if steps_per_episode is not None and len(steps_per_episode) == n else list(range(1, n + 1))
+        )
+        x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
+
+        # 100-episode rolling mean reward
+        mean_rewards = np.zeros(n)
+        for i in range(n):
             mean_rewards[i] = np.mean(rewards_per_episode[max(0, i - 99) : i + 1])
 
-        plt.figure(figsize=(10, 4))
-        plt.subplot(1, 2, 1)
-        plt.xlabel("Episodes")
-        plt.ylabel("Mean Reward (Last 100 Episodes)")
-        plt.plot(mean_rewards, label="Mean Reward")
-        plt.grid(True, alpha=0.3)
+        # 100-episode rolling goal rate (%)
+        goal_rates = np.zeros(n)
+        has_goals = goals_per_episode is not None and len(goals_per_episode) == n
+        if has_goals:
+            for i in range(n):
+                goal_rates[i] = np.mean(goals_per_episode[max(0, i - 99) : i + 1]) * 100.0
 
-        plt.subplot(1, 2, 2)
-        plt.xlabel("Episodes")
-        plt.ylabel("Epsilon Decay")
-        plt.plot(epsilon_history, label="Epsilon", color="orange")
-        plt.grid(True, alpha=0.3)
+        fig, axs = plt.subplots(2, 2, figsize=(14, 9))
 
+        # 1. Sample Efficiency
+        axs[0, 0].plot(x, rewards_per_episode, color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
+        axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
+        axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+        axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
+        axs[0, 0].set_xlabel(x_label)
+        axs[0, 0].set_ylabel("Episodic Return")
+        axs[0, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 0].legend(loc="upper left", framealpha=0.8)
+
+        # 2. Objective Goal Conversion Rate (%)
+        if has_goals:
+            axs[0, 1].plot(x, goal_rates, color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
+            axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
+            axs[0, 1].set_ylim([-2, 105])
+        axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
+        axs[0, 1].set_xlabel(x_label)
+        axs[0, 1].set_ylabel("Goal Rate (%)")
+        axs[0, 1].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 1].legend(loc="upper left", framealpha=0.8)
+
+        # 3. Epsilon Decay
+        eps_arr = np.array(epsilon_history) if epsilon_history is not None else np.array([])
+        if len(eps_arr) == n:
+            axs[1, 0].plot(x, eps_arr, color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
+        elif len(eps_arr) > 0:
+            axs[1, 0].plot(eps_arr, color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
+        axs[1, 0].set_title("Exploration Schedule (Epsilon Decay)", fontsize=11, fontweight="bold")
+        axs[1, 0].set_xlabel(x_label)
+        axs[1, 0].set_ylabel("Epsilon (ε)")
+        axs[1, 0].set_ylim([-0.02, 1.05])
+        axs[1, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[1, 0].legend(loc="upper right", framealpha=0.8)
+
+        # 4. TD Huber Loss
+        if loss_history is not None and len(loss_history) == n:
+            losses = np.array(loss_history)
+            axs[1, 1].plot(x, losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw TD Loss")
+            smooth_loss = np.zeros(n)
+            for i in range(n):
+                smooth_loss[i] = np.mean(losses[max(0, i - 49) : i + 1])
+            axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
+            axs[1, 1].legend(loc="upper right", framealpha=0.8)
+        axs[1, 1].set_title("Bellman Optimization Health (TD Loss)", fontsize=11, fontweight="bold")
+        axs[1, 1].set_xlabel(x_label)
+        axs[1, 1].set_ylabel("Huber Loss")
+        axs[1, 1].grid(True, alpha=0.3, linestyle="--")
+
+        agent_name = "Dueling Double DQN" if (self.enable_dueling_dqn and self.enable_double_dqn) else "DQN"
+        fig.suptitle(f"{agent_name} Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE)
+        plt.savefig(self.GRAPH_FILE, dpi=150)
         plt.close()
 
     def run(
@@ -234,6 +305,9 @@ class DuelingDDQNAgent:
 
             step_count = 0
             epsilon_history = []
+            steps_history = []
+            loss_history = []
+            current_loss = 0.0
             self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
 
             best_mean_reward = float("-inf")
@@ -296,7 +370,7 @@ class DuelingDDQNAgent:
                             and step_count % self.train_freq == 0
                         ):
                             mini_batch = memory.sample(self.mini_batch_size)
-                            self.optimize(mini_batch, policy_dqn, target_dqn)
+                            current_loss = self.optimize(mini_batch, policy_dqn, target_dqn)
 
                         # Sync target network every `network_sync_rate` decision steps
                         if step_count % self.network_sync_rate == 0:
@@ -324,6 +398,18 @@ class DuelingDDQNAgent:
                 if is_training:
                     epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
                     epsilon_history.append(epsilon)
+                    steps_history.append(step_count)
+                    loss_history.append(current_loss)
+
+                    # Append metrics to CSV log for flexible offline plotting & evaluation
+                    write_header = not os.path.exists(self.METRICS_FILE) or os.path.getsize(self.METRICS_FILE) == 0
+                    with open(self.METRICS_FILE, "a", newline="") as f:
+                        if write_header:
+                            f.write("episode,step,reward,mean_reward_100,goal,goal_rate_100,epsilon,td_loss\n")
+                        f.write(
+                            f"{episode},{step_count},{episode_reward:.4f},{mean_reward_100:.4f},"
+                            f"{scored_goal},{goal_rate_100:.2f},{epsilon:.4f},{current_loss:.6f}\n"
+                        )
 
                     # Save best model based on 100-episode rolling mean reward
                     should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
@@ -344,13 +430,27 @@ class DuelingDDQNAgent:
 
                     current_time = datetime.now()
                     if current_time - last_graph_update_time > timedelta(seconds=10):
-                        self.save_graph(rewards_per_episode, epsilon_history)
+                        self.save_graph(
+                            rewards_per_episode,
+                            epsilon_history,
+                            steps_per_episode=steps_history,
+                            goals_per_episode=goals_per_episode,
+                            loss_history=loss_history,
+                        )
                         last_graph_update_time = current_time
 
                     if not env.unwrapped.isopen:
                         print("Exiting environment.")
                         break
         finally:
+            if is_training and len(rewards_per_episode) > 0:
+                self.save_graph(
+                    rewards_per_episode,
+                    epsilon_history,
+                    steps_per_episode=steps_history,
+                    goals_per_episode=goals_per_episode,
+                    loss_history=loss_history,
+                )
             env.close()
 
         return {

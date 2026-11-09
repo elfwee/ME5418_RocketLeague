@@ -126,6 +126,10 @@ def main():
                 "  python -m src --eval --dqn          [--render] # Evaluate Vanilla DQN\n"
                 "  python -m src --eval --ppo          [--render] # Evaluate PPO [alias: -ppo]"
             )
+    elif "--plot" in sys.argv:
+        from src.learning_agents.plot_learning_curves import main as plot_main
+        plot_args = [arg for arg in sys.argv[1:] if arg != "--plot"]
+        plot_main(plot_args)
     else:
         print(
             "Usage:\n"
@@ -135,7 +139,8 @@ def main():
             "  python -m src --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants\n"
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"
             "  python -m src --train --dueling_ddqn|--ppo          # Train Dueling Double DQN or PPO agent\n"
-            "  python -m src --eval --dueling_ddqn|--ppo [--render] # Evaluate Dueling Double DQN or PPO agent"
+            "  python -m src --eval --dueling_ddqn|--ppo [--render] # Evaluate Dueling Double DQN or PPO agent\n"
+            "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
 
 

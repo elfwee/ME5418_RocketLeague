@@ -87,6 +87,7 @@ class PPOAgent:
         self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
 
     def _compute_gae(
         self,
@@ -123,11 +124,17 @@ class PPOAgent:
         returns: torch.Tensor,
         advantages: torch.Tensor,
         policy_net: ActorCritic,
-    ) -> tuple[float, float]:
-        """Run `update_epochs` of shuffled minibatch PPO clipped surrogate updates."""
+    ) -> tuple[float, float, float, float]:
+        """Run `update_epochs` of shuffled minibatch PPO clipped surrogate updates.
+
+        Returns:
+            (mean_total_loss, mean_entropy, mean_value_loss, mean_approx_kl)
+        """
         batch_size = states.size(0)
         total_loss_sum = 0.0
         entropy_sum = 0.0
+        value_loss_sum = 0.0
+        kl_sum = 0.0
         num_mb = 0
 
         # Normalize advantages across the entire 4,096-sample rollout batch before minibatch sampling
@@ -154,7 +161,9 @@ class PPOAgent:
                 # Non-negative, minimum-variance KL divergence approximation
                 with torch.no_grad():
                     approx_kl = ((ratio - 1.0) - logratio).mean()
-                    epoch_kl_sum += float(approx_kl.item())
+                    kl_val = float(approx_kl.item())
+                    epoch_kl_sum += kl_val
+                    kl_sum += kl_val
                     epoch_mb_count += 1
 
                 # Clipped surrogate objective
@@ -174,6 +183,7 @@ class PPOAgent:
 
                 total_loss_sum += float(loss.item())
                 entropy_sum += float(entropy_loss.item())
+                value_loss_sum += float(v_loss.item())
                 num_mb += 1
 
             # Early stop if average KL divergence across this epoch exceeded target threshold
@@ -182,7 +192,7 @@ class PPOAgent:
                 break
 
         denom = max(num_mb, 1)
-        return total_loss_sum / denom, entropy_sum / denom
+        return total_loss_sum / denom, entropy_sum / denom, value_loss_sum / denom, kl_sum / denom
 
     def _step_with_action_repeat(self, env: gym.Env, action):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
@@ -209,29 +219,97 @@ class PPOAgent:
 
         return next_state, total_reward, terminated, truncated, info
 
-    def save_graph(self, rewards_per_episode: list[float], entropy_history: list[float]):
-        """Plot and save 100-episode rolling mean reward and policy entropy curves."""
+    def save_graph(
+        self,
+        rewards_per_episode: list[float],
+        entropy_history: list[float],
+        steps_per_episode: list[int] | None = None,
+        goals_per_episode: list[int] | None = None,
+        value_loss_history: list[float] | None = None,
+    ):
+        """Plot and save a comprehensive 2x2 training dashboard.
+
+        Subplots:
+            1. Sample Efficiency: 100-episode rolling mean reward & episodic return vs. Environment Steps.
+            2. Task Competency: 100-episode rolling goal conversion rate (%) vs. Environment Steps.
+            3. Exploration Dynamics: Policy entropy H(pi) vs. Environment Steps.
+            4. Critic Optimization Health: Critic value MSE loss (with 50-ep smoothing) vs. Environment Steps.
+        """
         import matplotlib.pyplot as plt
 
-        mean_rewards = np.zeros(len(rewards_per_episode))
-        for i in range(len(rewards_per_episode)):
+        n = len(rewards_per_episode)
+        if n == 0:
+            return
+
+        x = np.array(
+            steps_per_episode if steps_per_episode is not None and len(steps_per_episode) == n else list(range(1, n + 1))
+        )
+        x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
+
+        # 100-episode rolling mean reward
+        mean_rewards = np.zeros(n)
+        for i in range(n):
             mean_rewards[i] = np.mean(rewards_per_episode[max(0, i - 99) : i + 1])
 
-        plt.figure(figsize=(10, 4))
-        plt.subplot(1, 2, 1)
-        plt.xlabel("Episodes")
-        plt.ylabel("Mean Reward (Last 100 Episodes)")
-        plt.plot(mean_rewards, label="Mean Reward")
-        plt.grid(True, alpha=0.3)
+        # 100-episode rolling goal rate (%)
+        goal_rates = np.zeros(n)
+        has_goals = goals_per_episode is not None and len(goals_per_episode) == n
+        if has_goals:
+            for i in range(n):
+                goal_rates[i] = np.mean(goals_per_episode[max(0, i - 99) : i + 1]) * 100.0
 
-        plt.subplot(1, 2, 2)
-        plt.xlabel("Episodes")
-        plt.ylabel("Policy Entropy")
-        plt.plot(entropy_history, label="Entropy", color="orange")
-        plt.grid(True, alpha=0.3)
+        fig, axs = plt.subplots(2, 2, figsize=(14, 9))
 
+        # 1. Sample Efficiency
+        axs[0, 0].plot(x, rewards_per_episode, color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
+        axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
+        axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+        axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
+        axs[0, 0].set_xlabel(x_label)
+        axs[0, 0].set_ylabel("Episodic Return")
+        axs[0, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 0].legend(loc="upper left", framealpha=0.8)
+
+        # 2. Objective Goal Conversion Rate (%)
+        if has_goals:
+            axs[0, 1].plot(x, goal_rates, color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
+            axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
+            axs[0, 1].set_ylim([-2, 105])
+        axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
+        axs[0, 1].set_xlabel(x_label)
+        axs[0, 1].set_ylabel("Goal Rate (%)")
+        axs[0, 1].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 1].legend(loc="upper left", framealpha=0.8)
+
+        # 3. Policy Entropy
+        entropy_arr = np.array(entropy_history) if entropy_history is not None else np.array([])
+        if len(entropy_arr) == n:
+            axs[1, 0].plot(x, entropy_arr, color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
+        elif len(entropy_arr) > 0:
+            axs[1, 0].plot(entropy_arr, color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
+        axs[1, 0].set_title("Exploration Dynamics (Policy Entropy)", fontsize=11, fontweight="bold")
+        axs[1, 0].set_xlabel(x_label)
+        axs[1, 0].set_ylabel("Entropy H(pi)")
+        axs[1, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[1, 0].legend(loc="upper right", framealpha=0.8)
+
+        # 4. Critic Value MSE Loss
+        if value_loss_history is not None and len(value_loss_history) == n:
+            v_losses = np.array(value_loss_history)
+            axs[1, 1].plot(x, v_losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw Value Loss")
+            smooth_loss = np.zeros(n)
+            for i in range(n):
+                smooth_loss[i] = np.mean(v_losses[max(0, i - 49) : i + 1])
+            axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
+            axs[1, 1].legend(loc="upper right", framealpha=0.8)
+        axs[1, 1].set_title("Critic Optimization Health (Value Loss)", fontsize=11, fontweight="bold")
+        axs[1, 1].set_xlabel(x_label)
+        axs[1, 1].set_ylabel("Value MSE Loss")
+        axs[1, 1].grid(True, alpha=0.3, linestyle="--")
+
+        fig.suptitle(f"PPO Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE)
+        plt.savefig(self.GRAPH_FILE, dpi=150)
         plt.close()
 
     def run(
@@ -278,6 +356,9 @@ class PPOAgent:
             self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
+            steps_history = []
+            value_loss_history = []
+            current_v_loss = 0.0
             current_entropy = (
                 float(sum(np.log(d) for d in action_dim))
                 if isinstance(action_dim, list)
@@ -393,7 +474,7 @@ class PPOAgent:
                             advantages_t, returns_t = self._compute_gae(
                                 rewards_t, values_t, next_values_t, dones_t
                             )
-                            _, current_entropy = self.optimize(
+                            _, current_entropy, current_v_loss, _ = self.optimize(
                                 states_t,
                                 actions_t,
                                 old_log_probs_t,
@@ -430,7 +511,19 @@ class PPOAgent:
                 )
 
                 if is_training:
+                    steps_history.append(step_count)
                     entropy_history.append(current_entropy)
+                    value_loss_history.append(current_v_loss)
+
+                    # Append metrics to CSV log for flexible offline plotting & evaluation
+                    write_header = not os.path.exists(self.METRICS_FILE) or os.path.getsize(self.METRICS_FILE) == 0
+                    with open(self.METRICS_FILE, "a", newline="") as f:
+                        if write_header:
+                            f.write("episode,step,reward,mean_reward_100,goal,goal_rate_100,entropy,value_loss\n")
+                        f.write(
+                            f"{episode},{step_count},{episode_reward:.4f},{mean_reward_100:.4f},"
+                            f"{scored_goal},{goal_rate_100:.2f},{current_entropy:.4f},{current_v_loss:.6f}\n"
+                        )
 
                     # Save best model based on 100-episode rolling mean reward
                     should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
@@ -452,13 +545,27 @@ class PPOAgent:
 
                     current_time = datetime.now()
                     if current_time - last_graph_update_time > timedelta(seconds=10):
-                        self.save_graph(rewards_per_episode, entropy_history)
+                        self.save_graph(
+                            rewards_per_episode,
+                            entropy_history,
+                            steps_per_episode=steps_history,
+                            goals_per_episode=goals_per_episode,
+                            value_loss_history=value_loss_history,
+                        )
                         last_graph_update_time = current_time
 
                     if not env.unwrapped.isopen:
                         print("Exiting environment.")
                         break
         finally:
+            if is_training and len(rewards_per_episode) > 0:
+                self.save_graph(
+                    rewards_per_episode,
+                    entropy_history,
+                    steps_per_episode=steps_history,
+                    goals_per_episode=goals_per_episode,
+                    value_loss_history=value_loss_history,
+                )
             env.close()
 
         return {
