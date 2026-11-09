@@ -246,6 +246,15 @@ class PPOAgent:
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
+            if model_path is not None:
+                if os.path.exists(ckpt_file):
+                    state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+                    policy_net.load_state_dict(state_dict)
+                    print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
+                else:
+                    print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
+            else: 
+                print(f"[PPO Train] Training from scratch; no model checkpoint specified.")
             self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
@@ -259,7 +268,7 @@ class PPOAgent:
 
             print(
                 f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-                f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={ckpt_file}"
+                f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -394,7 +403,8 @@ class PPOAgent:
                         with open(self.LOG_FILE, "a") as log_file:
                             log_file.write(log_message + "\n")
 
-                        torch.save(policy_net.state_dict(), ckpt_file)
+                        # torch.save(policy_net.state_dict(), ckpt_file)
+                        torch.save(policy_net.state_dict(), self.MODEL_FILE)
 
                     current_time = datetime.now()
                     if current_time - last_graph_update_time > timedelta(seconds=10):
@@ -417,6 +427,7 @@ class PPOAgent:
 def train_ppo(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
+    model_path: str | Path | None = None,
     hyperparameter_set: str = PPOConfig.hyperparameter_set,
 ) -> dict[str, float]:
     """Train the PPO agent."""
@@ -426,6 +437,7 @@ def train_ppo(
         render=False,
         max_episode_steps=max_episode_steps,
         num_episodes=num_episodes,
+        model_path=model_path,
     )
 
 
@@ -466,6 +478,7 @@ if __name__ == "__main__":
     if args.train:
         train_ppo(
             num_episodes=args.episodes,
+            model_path=args.model_path,
             hyperparameter_set=args.hyperparameter_set,
         )
     else:

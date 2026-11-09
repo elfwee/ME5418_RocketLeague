@@ -52,21 +52,33 @@ def main():
                 "  python -m src --demo --ppo           # Proximal Policy Optimization network test (PyTorch) [alias: -ppo]"
             )
     elif "--train" in sys.argv:
+        num_episodes = None
+        if "--episodes" in sys.argv:
+            idx = sys.argv.index("--episodes")
+            if idx +1 < len(sys.argv):
+                num_episodes = int(sys.argv[idx + 1])
+
+        model_path = None
+        if "--model_path" in sys.argv:
+            idx = sys.argv.index("--model_path")
+            if idx + 1 < len(sys.argv):
+                model_path = sys.argv[idx + 1]
+
         if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
-            train_dueling_ddqn(enable_dueling_dqn=True, enable_double_dqn=True, hyperparameter_set="dueling_ddqn")
+            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=True, enable_double_dqn=True, hyperparameter_set="dueling_ddqn")
         elif "--double_dqn" in sys.argv:
-            train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=True, hyperparameter_set="double_dqn")
+            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=False, enable_double_dqn=True, hyperparameter_set="double_dqn")
         elif "--dqn" in sys.argv:
-            train_dueling_ddqn(enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
+            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
-            train_ppo(hyperparameter_set="ppo")
+            train_ppo(num_episodes=num_episodes, model_path=model_path, hyperparameter_set="ppo")
         else:
             print(
                 "Please specify a learning agent to train:\n"
-                "  python -m src --train --dueling_ddqn # Train Dueling Double DQN agent [alias: --ddqn]\n"
-                "  python -m src --train --double_dqn   # Train Double DQN agent\n"
-                "  python -m src --train --dqn          # Train Vanilla DQN agent\n"
-                "  python -m src --train --ppo          # Train PPO agent [alias: -ppo]"
+                "  python -m src --train --dueling_ddqn [--episodes N] # Train Dueling Double DQN agent [alias: --ddqn]\n"
+                "  python -m src --train --double_dqn   [--episodes N] # Train Double DQN agent\n"
+                "  python -m src --train --dqn          [--episodes N] # Train Vanilla DQN agent\n"
+                "  python -m src --train --ppo          [--episodes N] # Train PPO agent [alias: -ppo]"
             )
     elif "--eval" in sys.argv:
         render = "--render" in sys.argv

@@ -210,6 +210,16 @@ class DuelingDDQNAgent:
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
+            if model_path is not None:
+                if os.path.exists(ckpt_file):
+                    state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+                    policy_dqn.load_state_dict(state_dict)
+                    print(f"[DuelingDDQN Train] Loaded model weights from: {ckpt_file}")
+                else:
+                    print(f"[DuelingDDQN Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
+            else:
+                print("[DuelingDDQN Train] Training from scratch; no model checkpoint specified.")
+
             memory = ReplayMemory(maxlen=self.replay_memory_size)
             epsilon = self.epsilon_init
 
@@ -230,7 +240,7 @@ class DuelingDDQNAgent:
             last_graph_update_time = datetime.now()
             print(
                 f"[DuelingDDQN Train] Device={device} | Dueling={self.enable_dueling_dqn} | "
-                f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={ckpt_file}"
+                f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -330,7 +340,7 @@ class DuelingDDQNAgent:
                         with open(self.LOG_FILE, "a") as log_file:
                             log_file.write(log_message + "\n")
 
-                        torch.save(policy_dqn.state_dict(), ckpt_file)
+                        torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
 
                     current_time = datetime.now()
                     if current_time - last_graph_update_time > timedelta(seconds=10):
@@ -357,6 +367,7 @@ Agent = DuelingDDQNAgent
 def train_dueling_ddqn(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
+    model_path: str | Path | None = None,
     enable_dueling_dqn: bool = True,
     enable_double_dqn: bool = True,
     hyperparameter_set: str = DQNConfig.hyperparameter_set,
@@ -372,6 +383,7 @@ def train_dueling_ddqn(
         render=False,
         max_episode_steps=max_episode_steps,
         num_episodes=num_episodes,
+        model_path=model_path,
     )
 
 
@@ -418,6 +430,7 @@ if __name__ == "__main__":
     if args.train:
         train_dueling_ddqn(
             num_episodes=args.episodes,
+            model_path=args.model_path,
             hyperparameter_set=args.hyperparameter_set,
         )
     else:
