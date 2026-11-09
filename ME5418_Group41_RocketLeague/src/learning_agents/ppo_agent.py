@@ -301,6 +301,10 @@ class PPOAgent:
                         if is_training:
                             action, log_prob, _, value = policy_net.get_action_and_value(state.unsqueeze(0))
                             action_idx = int(action.item())
+
+                            # Backfill the previous step's next_value using this step's already-computed value
+                            if (len(buf_next_values) > 0 and buf_next_values[-1] is None):
+                                buf_next_values[-1] = value.squeeze(0)
                         else:
                             logits, _ = policy_net(state.unsqueeze(0))
                             action = logits.squeeze(0).argmax()
@@ -319,12 +323,16 @@ class PPOAgent:
                         with torch.no_grad():
                             # Truncation-aware bootstrapping:
                             # - Terminal goal state (`terminated=True`) -> bootstrap 0.0
-                            # - Non-terminal or timeout state (`terminated=False`) -> bootstrap V(new_state)
+                            # - Timeout state (`truncated=True`) -> evaluate V(new_state) once before reset                   
+                            # - Non-terminal (`done=False`) -> defer forward pass to the next step
                             if terminated:
                                 next_val = torch.tensor(0.0, dtype=torch.float32, device=device)
+                            elif truncated:
+                                with torch.no_grad():
+                                    _, next_val = policy_net(new_state.unsqueeze(0))
+                                    next_val = next_val.squeeze(0)
                             else:
-                                _, next_val = policy_net(new_state.unsqueeze(0))
-                                next_val = next_val.squeeze(0)
+                                next_val = None
 
                         buf_states.append(state)
                         buf_actions.append(action.squeeze(0))
@@ -338,6 +346,12 @@ class PPOAgent:
 
                         # Perform PPO multi-epoch minibatch update once rollout horizon is reached
                         if len(buf_states) >= self.rollout_steps:
+                            # if the rollout cut off mid-episode, bootstrap the tail step's next_value
+                            if buf_next_values[-1] is None:
+                                with torch.no_grad():
+                                    _, tail_val = policy_net(new_state.unsqueeze(0))
+                                    buf_next_values[-1] = tail_val.squeeze(0)
+
                             states_t = torch.stack(buf_states)
                             actions_t = torch.stack(buf_actions)
                             old_log_probs_t = torch.stack(buf_log_probs)
