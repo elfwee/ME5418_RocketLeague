@@ -26,7 +26,7 @@ class DQNConfig:
     epsilon_min = 0.05
 
     # Environment & Checkpointing
-    bot_type = "none"  # "none" or "heuristic_bot"
+    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
     eval_episodes = 5
     runs_dir = "runs"
     hyperparameter_set = "dueling_ddqn"
@@ -57,7 +57,7 @@ class PPOConfig:
     demo_rollout_steps = 32
 
     # Environment & Checkpointing
-    bot_type = "none"  # "none" or "heuristic_bot"
+    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
     eval_episodes = 5
     runs_dir = "runs"
     hyperparameter_set = "ppo"
