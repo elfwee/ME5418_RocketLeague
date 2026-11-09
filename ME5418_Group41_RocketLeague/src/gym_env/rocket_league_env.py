@@ -28,7 +28,7 @@ if GymConfig.gym_id not in gym.envs.registry:
 
 
 class RocketLeagueEnv(gym.Env):
-    metadata = {"render_modes": ["human"], "render_fps": SIM_HZ}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
 
     def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
         if bot_type not in ("none", "heuristic_bot"):
@@ -56,10 +56,16 @@ class RocketLeagueEnv(gym.Env):
         obs_dim = len(self.sim.get_state_norm(as_flat_array=True))
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
+        self.renderer = None
+        self.clock = None
         if self.render_mode == "human":
             pygame.init()
             pygame.display.set_caption("Rocket League Sideswipe 2D")
             self.renderer = Renderer(pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT)))
+            self.clock = pygame.time.Clock()
+        elif self.render_mode == "rgb_array":
+            pygame.init()
+            self.renderer = Renderer(pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)))
             self.clock = pygame.time.Clock()
 
     def _get_obs(self):
@@ -143,28 +149,40 @@ class RocketLeagueEnv(gym.Env):
         return reward, False
 
     def render(self):
-        if self.render_mode != "human" or not self.isopen:
-            return
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                self.isopen = False
-                return
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
-                    self.reset()
-                elif event.key == pygame.K_b:
-                    self.sim.set_orange_enabled(not self.sim.enable_orange, is_bot=True)
-                elif event.key == pygame.K_l:
-                    self.renderer.show_raycasts = not self.renderer.show_raycasts
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                self.renderer.handle_click(event.pos)
-        self.renderer.render(self.sim)
-        pygame.display.flip()
-        self.clock.tick(SIM_HZ)
+        if not self.isopen:
+            return None
+        if self.render_mode == "human":
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    self.isopen = False
+                    return None
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r:
+                        self.reset()
+                    elif event.key == pygame.K_b:
+                        self.sim.set_orange_enabled(not self.sim.enable_orange, is_bot=True)
+                    elif event.key == pygame.K_l:
+                        self.renderer.show_raycasts = not self.renderer.show_raycasts
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.renderer.handle_click(event.pos)
+            self.renderer.render(self.sim)
+            pygame.display.flip()
+            self.clock.tick(SIM_HZ)
+            return None
+        elif self.render_mode == "rgb_array":
+            return self.get_frame()
+        return None
+
+    def get_frame(self):
+        """Capture the current visual frame as an RGB numpy array (H, W, 3)."""
+        if self.renderer is not None:
+            self.renderer.render(self.sim)
+            return np.transpose(pygame.surfarray.array3d(self.renderer.screen), (1, 0, 2))
+        return None
 
     def close(self):
         self.isopen = False
-        if self.render_mode == "human" and pygame.get_init():
+        if self.render_mode in ("human", "rgb_array") and pygame.get_init():
             pygame.quit()
 
 

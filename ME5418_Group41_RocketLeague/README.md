@@ -72,6 +72,9 @@ python -m src --train --ppo
 # Optional DQN ablation variants:
 python -m src --train --double_dqn
 python -m src --train --dqn
+
+# To start from a checkpoint for training
+python -m src --train --training_architecture --model_path path_to_model.pt
 ```
 
 #### Evaluate a Trained Learning Agent
@@ -84,6 +87,16 @@ python -m src --eval --dueling_ddqn --render
 # Evaluate PPO (headless or with live Pygame rendering)
 python -m src --eval --ppo
 python -m src --eval --ppo --render
+```
+
+#### Plot Learning Curves & Dashboards
+
+```bash
+# Auto-discover runs/ metrics and generate multi-algorithm comparative curves
+python -m src --plot
+
+# Generate a 4-panel dashboard for a specific agent run
+python -m src --plot --dashboard runs/metrics_ppo.csv
 ```
 
 ### Step 4: Interactive Play & Component Demos

@@ -1,0 +1,293 @@
+"""
+Learning Curves & Training Dashboard Plotting Tool for ME5418 Rocket League Learning Agents.
+
+Supports:
+1. Plotting comprehensive 4-panel dashboards (Return, Goal Rate %, Exploration, Loss) from CSV metrics.
+2. Overlaying multi-algorithm comparison curves (e.g., PPO vs Dueling DDQN vs Double DQN).
+3. Parsing existing `.log` checkpoint records if `.csv` metrics are not yet available.
+
+Usage:
+    # Auto-discover all metrics in runs/ and generate comparison plot:
+    python -m src.learning_agents.plot_learning_curves
+
+    # Plot comparison between specific runs:
+    python -m src.learning_agents.plot_learning_curves --runs runs/metrics_ppo.csv runs/metrics_dueling_ddqn.csv
+
+    # Generate single 4-panel dashboard for a specific CSV:
+    python -m src.learning_agents.plot_learning_curves --dashboard runs/metrics_ppo.csv --output runs/dashboard_ppo.png
+"""
+
+import argparse
+import csv
+import os
+from pathlib import Path
+import re
+import sys
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Ensure repository root is on sys.path
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+RUNS_DIR = ROOT_DIR / "runs"
+
+
+def load_metrics_csv(csv_path: str | Path) -> dict[str, np.ndarray]:
+    """Load a metrics CSV file and return a dictionary of numpy arrays."""
+    data: dict[str, list[float]] = {}
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            for k, v in row.items():
+                if k not in data:
+                    data[k] = []
+                try:
+                    data[k].append(float(v))
+                except ValueError:
+                    data[k].append(np.nan)
+
+    return {k: np.array(v) for k, v in data.items()}
+
+
+def parse_log_file(log_path: str | Path) -> dict[str, np.ndarray]:
+    """Fallback parser for checkpoint log files (e.g. `run_ppo.log`)."""
+    steps = []
+    episodes = []
+    mean_rewards = []
+    goal_rates = []
+    ep_rewards = []
+
+    pattern = re.compile(
+        r"New best 100-ep mean reward:\s*([-\d.]+)\s*\(Goal rate:\s*([-\d.]+)%,\s*Ep reward:\s*([-\d.]+)\)\s*at episode\s*(\d+)\s*\(step\s*(\d+)\)"
+    )
+
+    with open(log_path, mode="r", encoding="utf-8") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                mr, gr, er, ep, st = match.groups()
+                mean_rewards.append(float(mr))
+                goal_rates.append(float(gr))
+                ep_rewards.append(float(er))
+                episodes.append(int(ep))
+                steps.append(int(st))
+
+    return {
+        "episode": np.array(episodes),
+        "step": np.array(steps),
+        "reward": np.array(ep_rewards),
+        "mean_reward_100": np.array(mean_rewards),
+        "goal_rate_100": np.array(goal_rates),
+    }
+
+
+def plot_single_dashboard(data: dict[str, np.ndarray], title: str, output_path: str | Path):
+    """Generate a publication-ready 4-panel dashboard for a single run."""
+    n = len(data.get("reward", []))
+    if n == 0:
+        print(f"[Plotting] Warning: No data points found for '{title}'. Skipping.")
+        return
+
+    x = data.get("step") if "step" in data and len(data["step"]) == n else np.arange(1, n + 1)
+    x_label = "Environment Steps" if "step" in data else "Episodes"
+
+    # Compute rolling returns if not present
+    if "mean_reward_100" in data:
+        mean_rewards = data["mean_reward_100"]
+    else:
+        rewards = data["reward"]
+        mean_rewards = np.zeros(n)
+        for i in range(n):
+            mean_rewards[i] = np.mean(rewards[max(0, i - 99) : i + 1])
+
+    fig, axs = plt.subplots(2, 2, figsize=(14, 9))
+
+    # 1. Sample Efficiency (Return vs Steps)
+    if "reward" in data:
+        axs[0, 0].plot(x, data["reward"], color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
+    axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
+    axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+    axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
+    axs[0, 0].set_xlabel(x_label)
+    axs[0, 0].set_ylabel("Episodic Return")
+    axs[0, 0].grid(True, alpha=0.3, linestyle="--")
+    axs[0, 0].legend(loc="upper left", framealpha=0.8)
+
+    # 2. Objective Goal Rate (%)
+    if "goal_rate_100" in data:
+        axs[0, 1].plot(x, data["goal_rate_100"], color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
+        axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
+        axs[0, 1].set_ylim([-2, 105])
+    axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
+    axs[0, 1].set_xlabel(x_label)
+    axs[0, 1].set_ylabel("Goal Rate (%)")
+    axs[0, 1].grid(True, alpha=0.3, linestyle="--")
+    axs[0, 1].legend(loc="upper left", framealpha=0.8)
+
+    # 3. Exploration Dynamics (Entropy or Epsilon)
+    if "entropy" in data:
+        axs[1, 0].plot(x, data["entropy"], color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
+        axs[1, 0].set_ylabel("Entropy H(pi)")
+        axs[1, 0].set_title("Exploration Dynamics (Policy Entropy)", fontsize=11, fontweight="bold")
+    elif "epsilon" in data:
+        axs[1, 0].plot(x, data["epsilon"], color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
+        axs[1, 0].set_ylabel("Epsilon (ε)")
+        axs[1, 0].set_ylim([-0.02, 1.05])
+        axs[1, 0].set_title("Exploration Schedule (Epsilon Decay)", fontsize=11, fontweight="bold")
+    else:
+        axs[1, 0].text(0.5, 0.5, "No Exploration Metric Recorded", ha="center", va="center")
+    axs[1, 0].set_xlabel(x_label)
+    axs[1, 0].grid(True, alpha=0.3, linestyle="--")
+    if "entropy" in data or "epsilon" in data:
+        axs[1, 0].legend(loc="upper right", framealpha=0.8)
+
+    # 4. Optimization Health (Value Loss or TD Loss)
+    loss_key = "value_loss" if "value_loss" in data else ("td_loss" if "td_loss" in data else None)
+    if loss_key and loss_key in data:
+        losses = data[loss_key]
+        axs[1, 1].plot(x, losses, color="#d62728", alpha=0.25, linewidth=0.8, label=f"Raw {loss_key}")
+        smooth_loss = np.zeros(n)
+        for i in range(n):
+            smooth_loss[i] = np.mean(losses[max(0, i - 49) : i + 1])
+        axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
+        axs[1, 1].set_title(f"Optimization Health ({loss_key})", fontsize=11, fontweight="bold")
+        axs[1, 1].set_ylabel("Loss")
+        axs[1, 1].legend(loc="upper right", framealpha=0.8)
+    else:
+        axs[1, 1].text(0.5, 0.5, "No Loss Metric Recorded", ha="center", va="center")
+    axs[1, 1].set_xlabel(x_label)
+    axs[1, 1].grid(True, alpha=0.3, linestyle="--")
+
+    fig.suptitle(f"{title} Training Dashboard", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"[Plotting] Saved dashboard to: {output_path}")
+
+
+def plot_comparison(runs_data: dict[str, dict[str, np.ndarray]], output_path: str | Path):
+    """Plot multi-algorithm comparative overlay curves across Environment Steps."""
+    if not runs_data:
+        print("[Plotting] No valid run data to compare.")
+        return
+
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    fig, axs = plt.subplots(1, 2, figsize=(15, 6))
+
+    # Subplot 1: Sample Efficiency (Mean Return vs Steps)
+    for idx, (label, data) in enumerate(runs_data.items()):
+        color = colors[idx % len(colors)]
+        x = data.get("step") if "step" in data else np.arange(len(data.get("reward", [])))
+        if "mean_reward_100" in data:
+            y = data["mean_reward_100"]
+        elif "reward" in data:
+            rewards = data["reward"]
+            y = np.zeros(len(rewards))
+            for i in range(len(rewards)):
+                y[i] = np.mean(rewards[max(0, i - 99) : i + 1])
+        else:
+            continue
+
+        axs[0].plot(x, y, label=label, color=color, linewidth=2.2)
+
+    axs[0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+    axs[0].set_title("Sample Efficiency Comparison (100-Ep Rolling Return)", fontsize=11, fontweight="bold")
+    axs[0].set_xlabel("Environment Steps")
+    axs[0].set_ylabel("Rolling Mean Return")
+    axs[0].grid(True, alpha=0.3, linestyle="--")
+    axs[0].legend(loc="lower right", framealpha=0.8)
+
+    # Subplot 2: Goal Conversion Rate (%)
+    for idx, (label, data) in enumerate(runs_data.items()):
+        color = colors[idx % len(colors)]
+        x = data.get("step") if "step" in data else np.arange(len(data.get("reward", [])))
+        if "goal_rate_100" in data:
+            axs[1].plot(x, data["goal_rate_100"], label=label, color=color, linewidth=2.2)
+
+    axs[1].axhline(50.0, color="#7f7f7f", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Parity")
+    axs[1].set_ylim([-2, 105])
+    axs[1].set_title("Objective Competency Comparison (Goal Rate %)", fontsize=11, fontweight="bold")
+    axs[1].set_xlabel("Environment Steps")
+    axs[1].set_ylabel("Goal Rate (%)")
+    axs[1].grid(True, alpha=0.3, linestyle="--")
+    axs[1].legend(loc="lower right", framealpha=0.8)
+
+    fig.suptitle("Comparative Evaluation: Reinforcement Learning Agents", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"[Plotting] Saved comparative plot to: {output_path}")
+
+
+def main(args_list: list[str] | None = None):
+    parser = argparse.ArgumentParser(description="Learning Curve Plotter for ME5418 Rocket League Agents")
+    parser.add_argument(
+        "--runs",
+        nargs="+",
+        default=None,
+        help="List of CSV metric files or log files to plot/compare",
+    )
+    parser.add_argument(
+        "--dashboard",
+        type=str,
+        default=None,
+        help="Generate a 4-panel single-run dashboard for the specified file",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Destination path for the output PNG image",
+    )
+    args = parser.parse_args(args_list)
+
+    if args.dashboard:
+        path = Path(args.dashboard)
+        if not path.exists():
+            print(f"[Plotting] Error: File '{path}' does not exist.")
+            return
+        data = load_metrics_csv(path) if path.suffix == ".csv" else parse_log_file(path)
+        out = args.output if args.output else RUNS_DIR / f"dashboard_{path.stem}.png"
+        plot_single_dashboard(data, title=path.stem, output_path=out)
+        return
+
+    # Multi-run comparison
+    run_files = args.runs
+    if not run_files:
+        # Search for all metrics CSVs in runs/
+        run_files = list(RUNS_DIR.glob("metrics_*.csv"))
+        if not run_files:
+            # Fallback to .log files
+            run_files = list(RUNS_DIR.glob("run_*.log"))
+
+    if not run_files:
+        print("[Plotting] No metrics or log files found in runs/ directory.")
+        return
+
+    runs_data = {}
+    for rf in run_files:
+        path = Path(rf)
+        if path.suffix == ".csv":
+            runs_data[path.stem.replace("metrics_", "").upper()] = load_metrics_csv(path)
+        elif path.suffix == ".log":
+            parsed = parse_log_file(path)
+            if len(parsed.get("step", [])) > 0:
+                runs_data[path.stem.replace("run_", "").upper()] = parsed
+
+    out = args.output if args.output else RUNS_DIR / "comparison_learning_curves.png"
+    if len(runs_data) == 1:
+        name, data = next(iter(runs_data.items()))
+        plot_single_dashboard(data, title=name, output_path=out)
+    else:
+        plot_comparison(runs_data, output_path=out)
+
+
+if __name__ == "__main__":
+    main()
