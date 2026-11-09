@@ -184,7 +184,7 @@ class PPOAgent:
         denom = max(num_mb, 1)
         return total_loss_sum / denom, entropy_sum / denom
 
-    def _step_with_action_repeat(self, env: gym.Env, action_idx: int):
+    def _step_with_action_repeat(self, env: gym.Env, action):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
         edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
         total_reward = 0.0
@@ -194,11 +194,14 @@ class PPOAgent:
         next_state = None
 
         # Clear jump bit on repeat frames > 0 so _prev_jump_action resets between decisions
-        jump_bit = (action_idx % 4) // 2
-        held_action_idx = (action_idx - 2) if jump_bit == 1 else action_idx
+        if isinstance(action, (list, tuple, np.ndarray)):
+            held_action = [int(action[0]), 0, int(action[2])]
+        else:
+            jump_bit = (action % 4) // 2
+            held_action = (action - 2) if jump_bit == 1 else action
 
         for sub in range(max(1, self.action_repeat)):
-            act = action_idx if sub == 0 else held_action_idx
+            act = action if sub == 0 else held_action
             next_state, reward, terminated, truncated, info = env.step(act)
             total_reward += float(reward)
             if terminated or truncated or not env.unwrapped.isopen:
@@ -244,21 +247,22 @@ class PPOAgent:
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
 
+        factored = getattr(PPOConfig, "factored_action", False)
         env = gym.make(
             self.env_id,
             render_mode="human" if render else None,
             bot_type=self.bot_type,
-            discrete_action=True,
+            discrete_action=not factored,
             **make_kwargs,
         )
 
         num_states = env.observation_space.shape[0]
-        num_actions = env.action_space.n
+        action_dim = list(env.action_space.nvec) if factored else env.action_space.n
 
         rewards_per_episode = []
         goals_per_episode = []
 
-        policy_net = ActorCritic(num_states, num_actions, self.fcl_nodes).to(device)
+        policy_net = ActorCritic(num_states, action_dim, self.fcl_nodes).to(device)
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
@@ -274,7 +278,11 @@ class PPOAgent:
             self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
-            current_entropy = float(np.log(num_actions))
+            current_entropy = (
+                float(sum(np.log(d) for d in action_dim))
+                if isinstance(action_dim, list)
+                else float(np.log(action_dim))
+            )
             best_mean_reward = float("-inf")
             last_graph_update_time = datetime.now()
 
@@ -316,17 +324,23 @@ class PPOAgent:
                     with torch.no_grad():
                         if is_training:
                             action, log_prob, _, value = policy_net.get_action_and_value(state.unsqueeze(0))
-                            action_idx = int(action.item())
+                            action_for_env = (
+                                action.squeeze(0).cpu().numpy().tolist()
+                                if policy_net.is_factored
+                                else int(action.item())
+                            )
 
                             # Backfill the previous step's next_value using this step's already-computed value
                             if (len(buf_next_values) > 0 and buf_next_values[-1] is None):
                                 buf_next_values[-1] = value.squeeze(0)
                         else:
                             logits, _ = policy_net(state.unsqueeze(0))
-                            action = logits.squeeze(0).argmax()
-                            action_idx = int(action.item())
+                            if policy_net.is_factored:
+                                action_for_env = [int(l.squeeze(0).argmax().item()) for l in logits]
+                            else:
+                                action_for_env = int(logits.squeeze(0).argmax().item())
 
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_idx)
+                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_for_env)
                     done = terminated or truncated
 
                     episode_reward += reward

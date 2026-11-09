@@ -34,8 +34,10 @@ class DQNConfig:
 
 @dataclass
 class PPOConfig:
-    # Architecture (matched 1-to-1 with Dueling DQN: 150,949 trainable parameters)
+    # Architecture
     hidden_size = 256
+    factored_action = True              # Use MultiDiscrete([9, 2, 2])
+    action_dims = (9, 2, 2)             # (direction: 9, jump: 2, boost: 2)
 
     # Optimization & Returns (matched with DQNConfig where applicable)
     learning_rate = 3e-4

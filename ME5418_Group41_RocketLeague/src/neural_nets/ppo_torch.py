@@ -22,18 +22,30 @@ from src.config.nn_config import PPOConfig
 
 
 class ActorCritic(nn.Module):
-    """Actor-Critic network for PPO over a discrete action space.
+    """Actor-Critic network for PPO supporting discrete and factored MultiDiscrete action spaces.
 
-    Architecture (matched 1-to-1 with Dueling DQN in `dueling_ddqn_torch.py`):
+    Architecture:
         - Input Layer: 52-dimensional normalized state vector in [-1, 1].
         - Shared Feature Extractor: 2 fully-connected layers (256 units) with LayerNorm and ReLU.
-        - Two Heads (128 hidden units each):
-            1. Actor (Policy) Head pi(a | s): outputs logits over each discrete action a (36 actions).
+        - Two Heads:
+            1. Actor (Policy) Head:
+               - Discrete: Single Linear layer outputting logits over all discrete actions.
+               - Factored MultiDiscrete: ModuleList of independent Linear heads for each action axis
+                 (e.g., 9 directions, 2 jumps, 2 boosts).
             2. Critic (Value) Head V(s): estimates scalar value of being in state s.
     """
 
-    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = PPOConfig.hidden_size):
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int | list[int] | tuple[int, ...] = (
+            PPOConfig.action_dims if getattr(PPOConfig, "factored_action", False) else 36
+        ),
+        hidden_dim: int = PPOConfig.hidden_size,
+    ):
         super(ActorCritic, self).__init__()
+        self.is_factored = isinstance(action_dim, (list, tuple))
+        self.action_dims = list(action_dim) if self.is_factored else [action_dim]
 
         def layer_init(layer: nn.Linear, std: float = math.sqrt(2), bias_const: float = 0.0) -> nn.Linear:
             nn.init.orthogonal_(layer.weight, gain=std)
@@ -48,13 +60,18 @@ class ActorCritic(nn.Module):
 
         # Actor stream (hidden: gain = sqrt(2), policy output: gain = 0.01 for near-uniform exploration)
         self.fc_actor = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
-        self.actor = layer_init(nn.Linear(hidden_dim // 2, action_dim), std=0.01)
+        if self.is_factored:
+            self.actor_heads = nn.ModuleList([
+                layer_init(nn.Linear(hidden_dim // 2, d), std=0.01) for d in self.action_dims
+            ])
+        else:
+            self.actor = layer_init(nn.Linear(hidden_dim // 2, self.action_dims[0]), std=0.01)
 
         # Critic stream (hidden: gain = sqrt(2), value output: gain = 1.0)
         self.fc_critic = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
         self.critic = layer_init(nn.Linear(hidden_dim // 2, 1), std=1.0)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor | list[torch.Tensor], torch.Tensor]:
         """Compute action logits and state value V(s) for input state tensor x."""
         # Shared feature extraction
         x = F.relu(self.ln1(self.fc1(x)))
@@ -62,7 +79,10 @@ class ActorCritic(nn.Module):
 
         # Compute action logits for pi(a | s)
         a = F.relu(self.fc_actor(x))
-        logits = self.actor(a)
+        if self.is_factored:
+            logits = [head(a) for head in self.actor_heads]
+        else:
+            logits = self.actor(a)
 
         # Compute state value V(s)
         v = F.relu(self.fc_critic(x))
@@ -72,10 +92,19 @@ class ActorCritic(nn.Module):
     def get_action_and_value(self, x: torch.Tensor, action: torch.Tensor | None = None):
         """Sample (or evaluate a given) action, returning (action, log pi(a | s), entropy, V(s))."""
         logits, V = self(x)
-        dist = Categorical(logits=logits)
-        if action is None:
-            action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), V
+        if self.is_factored:
+            dists = [Categorical(logits=l) for l in logits]
+            if action is None:
+                action = torch.stack([d.sample() for d in dists], dim=-1)
+            # Sum log probabilities and entropies across independent action dimensions
+            log_prob = torch.stack([d.log_prob(action[..., i]) for i, d in enumerate(dists)], dim=-1).sum(dim=-1)
+            entropy = torch.stack([d.entropy() for d in dists], dim=-1).sum(dim=-1)
+            return action, log_prob, entropy, V
+        else:
+            dist = Categorical(logits=logits)
+            if action is None:
+                action = dist.sample()
+            return action, dist.log_prob(action), dist.entropy(), V
 
 
 def compute_gae(
@@ -107,14 +136,15 @@ def compute_gae(
 def run_ppo_network():
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = gym.make(GymConfig.gym_id, render_mode=None, bot_type=PPOConfig.bot_type, discrete_action=True)
+    factored = getattr(PPOConfig, "factored_action", False)
+    env = gym.make(GymConfig.gym_id, render_mode=None, bot_type=PPOConfig.bot_type, discrete_action=not factored)
 
     num_states = env.observation_space.shape[0]
-    num_actions = env.action_space.n
+    action_dim = list(env.action_space.nvec) if factored else env.action_space.n
     hidden_dim = PPOConfig.hidden_size
 
     # 1. Create Actor-Critic Network
-    agent = ActorCritic(num_states, num_actions, hidden_dim).to(device)
+    agent = ActorCritic(num_states, action_dim, hidden_dim).to(device)
     total_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
 
     optimizer = torch.optim.Adam(agent.parameters(), lr=PPOConfig.learning_rate, eps=1e-5)
@@ -129,7 +159,7 @@ def run_ppo_network():
     print("1. NETWORK ARCHITECTURE (PPO ACTOR-CRITIC)")
     print("=" * 65)
     print(
-        f"Device: {device} | State Dim: {num_states} | Action Dim: {num_actions} | "
+        f"Device: {device} | State Dim: {num_states} | Action Dim: {action_dim} | "
         f"Hidden Dim: {hidden_dim} | Trainable Params: {total_params:,}"
     )
     print(agent)
@@ -138,32 +168,47 @@ def run_ppo_network():
     obs, info = env.reset()
     state_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)  # Shape: (1, 52)
 
-    logits, value = agent(state_tensor)  # Shapes: (1, 36), (1,)
-    probs = F.softmax(logits, dim=-1)
-    action_idx = probs.argmax(dim=-1).item()
-
-    # Decode discrete action index (0..35) into (direction, jump, boost)
-    dir_idx, jump_bit, boost_bit = action_idx // 4, (action_idx % 4) // 2, action_idx % 2
-
-    print("\n" + "=" * 65)
-    print("2. FORWARD PASS (INPUT -> OUTPUT)")
-    print("=" * 65)
-    print(f"Input State Shape : {state_tensor.shape}")
-    print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
-    print(f"Output Logits Shape : {logits.shape}")
-    print(f"Output pi(.|s) Sample (first 6 actions): {probs[0, :6].detach().cpu().numpy().round(4)}")
-    print(f"Output V(s)         : {value.item():.6f}")
-    print(
-        f"Greedy Action     : {action_idx} -> dir={GymConfig.directions[dir_idx]}, "
-        f"jump={bool(jump_bit)}, boost={bool(boost_bit)}"
-    )
+    logits, value = agent(state_tensor)
+    if agent.is_factored:
+        action_parts = [l.squeeze(0).argmax().item() for l in logits]
+        dir_idx, jump_bit, boost_bit = action_parts[0], action_parts[1], action_parts[2]
+        dir_probs = F.softmax(logits[0], dim=-1)
+        print("\n" + "=" * 65)
+        print("2. FORWARD PASS (INPUT -> OUTPUT)")
+        print("=" * 65)
+        print(f"Input State Shape : {state_tensor.shape}")
+        print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
+        print(f"Output Logits Shapes: {[list(l.shape) for l in logits]}")
+        print(f"Output Direction pi Sample (first 5 actions): {dir_probs[0, :5].detach().cpu().numpy().round(4)}")
+        print(f"Output V(s)         : {value.item():.6f}")
+        print(
+            f"Greedy Action     : {action_parts} -> dir={GymConfig.directions[dir_idx]}, "
+            f"jump={bool(jump_bit)}, boost={bool(boost_bit)}"
+        )
+    else:
+        probs = F.softmax(logits, dim=-1)
+        action_idx = probs.argmax(dim=-1).item()
+        dir_idx, jump_bit, boost_bit = action_idx // 4, (action_idx % 4) // 2, action_idx % 2
+        print("\n" + "=" * 65)
+        print("2. FORWARD PASS (INPUT -> OUTPUT)")
+        print("=" * 65)
+        print(f"Input State Shape : {state_tensor.shape}")
+        print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
+        print(f"Output Logits Shape : {logits.shape}")
+        print(f"Output pi(.|s) Sample (first 6 actions): {probs[0, :6].detach().cpu().numpy().round(4)}")
+        print(f"Output V(s)         : {value.item():.6f}")
+        print(
+            f"Greedy Action     : {action_idx} -> dir={GymConfig.directions[dir_idx]}, "
+            f"jump={bool(jump_bit)}, boost={bool(boost_bit)}"
+        )
 
     # Collect a short on-policy rollout of transitions (s, a, log pi_old(a|s), r, done, V(s))
     states, actions, log_probs, rewards, dones, values = [], [], [], [], [], []
     with torch.no_grad():
         for _ in range(rollout_steps):
             action, log_prob, _, v = agent.get_action_and_value(state_tensor)
-            next_state, reward, terminated, truncated, _ = env.step(action.item())
+            step_act = action.squeeze(0).cpu().numpy().tolist() if agent.is_factored else action.item()
+            next_state, reward, terminated, truncated, _ = env.step(step_act)
             done = terminated or truncated
 
             states.append(state_tensor.squeeze(0))
