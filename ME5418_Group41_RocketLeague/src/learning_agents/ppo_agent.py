@@ -75,6 +75,7 @@ class PPOAgent:
         self.value_loss_coef = PPOConfig.value_loss_coef
         self.entropy_coef = PPOConfig.entropy_coef
         self.max_grad_norm = PPOConfig.max_grad_norm
+        self.target_kl = getattr(PPOConfig, "target_kl", 0.02)
 
         self.action_repeat = PPOConfig.action_repeat
         self.rollout_steps = PPOConfig.rollout_steps
@@ -133,8 +134,11 @@ class PPOAgent:
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for _ in range(self.update_epochs):
+        for epoch in range(self.update_epochs):
             perm = torch.randperm(batch_size, device=device)
+            epoch_kl_sum = 0.0
+            epoch_mb_count = 0
+
             for start in range(0, batch_size, self.mini_batch_size):
                 idx = perm[start : start + self.mini_batch_size]
                 mb_states = states[idx]
@@ -144,7 +148,14 @@ class PPOAgent:
                 mb_adv = advantages[idx]
 
                 _, new_log_probs, entropy, new_values = policy_net.get_action_and_value(mb_states, mb_actions)
-                ratio = torch.exp(new_log_probs - mb_old_log_probs)
+                logratio = new_log_probs - mb_old_log_probs
+                ratio = torch.exp(logratio)
+
+                # Non-negative, minimum-variance KL divergence approximation
+                with torch.no_grad():
+                    approx_kl = ((ratio - 1.0) - logratio).mean()
+                    epoch_kl_sum += float(approx_kl.item())
+                    epoch_mb_count += 1
 
                 # Clipped surrogate objective
                 pg_loss1 = -mb_adv * ratio
@@ -164,6 +175,11 @@ class PPOAgent:
                 total_loss_sum += float(loss.item())
                 entropy_sum += float(entropy_loss.item())
                 num_mb += 1
+
+            # Early stop if average KL divergence across this epoch exceeded target threshold
+            mean_epoch_kl = epoch_kl_sum / max(epoch_mb_count, 1)
+            if self.target_kl is not None and mean_epoch_kl > self.target_kl:
+                break
 
         denom = max(num_mb, 1)
         return total_loss_sum / denom, entropy_sum / denom

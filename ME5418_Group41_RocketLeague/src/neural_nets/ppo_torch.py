@@ -1,6 +1,7 @@
 """
 Proximal Policy Optimization (PPO) Actor-Critic Architecture & Forward/Backward Pass Demo.
 """
+import math
 import sys
 from pathlib import Path
 import gymnasium as gym
@@ -34,19 +35,24 @@ class ActorCritic(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = PPOConfig.hidden_size):
         super(ActorCritic, self).__init__()
 
-        # Shared feature backbone with LayerNorm to stabilize hidden activations across varying scales
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        def layer_init(layer: nn.Linear, std: float = math.sqrt(2), bias_const: float = 0.0) -> nn.Linear:
+            nn.init.orthogonal_(layer.weight, gain=std)
+            nn.init.constant_(layer.bias, bias_const)
+            return layer
+
+        # Shared feature backbone with LayerNorm (hidden: gain = sqrt(2))
+        self.fc1 = layer_init(nn.Linear(state_dim, hidden_dim))
         self.ln1 = nn.LayerNorm(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = layer_init(nn.Linear(hidden_dim, hidden_dim))
         self.ln2 = nn.LayerNorm(hidden_dim)
 
-        # Actor stream pi(a | s): R^(hidden_dim) -> R^(action_dim) logits
-        self.fc_actor = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.actor = nn.Linear(hidden_dim // 2, action_dim)
+        # Actor stream (hidden: gain = sqrt(2), policy output: gain = 0.01 for near-uniform exploration)
+        self.fc_actor = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
+        self.actor = layer_init(nn.Linear(hidden_dim // 2, action_dim), std=0.01)
 
-        # Critic stream V(s): R^(hidden_dim) -> R^1
-        self.fc_critic = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.critic = nn.Linear(hidden_dim // 2, 1)
+        # Critic stream (hidden: gain = sqrt(2), value output: gain = 1.0)
+        self.fc_critic = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
+        self.critic = layer_init(nn.Linear(hidden_dim // 2, 1), std=1.0)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute action logits and state value V(s) for input state tensor x."""
