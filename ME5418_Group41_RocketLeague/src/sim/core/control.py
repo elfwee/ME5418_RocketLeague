@@ -2,6 +2,7 @@ import pygame
 import numpy as np
 from src.sim.core.actions import CarAction
 from src.sim.ai.heuristic_bot import HeuristicBot
+from src.sim.ai.rl_bot import RLBot
 from src.sim.core.simulation import Simulation
 from typing import Dict, Any, Optional, Tuple
 
@@ -14,18 +15,38 @@ class CarControl:
         - human: enables keyboard control
         - random: samples a random action every 0.5s
         - heuristic_bot: uses HeuristicBot (HZISM)
+        - ppo: uses trained PPO ActorCritic policy
+        - dueling_ddqn / ddqn: uses trained Dueling Double DQN policy
+        - double_dqn / dqn: uses trained Double/Vanilla DQN policy
     - team:
         - orange
         - blue
-    - sim: Simulation needed for HeuristicBot
+    - sim: Simulation instance needed for bot decision making
+    - model_path: optional path to .pt checkpoint file
     """
 
-    def __init__(self, control_type: str = "none", team: str = "blue", sim: Optional[Simulation] = None):
-        self.control_type = control_type
+    def __init__(
+        self,
+        control_type: str = "none",
+        team: str = "blue",
+        sim: Optional[Simulation] = None,
+        model_path: Optional[str] = None,
+    ):
+        self.control_type = control_type.lower()
         self.sim = sim
-        self.team = team
-        self.bot = HeuristicBot(team=self.team) if self.control_type == "heuristic_bot" else None
+        self.team = team.lower()
+        self.model_path = model_path
+
+        if self.control_type == "heuristic_bot":
+            self.bot = HeuristicBot(team=self.team)
+        elif self.control_type in ("ppo", "dueling_ddqn", "ddqn", "double_dqn", "dqn", "rl_bot"):
+            agent_type = "ppo" if self.control_type in ("ppo", "rl_bot") else self.control_type
+            self.bot = RLBot(agent_type=agent_type, team=self.team, model_path=self.model_path)
+        else:
+            self.bot = None
+
         self.action = CarAction()
+        self.random_action = CarAction()
 
     def get_action(self):
         if self.control_type == "passive":
@@ -72,11 +93,16 @@ class CarControl:
         elif self.control_type == "heuristic_bot":
             if self.bot is None:
                 self.bot = HeuristicBot(team=self.team)
-            self.action = self.bot.compute_action(self.sim)
+            if self.sim is not None:
+                self.action = self.bot.compute_action(self.sim)
+
+        elif self.control_type in ("ppo", "dueling_ddqn", "ddqn", "double_dqn", "dqn", "rl_bot"):
+            if self.bot is not None and self.sim is not None:
+                self.action = self.bot.compute_action(self.sim)
 
         return self.action
 
     def reset(self):
         self.action = CarAction(dir_x=0, dir_y=0, jump=False, boost=False)
-        if self.control_type == "heuristic_bot" and self.bot is not None:
+        if self.bot is not None and hasattr(self.bot, "reset"):
             self.bot.reset()

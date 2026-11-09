@@ -479,7 +479,7 @@ class Simulation:
 
         return state
 
-    def get_state_norm(self, as_flat_array: bool = False) -> Any:
+    def get_state_norm(self, as_flat_array: bool = False, team: str = "blue") -> Any:
         """Query normalized simulation state representation for RL observations or neural policies.
 
         Normalizations applied:
@@ -512,6 +512,8 @@ class Simulation:
         Args:
             as_flat_array: If True, returns a flat 1D list of 52 float features suitable for Box space.
                            If False (default), returns structured Dict[str, Any].
+            team: 'blue' (default) or 'orange'. If 'orange', symmetrically mirrors observation along
+                  the horizontal X axis so an agent trained on Blue can control Orange seamlessly.
         """
         # 1. Normalized Relational State
         raw_relations = self._compute_relations()
@@ -602,6 +604,75 @@ class Simulation:
 
         if not as_flat_array:
             return state_norm
+
+        ball = state_norm["ball"]
+        rel = state_norm["relations"]
+
+        # If team == 'orange', reflect observation horizontally across X=0 so an agent
+        # trained as Blue can control Orange attacking towards -X without retraining.
+        if team.lower() == "orange" and state_norm.get("car_orange") is not None:
+            car = state_norm["car_orange"]
+            co = state_norm["blue_car"]
+            ego_rel = rel.get("orange_car_to_ball")
+            opp_rel = rel.get("blue_car_to_ball")
+            # 8 raycasts mirrored: ray i reflects to (8 - i) % 8
+            mirrored_rays = [car["boundary_distances"][(8 - i) % 8] for i in range(8)]
+
+            vec = [
+                # 1. Ego agent Orange car (mirrored X) (21 floats)
+                -car["position"][0],
+                car["position"][1],
+                -car["velocity"][0],
+                car["velocity"][1],
+                car["orientation"][0],
+                -car["orientation"][1],
+                -car["angular_velocity"],
+                car["boost"],
+                car["wheel_contacts"],
+                car["has_jump2"],
+                car["is_flipping"],
+                car["is_turtling"],
+                car["is_boost_recovery"],
+                *mirrored_rays,
+                # 2. Ball features (mirrored X) (5 floats)
+                -ball["position"][0],
+                ball["position"][1],
+                -ball["velocity"][0],
+                ball["velocity"][1],
+                -ball["angular_velocity"],
+                # 3. Agent relations (9 floats)
+                ego_rel["magnitude"] if ego_rel else 0.0,
+                -ego_rel["direction"][0] if ego_rel else 0.0,
+                ego_rel["direction"][1] if ego_rel else 0.0,
+                # Opponent goal for Orange is Blue goal (-X mirrored to +X)
+                rel["ball_to_blue_goal"]["magnitude"],
+                -rel["ball_to_blue_goal"]["direction"][0],
+                rel["ball_to_blue_goal"]["direction"][1],
+                # Own goal for Orange is Orange goal (+X mirrored to -X)
+                rel["ball_to_orange_goal"]["magnitude"],
+                -rel["ball_to_orange_goal"]["direction"][0],
+                rel["ball_to_orange_goal"]["direction"][1],
+                # 4. Opponent present flag (1 float)
+                1.0,
+                # 5. Opponent Blue car (mirrored X) (16 floats)
+                -co["position"][0],
+                co["position"][1],
+                -co["velocity"][0],
+                co["velocity"][1],
+                co["orientation"][0],
+                -co["orientation"][1],
+                -co["angular_velocity"],
+                co["boost"],
+                co["wheel_contacts"],
+                co["has_jump2"],
+                co["is_flipping"],
+                co["is_turtling"],
+                co["is_boosting"],
+                opp_rel["magnitude"] if opp_rel else 0.0,
+                -opp_rel["direction"][0] if opp_rel else 0.0,
+                opp_rel["direction"][1] if opp_rel else 0.0,
+            ]
+            return vec
 
         car = state_norm["blue_car"]
         ball = state_norm["ball"]

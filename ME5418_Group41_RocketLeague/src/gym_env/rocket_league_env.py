@@ -30,16 +30,17 @@ if GymConfig.gym_id not in gym.envs.registry:
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
-        if bot_type not in ("none", "heuristic_bot"):
-            raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
+    def __init__(self, render_mode=None, bot_type="none", discrete_action=True, bot_model_path=None):
+        valid_bots = ("none", "heuristic_bot", "ppo", "dueling_ddqn", "ddqn", "double_dqn", "dqn")
+        if bot_type not in valid_bots:
+            raise ValueError(f"Invalid bot_type: {bot_type}. Must be one of {valid_bots}.")
 
         self.render_mode = render_mode
         self.bot_type = bot_type
-        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
+        self.sim = Simulation(enable_orange=(bot_type != "none"), random_spawn=True)
         self.orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
-            if bot_type == "heuristic_bot"
+            CarControl(control_type=bot_type, team="orange", sim=self.sim, model_path=bot_model_path)
+            if bot_type != "none"
             else None
         )
         self.ball_prev = None

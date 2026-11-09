@@ -16,7 +16,6 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 
-from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 
@@ -135,6 +134,7 @@ def compute_gae(
 
 def run_ppo_network():
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
+    from src.gym_env.rocket_league_env import RocketLeagueEnv
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     factored = getattr(PPOConfig, "factored_action", False)
     env = gym.make(GymConfig.gym_id, render_mode=None, bot_type=PPOConfig.bot_type, discrete_action=not factored)

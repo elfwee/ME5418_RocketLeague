@@ -27,10 +27,42 @@ def main():
             # Default or explicit `--blue`
             control_car = "blue"
 
+        def _get_arg(flags: list[str]) -> str | None:
+            for flag in flags:
+                if flag in sys.argv:
+                    idx = sys.argv.index(flag)
+                    if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("--"):
+                        return sys.argv[idx + 1]
+            return None
+
+        blue_agent = _get_arg(["--blue-agent", "--blue_agent", "--blue-bot", "--blue_bot"])
+        orange_agent = _get_arg(["--orange-agent", "--orange_agent", "--orange-bot", "--orange_bot"])
+        blue_model = _get_arg(["--blue-model", "--blue_model"])
+        orange_model = _get_arg(["--orange-model", "--orange_model"])
+        steps_str = _get_arg(["--steps", "-s"])
+        steps = int(steps_str) if steps_str is not None else 300
+
+        if orange_agent is not None:
+            enable_orange = True
+
         if "--headless" in sys.argv:
-            play_headless(steps=300, enable_orange=enable_orange)
+            play_headless(
+                steps=steps,
+                enable_orange=enable_orange,
+                blue_agent=blue_agent,
+                orange_agent=orange_agent,
+                blue_model=blue_model,
+                orange_model=orange_model,
+            )
         else:
-            play_interactive(enable_orange=enable_orange, control_car=control_car)
+            play_interactive(
+                enable_orange=enable_orange,
+                control_car=control_car,
+                blue_agent=blue_agent,
+                orange_agent=orange_agent,
+                blue_model=blue_model,
+                orange_model=orange_model,
+            )
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
             demo_gym()
@@ -162,6 +194,7 @@ def main():
     else:
         print(
             "Usage:\n"
+            "  python -m src --play [--blue-agent ppo] [--orange-agent dueling_ddqn] # Custom agent match\n"
             "  python -m src --play [--blue|--orange|--bot-vs-bot] # Play interactively (default: control Blue car)\n"
             "  python -m src --play --headless                     # Run headless physics benchmark\n"
             "  python -m src --demo --gym                          # Demo Gymnasium environment\n"
