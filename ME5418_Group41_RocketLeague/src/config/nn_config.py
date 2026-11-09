@@ -26,7 +26,7 @@ class DQNConfig:
     epsilon_min = 0.05
 
     # Environment & Checkpointing
-    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
+    bot_type = "none"  # "none" or "heuristic_bot"
     eval_episodes = 5
     runs_dir = "runs"
     hyperparameter_set = "dueling_ddqn"
@@ -45,6 +45,7 @@ class PPOConfig:
     value_loss_coef = 0.5
     entropy_coef = 0.01
     max_grad_norm = 0.5
+    target_kl = 0.02  # Early stopping threshold to preserve trust region
 
     # Rollout, Action Repeat & Multi-Epoch Minibatch Schedule
     action_repeat = 4
@@ -54,7 +55,7 @@ class PPOConfig:
     demo_rollout_steps = 32
 
     # Environment & Checkpointing
-    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
+    bot_type = "none"  # "none" or "heuristic_bot"
     eval_episodes = 5
     runs_dir = "runs"
     hyperparameter_set = "ppo"
