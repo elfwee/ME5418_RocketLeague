@@ -72,6 +72,9 @@ python -m src --train --ppo
 # Optional DQN ablation variants:
 python -m src --train --double_dqn
 python -m src --train --dqn
+
+# To start from a checkpoint for training
+python -m src --train --training_architecture --model_path path_to_model.pt
 ```
 
 #### Evaluate a Trained Learning Agent
