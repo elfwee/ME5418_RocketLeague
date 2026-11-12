@@ -14,6 +14,24 @@ from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
+from src.learning_agents.head_to_head import play_head_to_head
+
+RUNS_DIR = f"{ROOT_DIR}/runs"
+
+DEFAULT_BLUE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
+# DEFAULT_BLUE_MODEL = None # defaults to heuristics bot
+DEFAULT_ORANGE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
+# DEFAULT_ORANGE_MODEL = None # defaults to heuristics bot
+
+
+def _arg_value(flag: str, default=None):
+    """Return the value following `flag` in sys.argv, or `default` if absent."""
+    if flag in sys.argv:
+        idx = sys.argv.index(flag)
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+        raise SystemExit(f"{flag} requires a value")
+    return default
 
 
 def main():
@@ -31,6 +49,14 @@ def main():
             play_headless(steps=300, enable_orange=enable_orange)
         else:
             play_interactive(enable_orange=enable_orange, control_car=control_car)
+    elif "--head_to_head" in sys.argv:
+        play_head_to_head(
+            blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
+            orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
+            render="--headless" not in sys.argv,
+            random_spawn="--random_spawn" in sys.argv,
+            seed=int(seed) if (seed := _arg_value("--seed")) is not None else None,
+        )
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
             demo_gym()
@@ -164,6 +190,7 @@ def main():
             "Usage:\n"
             "  python -m src --play [--blue|--orange|--bot-vs-bot] # Play interactively (default: control Blue car)\n"
             "  python -m src --play --headless                     # Run headless physics benchmark\n"
+            "  python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
             "  python -m src --demo --gym                          # Demo Gymnasium environment\n"
             "  python -m src --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants\n"
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"

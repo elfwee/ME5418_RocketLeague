@@ -274,8 +274,9 @@ def run_ppo_network():
     optimizer.step()
     with torch.no_grad():
         _, log_probs_after, _, values_after = agent.get_action_and_value(states, actions)
-        ratio_after = torch.exp(log_probs_after - old_log_probs)
-        approx_kl = (old_log_probs - log_probs_after).mean()
+        log_ratio_after = log_probs_after - old_log_probs
+        ratio_after = torch.exp(log_ratio_after)
+        approx_kl = ((ratio_after - 1.0) - log_ratio_after).mean()  # non-negative KL(old || new) estimate
     print(f"\nMean Ratio          : {ratio_after.mean().item():.6f} (after 1 optimizer step)")
     print(f"Approx KL           : {approx_kl.item():.6f}")
     print(f"Value MSE Loss      : {F.mse_loss(values_after, returns).item():.6f} (after 1 optimizer step)")
