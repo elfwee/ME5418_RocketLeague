@@ -12,6 +12,10 @@ from src.learning_agents.ppo_agent import (
     evaluate_ppo,
     train_ppo,
 )
+from src.learning_agents.plot_learning_curves import (
+    plot_comparison,
+    plot_single_dashboard,
+)
 
 __all__ = [
     "Agent",
@@ -22,4 +26,6 @@ __all__ = [
     "evaluate_dueling_ddqn",
     "train_ppo",
     "evaluate_ppo",
+    "plot_comparison",
+    "plot_single_dashboard",
 ]

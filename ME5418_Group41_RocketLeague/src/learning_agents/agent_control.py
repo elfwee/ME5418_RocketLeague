@@ -51,10 +51,15 @@ class AgentControl:
         state_dim = state_dict["fc1.weight"].shape[1]
         hidden_dim = state_dict["fc1.weight"].shape[0]
 
-        if "actor.weight" in state_dict:
-            from src.neural_nets.ppo import PPO
+        if "actor_heads.0.weight" in state_dict or "actor.weight" in state_dict:
+            from src.neural_nets.ppo_torch import ActorCritic
 
-            net = PPO(state_dim, state_dict["actor.weight"].shape[0], hidden_dim)
+            if "actor_heads.0.weight" in state_dict:  # factored MultiDiscrete([9, 2, 2]) heads
+                n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("actor_heads.")})
+                action_dim = [state_dict[f"actor_heads.{i}.weight"].shape[0] for i in range(n_heads)]
+            else:  # flat Discrete(36) head
+                action_dim = state_dict["actor.weight"].shape[0]
+            net = ActorCritic(state_dim, action_dim, hidden_dim)
         else:
             from src.neural_nets.dueling_ddqn_torch import DQN
 
@@ -76,6 +81,16 @@ class AgentControl:
             dir_x=float(dir_x), dir_y=float(dir_y), jump=allow_jump and jump == 1, boost=boost == 1
         ).clamp()
 
+    @staticmethod
+    def _greedy_action_idx(out) -> int:
+        """Greedy Discrete(36) index from a network output: PPO ActorCritic -> (logits, V), where
+        logits is one tensor (flat) or [direction, jump, boost] tensors (factored); DQN -> Q-values."""
+        scores = out[0] if isinstance(out, tuple) else out
+        if isinstance(scores, (list, tuple)):
+            direction, jump, boost = (int(s.squeeze(0).argmax().item()) for s in scores)
+            return direction * 4 + jump * 2 + boost
+        return int(scores.squeeze(0).argmax().item())
+
     def get_action(self) -> CarAction:
         """Greedy policy action, re-decided every `action_repeat` frames like in training. The jump
         bit is only held on the decision frame so edge-triggered jumping can re-fire. On orange, the
@@ -96,8 +111,7 @@ class AgentControl:
             obs = np.asarray(raw_obs, dtype=np.float32)
             with torch.no_grad():
                 out = self.policy(torch.from_numpy(obs).unsqueeze(0))
-                scores = out[0] if isinstance(out, tuple) else out  # PPO -> (logits, V); DQN -> Q
-                self._agent_action_idx = int(scores.squeeze(0).argmax().item())
+            self._agent_action_idx = self._greedy_action_idx(out)
         self._agent_frame += 1
         action = self._decode_discrete_action(self._agent_action_idx, allow_jump=is_decision_frame)
         return mirror_action(action) if self.team == "orange" else action

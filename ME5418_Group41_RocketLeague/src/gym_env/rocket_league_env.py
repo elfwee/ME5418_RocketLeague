@@ -13,7 +13,6 @@ from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
-from src.gym_env.gif_saver import GifSaver
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
 from src.config.gym_config import GymConfig
 
@@ -28,43 +27,21 @@ if GymConfig.gym_id not in gym.envs.registry:
 # (dir_x, dir_y): none, right, left, down, up, down-right, up-right, down-left, up-left
 
 
-def decode_action(action, discrete_action=True):
-    """Convert a gym action (index in [0, 36) or [dir, jump, boost]) into a CarAction."""
-    if discrete_action:
-        action = int(action)
-        direction = action // 4
-        jump = (action % 4) // 2
-        boost = action % 2
-    else:
-        direction, jump, boost = action
-    dir_x, dir_y = GymConfig.directions[direction]
-    return CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
-
-
 class RocketLeagueEnv(gym.Env):
-    metadata = {"render_modes": ["human"], "render_fps": SIM_HZ}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
 
-    BOT_TYPES = ("none", "heuristic_bot")
-
-    def __init__(self, render_mode=None, bot_type="none", discrete_action=True, gif_path=None):
-        """
-        bot_type:
-            - "none": no orange car
-            - "heuristic_bot": orange driven by HeuristicBot
-        gif_path: If set, each episode is recorded from kickoff and saved as a GIF to this
-            path when a goal is scored. May contain "{episode}" to keep one file per episode,
-            otherwise the file is overwritten. Works with or without render_mode="human".
-        """
-        if bot_type not in self.BOT_TYPES:
-            raise ValueError(f"Invalid bot_type: {bot_type}. Must be one of {self.BOT_TYPES}.")
+    def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
+        if bot_type not in ("none", "heuristic_bot"):
+            raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
 
         self.render_mode = render_mode
-        self.sim = Simulation(enable_orange=(bot_type != "none"), random_spawn=True)
-
-        if bot_type == "heuristic_bot":
-            self.opponent = CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
-        else:
-            self.opponent = None
+        self.bot_type = bot_type
+        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
+        self.orange_control = (
+            CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
+            if bot_type == "heuristic_bot"
+            else None
+        )
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
@@ -79,27 +56,20 @@ class RocketLeagueEnv(gym.Env):
         obs_dim = len(self.sim.get_state_norm(as_flat_array=True))
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
+        self.renderer = None
+        self.clock = None
         if self.render_mode == "human":
             pygame.init()
             pygame.display.set_caption("Rocket League Sideswipe 2D")
             self.renderer = Renderer(pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT)))
             self.clock = pygame.time.Clock()
-
-        self.gif_path = gif_path
-        self.gif_saver = GifSaver() if gif_path else None
-        self.episode = 0
-        if self.gif_saver is not None and self.render_mode != "human":
-            # Offscreen surface: frames are rendered without opening a window
+        elif self.render_mode == "rgb_array":
             pygame.init()
             self.renderer = Renderer(pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)))
-
-    @staticmethod
-    def observe(sim):
-        """Observation of ``sim`` as this env sees it (used by the agent to play on any sim)."""
-        return np.asarray(sim.get_state_norm(as_flat_array=True), dtype=np.float32)
+            self.clock = pygame.time.Clock()
 
     def _get_obs(self):
-        return self.observe(self.sim)
+        return np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -109,43 +79,33 @@ class RocketLeagueEnv(gym.Env):
 
         random_spawn = options.get("random_spawn", None) if options else None
         self.sim.reset(reset_scores=True, random_spawn=random_spawn)
-        if self.opponent is not None:
-            self.opponent.reset()
+        if self.orange_control is not None:
+            self.orange_control.reset()
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
         self.render()
-        if self.gif_saver is not None:
-            self.episode += 1
-            self.gif_saver.clear()
-            self._capture_frame(force=True)
         return self._get_obs(), {}
 
     def step(self, action):
-        car_action = decode_action(action, self.discrete_action)
-        action_orange = self.opponent.get_action() if self.opponent is not None else CarAction()
+        if self.discrete_action:
+            direction = action // 4
+            jump = (action % 4) // 2
+            boost = action % 2
+        else:
+            direction, jump, boost = action
+        dir_x, dir_y = GymConfig.directions[direction]
+        car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
+
+        action_orange = (
+            self.orange_control.get_action()
+            if (self.orange_control is not None and self.sim.orange_car is not None)
+            else CarAction()
+        )
         self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=action_orange)
         reward, terminated = self._calculate_reward()
         self.render()
-        info = {}
-        if self.gif_saver is not None:
-            if self.sim.goal_scored_this_step is not None:
-                # The sim resets to kickoff in the same step a goal is scored, so the
-                # current state is not captured; the last buffered frame is the goal.
-                path = self.gif_path.format(episode=self.episode)
-                if self.gif_saver.save(path):
-                    info["gif_path"] = path
-                self.gif_saver.clear()
-            else:
-                self._capture_frame()
-        return self._get_obs(), reward, terminated, not self.isopen, info
-
-    def _capture_frame(self, force=False):
-        if not self.isopen:
-            return
-        if self.render_mode != "human":
-            self.renderer.render(self.sim)  # human mode already drew this frame in render()
-        self.gif_saver.capture(self.renderer.screen, force=force)
+        return self._get_obs(), reward, terminated, not self.isopen, {}
 
     def _calculate_reward(self):
         state = self.sim.get_state_norm()
@@ -189,28 +149,40 @@ class RocketLeagueEnv(gym.Env):
         return reward, False
 
     def render(self):
-        if self.render_mode != "human" or not self.isopen:
-            return
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                self.isopen = False
-                return
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
-                    self.reset()
-                elif event.key == pygame.K_b:
-                    self.sim.set_orange_enabled(not self.sim.enable_orange, is_bot=True)
-                elif event.key == pygame.K_l:
-                    self.renderer.show_raycasts = not self.renderer.show_raycasts
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                self.renderer.handle_click(event.pos)
-        self.renderer.render(self.sim)
-        pygame.display.flip()
-        self.clock.tick(SIM_HZ)
+        if not self.isopen:
+            return None
+        if self.render_mode == "human":
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    self.isopen = False
+                    return None
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r:
+                        self.reset()
+                    elif event.key == pygame.K_b:
+                        self.sim.set_orange_enabled(not self.sim.enable_orange, is_bot=True)
+                    elif event.key == pygame.K_l:
+                        self.renderer.show_raycasts = not self.renderer.show_raycasts
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.renderer.handle_click(event.pos)
+            self.renderer.render(self.sim)
+            pygame.display.flip()
+            self.clock.tick(SIM_HZ)
+            return None
+        elif self.render_mode == "rgb_array":
+            return self.get_frame()
+        return None
+
+    def get_frame(self):
+        """Capture the current visual frame as an RGB numpy array (H, W, 3)."""
+        if self.renderer is not None:
+            self.renderer.render(self.sim)
+            return np.transpose(pygame.surfarray.array3d(self.renderer.screen), (1, 0, 2))
+        return None
 
     def close(self):
         self.isopen = False
-        if (self.render_mode == "human" or self.gif_saver is not None) and pygame.get_init():
+        if self.render_mode in ("human", "rgb_array") and pygame.get_init():
             pygame.quit()
 
 
@@ -222,10 +194,10 @@ def my_check_env():
     print("Environment check passed successfully!")
 
 
-def demo_gym(gif_path=None):
+def demo_gym():
     my_check_env()
     bot_type = "heuristic_bot" if ENABLE_ORANGE_CAR else "none"
-    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type, gif_path=gif_path)
+    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type)
 
     obs, info = env.reset()
     total_reward = 0.0

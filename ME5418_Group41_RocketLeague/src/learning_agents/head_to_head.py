@@ -50,7 +50,7 @@ def play_head_to_head(
     else:
         orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
 
-    if orange_model is None:
+    if blue_model is None:
         blue = CarControl(control_type="heuristic_bot", team = "blue", sim=sim)
     else:
         blue = AgentControl(team="blue", sim=sim, model_path=blue_model)

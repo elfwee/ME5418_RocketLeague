@@ -72,6 +72,9 @@ python -m src --train --ppo
 # Optional DQN ablation variants:
 python -m src --train --double_dqn
 python -m src --train --dqn
+
+# To start from a checkpoint for training
+python -m src --train --training_architecture --model_path path_to_model.pt
 ```
 
 #### Evaluate a Trained Learning Agent
@@ -86,13 +89,30 @@ python -m src --eval --ppo
 python -m src --eval --ppo --render
 ```
 
+#### Plot Learning Curves & Dashboards
+
+```bash
+# Auto-discover runs/ metrics and generate multi-algorithm comparative curves
+python -m src --plot
+
+# Generate a 4-panel dashboard for a specific agent run
+python -m src --plot --dashboard runs/metrics_ppo.csv
+```
+
 ### Step 4: Interactive Play & Component Demos
 
 #### Play the game interactively
 
 ```bash
-# Play interactively with keyboard controls
+# Play interactively as Blue car vs Orange Heuristic Bot (default)
 python -m src --play
+python -m src --play --blue
+
+# Play interactively as Orange car vs Blue Heuristic Bot
+python -m src --play --orange
+
+# Watch bot-vs-bot match (Blue Heuristic Bot vs Orange Heuristic Bot)
+python -m src --play --bot-vs-bot
 
 # Run headless simulation benchmark
 python -m src --play --headless

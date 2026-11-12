@@ -1,11 +1,13 @@
 """
 Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Evaluation Pipeline.
 
-Designed for a controlled, head-to-head comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
-- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`PPO` in `src/neural_nets/ppo.py`).
+Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
+comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
+- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
-- Shared learning rate (`lr = 3e-4`); PPO uses its own `gamma`, minibatch size, reward scaling,
-  target-KL early stopping and LR annealing (see `PPOConfig`).
+- Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
+- On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
+  and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
 - Identical logging, checkpointing (`runs/model_ppo.pt`), and 100-episode rolling metrics (`runs/graph_ppo.png`).
 """
 
@@ -15,7 +17,6 @@ import itertools
 import os
 from pathlib import Path
 import sys
-from typing import Callable
 
 import gymnasium as gym
 import matplotlib
@@ -32,7 +33,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv
-from src.neural_nets.ppo import PPO
+from src.neural_nets.ppo_torch import ActorCritic
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RUNS_DIR = ROOT_DIR / PPOConfig.runs_dir
@@ -47,7 +48,7 @@ class PPOAgent:
     """Proximal Policy Optimization (PPO) Learning Agent supporting training and validation/evaluation.
 
     Key algorithmic components:
-        1. Actor-Critic Architecture (`PPO` from `src.neural_nets.ppo`):
+        1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
            Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
            Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
         2. Action Repeat with Edge-Triggered Jump Release (`_step_with_action_repeat`):
@@ -57,53 +58,36 @@ class PPOAgent:
            Terminal goal states (`terminated=True`) bootstrap to 0.0, whereas timeout states
            (`truncated=True`) bootstrap from the critic's value estimate `V(s_timeout)` before reset.
         4. Clipped Surrogate Objective (`optimize`):
-           Performs `update_epochs` of shuffled minibatch updates with ratio clipping `clip_coef`,
-           value MSE loss, entropy bonus, and global gradient norm clipping.
+           Normalizes advantages across the entire 4,096-step rollout batch and performs `update_epochs` (6)
+           of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value MSE loss,
+           entropy bonus, and global gradient norm clipping.
     """
 
-    def __init__(
-        self,
-        hyperparameter_set: str = PPOConfig.hyperparameter_set,
-        yaml_path: str | Path | None = None,
-    ):
-        hyperparameters = {}
-        if yaml_path is not None and Path(yaml_path).exists():
-            import yaml
-
-            with open(yaml_path, "r") as file:
-                all_sets = yaml.safe_load(file) or {}
-                hyperparameters = all_sets.get(hyperparameter_set, {})
-
+    def __init__(self, hyperparameter_set: str = PPOConfig.hyperparameter_set):
         self.hyperparameter_set = hyperparameter_set
         self.env_id = GymConfig.gym_id
-        self.bot = hyperparameters.get("bot", PPOConfig.bot_type == "heuristic_bot")
-        self.fcl_nodes = hyperparameters.get("fcl_nodes", PPOConfig.hidden_size)
-        self.learning_rate = hyperparameters.get("learning_rate", PPOConfig.learning_rate)
-        self.discount_factor_g = hyperparameters.get("discount_factor_g", PPOConfig.discount_factor)
-        self.gae_lambda = hyperparameters.get("gae_lambda", PPOConfig.gae_lambda)
-        self.clip_coef = hyperparameters.get("clip_coef", PPOConfig.clip_coef)
-        self.value_loss_coef = hyperparameters.get("value_loss_coef", PPOConfig.value_loss_coef)
-        self.entropy_coef = hyperparameters.get("entropy_coef", PPOConfig.entropy_coef)
-        self.max_grad_norm = hyperparameters.get("max_grad_norm", PPOConfig.max_grad_norm)
-        self.reward_scale = hyperparameters.get("reward_scale", PPOConfig.reward_scale)
-        self.target_kl = hyperparameters.get("target_kl", PPOConfig.target_kl)
-        self.anneal_lr = hyperparameters.get("anneal_lr", PPOConfig.anneal_lr)
-        self.lr_anneal_steps = hyperparameters.get("lr_anneal_steps", PPOConfig.lr_anneal_steps)
-        self.lr_min_frac = hyperparameters.get("lr_min_frac", PPOConfig.lr_min_frac)
+        self.bot_type = PPOConfig.bot_type
+        self.fcl_nodes = PPOConfig.hidden_size
+        self.learning_rate = PPOConfig.learning_rate
+        self.discount_factor_g = PPOConfig.discount_factor
+        self.gae_lambda = PPOConfig.gae_lambda
+        self.clip_coef = PPOConfig.clip_coef
+        self.value_loss_coef = PPOConfig.value_loss_coef
+        self.entropy_coef = PPOConfig.entropy_coef
+        self.max_grad_norm = PPOConfig.max_grad_norm
+        self.target_kl = getattr(PPOConfig, "target_kl", 0.02)
 
-        self.action_repeat = hyperparameters.get("action_repeat", PPOConfig.action_repeat)
-        self.rollout_steps = hyperparameters.get("rollout_steps", PPOConfig.rollout_steps)
-        self.update_epochs = hyperparameters.get("update_epochs", PPOConfig.update_epochs)
-        self.mini_batch_size = hyperparameters.get("mini_batch_size", PPOConfig.minibatch_size)
-        self.stop_on_reward = hyperparameters.get("stop_on_reward", PPOConfig.stop_on_reward)
+        self.action_repeat = PPOConfig.action_repeat
+        self.rollout_steps = PPOConfig.rollout_steps
+        self.update_epochs = PPOConfig.update_epochs
+        self.mini_batch_size = PPOConfig.minibatch_size
 
         self.optimizer = None
-        self.policy_net = None  # persisted across training run() calls (e.g. curriculum stages)
-        self.total_steps = 0  # decisions across all run() calls; drives LR annealing
 
         self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
 
     def _compute_gae(
         self,
@@ -139,26 +123,29 @@ class PPOAgent:
         old_log_probs: torch.Tensor,
         returns: torch.Tensor,
         advantages: torch.Tensor,
-        policy_net: PPO,
-    ) -> tuple[float, float, float]:
-        """Run up to `update_epochs` of shuffled minibatch PPO clipped surrogate updates.
+        policy_net: ActorCritic,
+    ) -> tuple[float, float, float, float]:
+        """Run `update_epochs` of shuffled minibatch PPO clipped surrogate updates.
 
-        Advantages are normalized once over the whole rollout. If `target_kl` is set, updates stop
-        early once the approximate KL to the rollout policy exceeds `1.5 * target_kl`.
-        Returns (mean loss, mean entropy, last approx KL).
+        Returns:
+            (mean_total_loss, mean_entropy, mean_value_loss, mean_approx_kl)
         """
         batch_size = states.size(0)
         total_loss_sum = 0.0
         entropy_sum = 0.0
+        value_loss_sum = 0.0
+        kl_sum = 0.0
         num_mb = 0
-        approx_kl = 0.0
 
+        # Normalize advantages across the entire 4,096-sample rollout batch before minibatch sampling
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for _ in range(self.update_epochs):
+        for epoch in range(self.update_epochs):
             perm = torch.randperm(batch_size, device=device)
-            stop_early = False
+            epoch_kl_sum = 0.0
+            epoch_mb_count = 0
+
             for start in range(0, batch_size, self.mini_batch_size):
                 idx = perm[start : start + self.mini_batch_size]
                 mb_states = states[idx]
@@ -167,15 +154,17 @@ class PPOAgent:
                 mb_returns = returns[idx]
                 mb_adv = advantages[idx]
 
-                _, new_log_probs, entropy, new_values = policy_net(mb_states, mb_actions)
-                log_ratio = new_log_probs - mb_old_log_probs
-                ratio = torch.exp(log_ratio)
+                _, new_log_probs, entropy, new_values = policy_net.get_action_and_value(mb_states, mb_actions)
+                logratio = new_log_probs - mb_old_log_probs
+                ratio = torch.exp(logratio)
 
+                # Non-negative, minimum-variance KL divergence approximation
                 with torch.no_grad():
-                    approx_kl = float(((ratio - 1.0) - log_ratio).mean().item())
-                if self.target_kl is not None and approx_kl > 1.5 * self.target_kl:
-                    stop_early = True
-                    break
+                    approx_kl = ((ratio - 1.0) - logratio).mean()
+                    kl_val = float(approx_kl.item())
+                    epoch_kl_sum += kl_val
+                    kl_sum += kl_val
+                    epoch_mb_count += 1
 
                 # Clipped surrogate objective
                 pg_loss1 = -mb_adv * ratio
@@ -194,14 +183,18 @@ class PPOAgent:
 
                 total_loss_sum += float(loss.item())
                 entropy_sum += float(entropy_loss.item())
+                value_loss_sum += float(v_loss.item())
                 num_mb += 1
-            if stop_early:
+
+            # Early stop if average KL divergence across this epoch exceeded target threshold
+            mean_epoch_kl = epoch_kl_sum / max(epoch_mb_count, 1)
+            if self.target_kl is not None and mean_epoch_kl > self.target_kl:
                 break
 
         denom = max(num_mb, 1)
-        return total_loss_sum / denom, entropy_sum / denom, approx_kl
+        return total_loss_sum / denom, entropy_sum / denom, value_loss_sum / denom, kl_sum / denom
 
-    def _step_with_action_repeat(self, env: gym.Env, action_idx: int):
+    def _step_with_action_repeat(self, env: gym.Env, action):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
         edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
         total_reward = 0.0
@@ -211,11 +204,14 @@ class PPOAgent:
         next_state = None
 
         # Clear jump bit on repeat frames > 0 so _prev_jump_action resets between decisions
-        jump_bit = (action_idx % 4) // 2
-        held_action_idx = (action_idx - 2) if jump_bit == 1 else action_idx
+        if isinstance(action, (list, tuple, np.ndarray)):
+            held_action = [int(action[0]), 0, int(action[2])]
+        else:
+            jump_bit = (action % 4) // 2
+            held_action = (action - 2) if jump_bit == 1 else action
 
         for sub in range(max(1, self.action_repeat)):
-            act = action_idx if sub == 0 else held_action_idx
+            act = action if sub == 0 else held_action
             next_state, reward, terminated, truncated, info = env.step(act)
             total_reward += float(reward)
             if terminated or truncated or not env.unwrapped.isopen:
@@ -223,31 +219,119 @@ class PPOAgent:
 
         return next_state, total_reward, terminated, truncated, info
 
-    def save_graph(self, rewards_per_episode: list[float], entropy_history: list[float]):
-        """Plot and save 100-episode rolling mean reward and policy entropy curves."""
+    def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
+        """Compile and save a list of RGB frames as an optimized animated GIF."""
+        from PIL import Image
+
+        if not frames:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Downscale by 50% (700x360) for smooth playback and lightweight GIF file size
+        pil_images = [
+            Image.fromarray(f).resize((700, 360), Image.Resampling.BILINEAR)
+            for f in frames
+        ]
+        pil_images[0].save(
+            str(path),
+            save_all=True,
+            append_images=pil_images[1:],
+            duration=int(1000 / fps),
+            loop=0,
+            optimize=True,
+        )
+        print(f"[PPO Eval] Saved evaluation GIF ({len(pil_images)} frames, {fps} FPS) to: {path}")
+
+    def save_graph(
+        self,
+        rewards_per_episode: list[float],
+        entropy_history: list[float],
+        steps_per_episode: list[int] | None = None,
+        goals_per_episode: list[int] | None = None,
+        value_loss_history: list[float] | None = None,
+    ):
+        """Plot and save a comprehensive 2x2 training dashboard.
+
+        Subplots:
+            1. Sample Efficiency: 100-episode rolling mean reward & episodic return vs. Environment Steps.
+            2. Task Competency: 100-episode rolling goal conversion rate (%) vs. Environment Steps.
+            3. Exploration Dynamics: Policy entropy H(pi) vs. Environment Steps.
+            4. Critic Optimization Health: Critic value MSE loss (with 50-ep smoothing) vs. Environment Steps.
+        """
         import matplotlib.pyplot as plt
 
-        mean_rewards = np.zeros(len(rewards_per_episode))
-        for i in range(len(rewards_per_episode)):
+        n = len(rewards_per_episode)
+        if n == 0:
+            return
+
+        x = np.array(
+            steps_per_episode if steps_per_episode is not None and len(steps_per_episode) == n else list(range(1, n + 1))
+        )
+        x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
+
+        # 100-episode rolling mean reward
+        mean_rewards = np.zeros(n)
+        for i in range(n):
             mean_rewards[i] = np.mean(rewards_per_episode[max(0, i - 99) : i + 1])
 
-        plt.figure(figsize=(10, 4))
-        plt.subplot(1, 2, 1)
-        plt.title(f"{self.hyperparameter_set} - Mean Reward (Last 100 Episodes)")
-        plt.xlabel("Episodes")
-        plt.ylabel("Mean Reward (Last 100 Episodes)")
-        plt.plot(mean_rewards, label="Mean Reward")
-        plt.grid(True, alpha=0.3)
+        # 100-episode rolling goal rate (%)
+        goal_rates = np.zeros(n)
+        has_goals = goals_per_episode is not None and len(goals_per_episode) == n
+        if has_goals:
+            for i in range(n):
+                goal_rates[i] = np.mean(goals_per_episode[max(0, i - 99) : i + 1]) * 100.0
 
-        plt.subplot(1, 2, 2)
-        plt.title(f"{self.hyperparameter_set} - Policy Entropy")
-        plt.xlabel("Episodes")
-        plt.ylabel("Policy Entropy")
-        plt.plot(entropy_history, label="Entropy", color="orange")
-        plt.grid(True, alpha=0.3)
+        fig, axs = plt.subplots(2, 2, figsize=(14, 9))
 
+        # 1. Sample Efficiency
+        axs[0, 0].plot(x, rewards_per_episode, color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
+        axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
+        axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+        axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
+        axs[0, 0].set_xlabel(x_label)
+        axs[0, 0].set_ylabel("Episodic Return")
+        axs[0, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 0].legend(loc="upper left", framealpha=0.8)
+
+        # 2. Objective Goal Conversion Rate (%)
+        if has_goals:
+            axs[0, 1].plot(x, goal_rates, color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
+            axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
+            axs[0, 1].set_ylim([-2, 105])
+        axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
+        axs[0, 1].set_xlabel(x_label)
+        axs[0, 1].set_ylabel("Goal Rate (%)")
+        axs[0, 1].grid(True, alpha=0.3, linestyle="--")
+        axs[0, 1].legend(loc="upper left", framealpha=0.8)
+
+        # 3. Policy Entropy
+        entropy_arr = np.array(entropy_history) if entropy_history is not None else np.array([])
+        if len(entropy_arr) == n:
+            axs[1, 0].plot(x, entropy_arr, color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
+        elif len(entropy_arr) > 0:
+            axs[1, 0].plot(entropy_arr, color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
+        axs[1, 0].set_title("Exploration Dynamics (Policy Entropy)", fontsize=11, fontweight="bold")
+        axs[1, 0].set_xlabel(x_label)
+        axs[1, 0].set_ylabel("Entropy H(pi)")
+        axs[1, 0].grid(True, alpha=0.3, linestyle="--")
+        axs[1, 0].legend(loc="upper right", framealpha=0.8)
+
+        # 4. Critic Value MSE Loss
+        if value_loss_history is not None and len(value_loss_history) == n:
+            v_losses = np.array(value_loss_history)
+            axs[1, 1].plot(x, v_losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw Value Loss")
+            smooth_loss = np.zeros(n)
+            for i in range(n):
+                smooth_loss[i] = np.mean(v_losses[max(0, i - 49) : i + 1])
+            axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
+            axs[1, 1].legend(loc="upper right", framealpha=0.8)
+        axs[1, 1].set_title("Critic Optimization Health (Value Loss)", fontsize=11, fontweight="bold")
+        axs[1, 1].set_xlabel(x_label)
+        axs[1, 1].set_ylabel("Value MSE Loss")
+        axs[1, 1].grid(True, alpha=0.3, linestyle="--")
+
+        fig.suptitle(f"PPO Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE)
+        plt.savefig(self.GRAPH_FILE, dpi=150)
         plt.close()
 
     def run(
@@ -257,50 +341,60 @@ class PPOAgent:
         max_episode_steps: int | None = None,
         num_episodes: int | None = None,
         model_path: str | Path | None = None,
-        bot_type: str | None = None,
-        stop_fn: Callable[[list[int]], bool] | None = None,
+        save_gif: bool = False,
+        gif_path: str | Path | None = None,
     ) -> dict[str, float]:
-        """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`).
-
-        Args:
-            bot_type: Overrides the configured opponent ("none" or "heuristic_bot") for this run.
-            stop_fn: Training only. Called after every episode with the per-episode goal history
-                     (1 = scored); returning True ends the run early.
-        """
-        bot_type = bot_type if bot_type is not None else ("heuristic_bot" if self.bot else "none")
+        """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         make_kwargs = {}
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
 
+        if render:
+            render_mode = "human"
+        elif save_gif:
+            render_mode = "rgb_array"
+        else:
+            render_mode = None
+
+        factored = getattr(PPOConfig, "factored_action", False)
         env = gym.make(
             self.env_id,
-            render_mode="human" if render else None,
-            bot_type=bot_type,
-            discrete_action=True,
+            render_mode=render_mode,
+            bot_type=self.bot_type,
+            discrete_action=not factored,
             **make_kwargs,
         )
 
         num_states = env.observation_space.shape[0]
-        num_actions = env.action_space.n
+        action_dim = list(env.action_space.nvec) if factored else env.action_space.n
 
         rewards_per_episode = []
         goals_per_episode = []
 
-        if is_training and self.policy_net is not None:
-            policy_net = self.policy_net  # continue training the same weights (e.g. next curriculum stage)
-        else:
-            policy_net = PPO(num_states, num_actions, self.fcl_nodes).to(device)
-            if is_training:
-                self.policy_net = policy_net
+        policy_net = ActorCritic(num_states, action_dim, self.fcl_nodes).to(device)
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
-            if self.optimizer is None:
-                self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
+            if model_path is not None:
+                if os.path.exists(ckpt_file):
+                    state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+                    policy_net.load_state_dict(state_dict)
+                    print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
+                else:
+                    print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
+            else: 
+                print(f"[PPO Train] Training from scratch; no model checkpoint specified.")
+            self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
-            current_entropy = float(np.log(num_actions))
-            current_kl = 0.0
+            steps_history = []
+            value_loss_history = []
+            current_v_loss = 0.0
+            current_entropy = (
+                float(sum(np.log(d) for d in action_dim))
+                if isinstance(action_dim, list)
+                else float(np.log(action_dim))
+            )
             best_mean_reward = float("-inf")
             last_graph_update_time = datetime.now()
 
@@ -310,7 +404,7 @@ class PPOAgent:
 
             print(
                 f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-                f"Minibatch={self.mini_batch_size} | Bot={bot_type} | Model={ckpt_file}"
+                f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
             )
         else:
             if os.path.exists(ckpt_file):
@@ -322,6 +416,9 @@ class PPOAgent:
             policy_net.eval()
             step_count = 0
             current_entropy = 0.0
+
+        gif_frames = []
+        gif_saved = False
 
         episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
 
@@ -338,18 +435,33 @@ class PPOAgent:
                 episode_reward = 0.0
                 scored_goal = 0
 
-                while (not (terminated or truncated)) and episode_reward < self.stop_on_reward:
+                while not (terminated or truncated):
                     with torch.no_grad():
                         if is_training:
-                            action, log_prob, _, value = policy_net(state.unsqueeze(0))
-                            action_idx = int(action.item())
-                        else:
-                            logits, _ = policy_net.logits_and_value(state.unsqueeze(0))
-                            action = logits.squeeze(0).argmax()
-                            action_idx = int(action.item())
+                            action, log_prob, _, value = policy_net.get_action_and_value(state.unsqueeze(0))
+                            action_for_env = (
+                                action.squeeze(0).cpu().numpy().tolist()
+                                if policy_net.is_factored
+                                else int(action.item())
+                            )
 
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_idx)
+                            # Backfill the previous step's next_value using this step's already-computed value
+                            if (len(buf_next_values) > 0 and buf_next_values[-1] is None):
+                                buf_next_values[-1] = value.squeeze(0)
+                        else:
+                            logits, _ = policy_net(state.unsqueeze(0))
+                            if policy_net.is_factored:
+                                action_for_env = [int(l.squeeze(0).argmax().item()) for l in logits]
+                            else:
+                                action_for_env = int(logits.squeeze(0).argmax().item())
+
+                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_for_env)
                     done = terminated or truncated
+
+                    if not is_training and save_gif and not gif_saved and len(gif_frames) < 1200:
+                        frame = env.unwrapped.get_frame()
+                        if frame is not None:
+                            gif_frames.append(frame)
 
                     episode_reward += reward
                     if info.get("is_success", False) or (terminated and reward > 0.0):
@@ -361,26 +473,35 @@ class PPOAgent:
                         with torch.no_grad():
                             # Truncation-aware bootstrapping:
                             # - Terminal goal state (`terminated=True`) -> bootstrap 0.0
-                            # - Non-terminal or timeout state (`terminated=False`) -> bootstrap V(new_state)
+                            # - Timeout state (`truncated=True`) -> evaluate V(new_state) once before reset                   
+                            # - Non-terminal (`done=False`) -> defer forward pass to the next step
                             if terminated:
                                 next_val = torch.tensor(0.0, dtype=torch.float32, device=device)
+                            elif truncated:
+                                with torch.no_grad():
+                                    _, next_val = policy_net(new_state.unsqueeze(0))
+                                    next_val = next_val.squeeze(0)
                             else:
-                                _, next_val = policy_net.logits_and_value(new_state.unsqueeze(0))
-                                next_val = next_val.squeeze(0)
+                                next_val = None
 
                         buf_states.append(state)
                         buf_actions.append(action.squeeze(0))
                         buf_log_probs.append(log_prob.squeeze(0))
                         buf_values.append(value.squeeze(0))
                         buf_next_values.append(next_val)
-                        buf_rewards.append(torch.tensor(reward * self.reward_scale, dtype=torch.float32, device=device))
+                        buf_rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
                         buf_dones.append(torch.tensor(float(done), dtype=torch.float32, device=device))
 
                         step_count += 1
-                        self.total_steps += 1
 
                         # Perform PPO multi-epoch minibatch update once rollout horizon is reached
                         if len(buf_states) >= self.rollout_steps:
+                            # if the rollout cut off mid-episode, bootstrap the tail step's next_value
+                            if buf_next_values[-1] is None:
+                                with torch.no_grad():
+                                    _, tail_val = policy_net(new_state.unsqueeze(0))
+                                    buf_next_values[-1] = tail_val.squeeze(0)
+
                             states_t = torch.stack(buf_states)
                             actions_t = torch.stack(buf_actions)
                             old_log_probs_t = torch.stack(buf_log_probs)
@@ -389,12 +510,10 @@ class PPOAgent:
                             rewards_t = torch.stack(buf_rewards)
                             dones_t = torch.stack(buf_dones)
 
-                            advantages_t, returns_t = self._compute_gae(rewards_t, values_t, next_values_t, dones_t)
-                            if self.anneal_lr:
-                                frac = max(self.lr_min_frac, 1.0 - self.total_steps / self.lr_anneal_steps)
-                                for group in self.optimizer.param_groups:
-                                    group["lr"] = self.learning_rate * frac
-                            _, current_entropy, current_kl = self.optimize(
+                            advantages_t, returns_t = self._compute_gae(
+                                rewards_t, values_t, next_values_t, dones_t
+                            )
+                            _, current_entropy, current_v_loss, _ = self.optimize(
                                 states_t,
                                 actions_t,
                                 old_log_probs_t,
@@ -418,23 +537,41 @@ class PPOAgent:
 
                 rewards_per_episode.append(episode_reward)
                 goals_per_episode.append(scored_goal)
+
+                if not is_training and save_gif and not gif_saved and len(gif_frames) > 0:
+                    out_gif = (
+                        gif_path if gif_path is not None else os.path.join(RUNS_DIR, f"eval_{self.hyperparameter_set}.gif")
+                    )
+                    self._save_gif(gif_frames, out_gif)
+                    gif_saved = True
                 mean_reward_100 = float(np.mean(rewards_per_episode[-100:]))
                 goal_rate_100 = float(np.mean(goals_per_episode[-100:])) * 100.0
 
                 print(
                     f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
                     f"Mean(100) = {mean_reward_100:7.2f} | GoalRate(100) = {goal_rate_100:5.1f}% | "
-                    f"Ent = {current_entropy:.3f} | KL = {current_kl:.4f} | "
-                    f"LR = {self.optimizer.param_groups[0]['lr']:.2e} | Steps = {step_count}"
+                    f"Ent = {current_entropy:.3f} | Steps = {step_count}"
                     if is_training
                     else f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
                     f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
                 )
 
                 if is_training:
+                    steps_history.append(step_count)
                     entropy_history.append(current_entropy)
+                    value_loss_history.append(current_v_loss)
 
-                    # Save best model based on 100-episode rolling mean reward (after 20-episode warmup, or on final episode of short runs)
+                    # Append metrics to CSV log for flexible offline plotting & evaluation
+                    write_header = not os.path.exists(self.METRICS_FILE) or os.path.getsize(self.METRICS_FILE) == 0
+                    with open(self.METRICS_FILE, "a", newline="") as f:
+                        if write_header:
+                            f.write("episode,step,reward,mean_reward_100,goal,goal_rate_100,entropy,value_loss\n")
+                        f.write(
+                            f"{episode},{step_count},{episode_reward:.4f},{mean_reward_100:.4f},"
+                            f"{scored_goal},{goal_rate_100:.2f},{current_entropy:.4f},{current_v_loss:.6f}\n"
+                        )
+
+                    # Save best model based on 100-episode rolling mean reward
                     should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
                         num_episodes is not None and episode == num_episodes - 1 and best_mean_reward == float("-inf")
                     )
@@ -449,21 +586,32 @@ class PPOAgent:
                         with open(self.LOG_FILE, "a") as log_file:
                             log_file.write(log_message + "\n")
 
-                        torch.save(policy_net.state_dict(), ckpt_file)
+                        # torch.save(policy_net.state_dict(), ckpt_file)
+                        torch.save(policy_net.state_dict(), self.MODEL_FILE)
 
                     current_time = datetime.now()
                     if current_time - last_graph_update_time > timedelta(seconds=10):
-                        self.save_graph(rewards_per_episode, entropy_history)
+                        self.save_graph(
+                            rewards_per_episode,
+                            entropy_history,
+                            steps_per_episode=steps_history,
+                            goals_per_episode=goals_per_episode,
+                            value_loss_history=value_loss_history,
+                        )
                         last_graph_update_time = current_time
 
                     if not env.unwrapped.isopen:
                         print("Exiting environment.")
                         break
-
-                    if stop_fn is not None and stop_fn(goals_per_episode):
-                        print(f"[PPO Train] stop_fn triggered at episode {episode}.")
-                        break
         finally:
+            if is_training and len(rewards_per_episode) > 0:
+                self.save_graph(
+                    rewards_per_episode,
+                    entropy_history,
+                    steps_per_episode=steps_history,
+                    goals_per_episode=goals_per_episode,
+                    value_loss_history=value_loss_history,
+                )
             env.close()
 
         return {
@@ -476,6 +624,7 @@ class PPOAgent:
 def train_ppo(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
+    model_path: str | Path | None = None,
     hyperparameter_set: str = PPOConfig.hyperparameter_set,
 ) -> dict[str, float]:
     """Train the PPO agent."""
@@ -485,6 +634,7 @@ def train_ppo(
         render=False,
         max_episode_steps=max_episode_steps,
         num_episodes=num_episodes,
+        model_path=model_path,
     )
 
 
@@ -494,16 +644,20 @@ def evaluate_ppo(
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
     hyperparameter_set: str = PPOConfig.hyperparameter_set,
+    save_gif: bool = False,
+    gif_path: str | Path | None = None,
 ) -> dict[str, float]:
     """Evaluate/validate a trained PPO agent."""
     agent = PPOAgent(hyperparameter_set=hyperparameter_set)
-    episodes = None if (render and num_episodes is None) else num_episodes
+    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
     return agent.run(
         is_training=False,
         render=render,
         max_episode_steps=max_episode_steps,
         num_episodes=episodes,
         model_path=model_path,
+        save_gif=save_gif,
+        gif_path=gif_path,
     )
 
 
@@ -520,11 +674,23 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true", help="Render the environment in a Pygame window")
     parser.add_argument("--episodes", type=int, default=None, help="Maximum number of episodes to run")
     parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
+    parser.add_argument("--gif", action="store_true", help="Record and save an animated GIF of the evaluation episode")
+    parser.add_argument("--gif_path", type=str, default=None, help="Optional custom output path for the GIF")
     args = parser.parse_args()
 
-    agent = PPOAgent(hyperparameter_set=args.hyperparameter_set)
     if args.train:
-        agent.run(is_training=True, render=args.render, num_episodes=args.episodes, model_path=args.model_path)
+        train_ppo(
+            num_episodes=args.episodes,
+            model_path=args.model_path,
+            hyperparameter_set=args.hyperparameter_set,
+        )
     else:
         eval_eps = args.episodes if args.episodes is not None else (None if args.render else PPOConfig.eval_episodes)
-        agent.run(is_training=False, render=args.render, num_episodes=eval_eps, model_path=args.model_path)
+        evaluate_ppo(
+            num_episodes=eval_eps,
+            render=args.render,
+            model_path=args.model_path,
+            hyperparameter_set=args.hyperparameter_set,
+            save_gif=args.gif,
+            gif_path=args.gif_path,
+        )
