@@ -38,6 +38,7 @@ class DQNConfig:
     runs_dir = "runs"
     hyperparameter_set = "dueling_ddqn"
 
+
 @dataclass
 class PPOConfig:
     # Architecture (matched 1-to-1 with Dueling DQN: 150,949 trainable parameters)
@@ -49,7 +50,7 @@ class PPOConfig:
 
     # Optimization & Returns
     learning_rate = 3e-4
-    discount_factor = 0.995  # ~200-decision (~13 s at 15 Hz) horizon; differs from DQNConfig (0.99)
+    discount_factor = 0.99  # ~200-decision (~13 s at 15 Hz) horizon;
     gae_lambda = 0.95
     clip_coef = 0.2
     value_loss_coef = 0.5
@@ -71,9 +72,8 @@ class PPOConfig:
     demo_rollout_steps = 32
 
     # Environment, Stopping & Checkpointing
-    bot_type = "none"  # "none" or "heuristic_bot"
+    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
     stop_on_reward = 100_000
     eval_episodes = 5
     runs_dir = "runs"
     hyperparameter_set = "ppo"
-
