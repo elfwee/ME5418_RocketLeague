@@ -113,7 +113,8 @@ class PPO(nn.Module):
     def compute_loss(self, obs, actions, old_log_prob, advantages, returns):
         """PPO clipped surrogate loss on a minibatch. Returns (loss, stats)."""
         _, new_log_prob, entropy, value = self.forward(obs, actions)
-        ratio = torch.exp(new_log_prob - old_log_prob)
+        log_ratio = new_log_prob - old_log_prob
+        ratio = torch.exp(log_ratio)
 
         # Clipped surrogate objective: L^CLIP = E[min(r_t * A_t, clip(r_t, 1 - eps, 1 + eps) * A_t)]
         unclipped = ratio * advantages
@@ -127,7 +128,8 @@ class PPO(nn.Module):
         loss = policy_loss + PPOConfig.value_loss_coef * value_loss - PPOConfig.entropy_coef * entropy_mean
 
         with torch.no_grad():
-            approx_kl = (old_log_prob - new_log_prob).mean()
+            # Low-variance, non-negative KL(old || new) estimator: E[(r - 1) - log r]
+            approx_kl = ((ratio - 1.0) - log_ratio).mean()
         stats = {
             "loss": loss.item(),
             "policy_loss": policy_loss.item(),
