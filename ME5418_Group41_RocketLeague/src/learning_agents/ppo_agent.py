@@ -2,7 +2,7 @@
 Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Evaluation Pipeline.
 
 Designed for a controlled, head-to-head comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
-- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
+- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`PPO` in `src/neural_nets/ppo.py`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
 - Shared learning rate (`lr = 3e-4`); PPO uses its own `gamma`, minibatch size, reward scaling,
   target-KL early stopping and LR annealing (see `PPOConfig`).
@@ -32,7 +32,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv
-from src.neural_nets.ppo_torch import ActorCritic
+from src.neural_nets.ppo import PPO
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RUNS_DIR = ROOT_DIR / PPOConfig.runs_dir
@@ -47,7 +47,7 @@ class PPOAgent:
     """Proximal Policy Optimization (PPO) Learning Agent supporting training and validation/evaluation.
 
     Key algorithmic components:
-        1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
+        1. Actor-Critic Architecture (`PPO` from `src.neural_nets.ppo`):
            Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
            Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
         2. Action Repeat with Edge-Triggered Jump Release (`_step_with_action_repeat`):
@@ -139,7 +139,7 @@ class PPOAgent:
         old_log_probs: torch.Tensor,
         returns: torch.Tensor,
         advantages: torch.Tensor,
-        policy_net: ActorCritic,
+        policy_net: PPO,
     ) -> tuple[float, float, float]:
         """Run up to `update_epochs` of shuffled minibatch PPO clipped surrogate updates.
 
@@ -167,7 +167,7 @@ class PPOAgent:
                 mb_returns = returns[idx]
                 mb_adv = advantages[idx]
 
-                _, new_log_probs, entropy, new_values = policy_net.get_action_and_value(mb_states, mb_actions)
+                _, new_log_probs, entropy, new_values = policy_net(mb_states, mb_actions)
                 log_ratio = new_log_probs - mb_old_log_probs
                 ratio = torch.exp(log_ratio)
 
@@ -289,7 +289,7 @@ class PPOAgent:
         if is_training and self.policy_net is not None:
             policy_net = self.policy_net  # continue training the same weights (e.g. next curriculum stage)
         else:
-            policy_net = ActorCritic(num_states, num_actions, self.fcl_nodes).to(device)
+            policy_net = PPO(num_states, num_actions, self.fcl_nodes).to(device)
             if is_training:
                 self.policy_net = policy_net
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
@@ -341,10 +341,10 @@ class PPOAgent:
                 while (not (terminated or truncated)) and episode_reward < self.stop_on_reward:
                     with torch.no_grad():
                         if is_training:
-                            action, log_prob, _, value = policy_net.get_action_and_value(state.unsqueeze(0))
+                            action, log_prob, _, value = policy_net(state.unsqueeze(0))
                             action_idx = int(action.item())
                         else:
-                            logits, _ = policy_net(state.unsqueeze(0))
+                            logits, _ = policy_net.logits_and_value(state.unsqueeze(0))
                             action = logits.squeeze(0).argmax()
                             action_idx = int(action.item())
 
@@ -365,7 +365,7 @@ class PPOAgent:
                             if terminated:
                                 next_val = torch.tensor(0.0, dtype=torch.float32, device=device)
                             else:
-                                _, next_val = policy_net(new_state.unsqueeze(0))
+                                _, next_val = policy_net.logits_and_value(new_state.unsqueeze(0))
                                 next_val = next_val.squeeze(0)
 
                         buf_states.append(state)

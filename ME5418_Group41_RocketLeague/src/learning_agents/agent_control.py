@@ -43,7 +43,7 @@ class AgentControl:
 
     @staticmethod
     def _load_policy(model_path: str | Path):
-        """Load a PPO ActorCritic or (Dueling) DQN state_dict for CPU inference, inferring the
+        """Load a PPO actor-critic or (Dueling) DQN state_dict for CPU inference, inferring the
         architecture from the checkpoint's layer names and shapes."""
         import torch
 
@@ -52,9 +52,9 @@ class AgentControl:
         hidden_dim = state_dict["fc1.weight"].shape[0]
 
         if "actor.weight" in state_dict:
-            from src.neural_nets.ppo_torch import ActorCritic
+            from src.neural_nets.ppo import PPO
 
-            net = ActorCritic(state_dim, state_dict["actor.weight"].shape[0], hidden_dim)
+            net = PPO(state_dim, state_dict["actor.weight"].shape[0], hidden_dim)
         else:
             from src.neural_nets.dueling_ddqn_torch import DQN
 

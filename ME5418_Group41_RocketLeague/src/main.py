@@ -13,7 +13,7 @@ from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
 from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 from src.neural_nets.a2c_torch import test_a2c_torch
-from src.neural_nets.ppo_torch import run_ppo_network
+from src.neural_nets.ppo import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.learning_agents.head_to_head import play_head_to_head

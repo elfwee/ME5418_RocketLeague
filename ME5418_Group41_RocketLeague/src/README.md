@@ -22,7 +22,7 @@ src/
 │
 ├── neural_nets/                 # Neural network architectures & forward/backward pass demos
 │   ├── dueling_ddqn_torch.py    # DQN / Double DQN / Dueling Double DQN in PyTorch
-│   └── ppo_torch.py             # PPO Actor-Critic network (Policy + Value heads) in PyTorch
+│   └── ppo.py                   # PPO Actor-Critic network (Policy + Value heads) in PyTorch
 │
 ├── learning_agents/             # Complete RL learning agents (training, evaluation, checkpointing)
 │   ├── __init__.py
