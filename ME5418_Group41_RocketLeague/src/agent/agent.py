@@ -10,7 +10,6 @@ import torch
 
 from src.config.gym_config import GymConfig
 from src.gym_env.rocket_league_env import decode_action  # also registers the gym env
-import src.gym_env.bentjh_gym  # noqa: F401  registers the bentjh gym env
 from src.neural_nets.a2c_torch import A2C
 
 CSV_FIELDS = ["episode", "total_steps", "reward", "length", "outcome", "mean_loss"]
@@ -30,7 +29,7 @@ class RocketLeagueAgent:
         bot_type: Opponent, ``"none"`` or ``"heuristic_bot"``.
         rollout_length: Steps per A2C update.
         seed: Seed for the first env reset.
-        env_id: Gym id of the env to train on (``GymConfig.gym_id`` or ``BentjhGymConfig.gym_id``).
+        env_id: Gym id of the env to train on (defaults to ``GymConfig.gym_id``, i.e. ``RocketLeagueEnv``).
         a2c_kwargs: Extra hyperparameters passed to :class:`A2C`.
     """
 

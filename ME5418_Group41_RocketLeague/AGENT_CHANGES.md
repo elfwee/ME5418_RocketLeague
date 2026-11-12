@@ -82,21 +82,5 @@ Tests were run in `me5418_projenv` with episodes capped at 100–150 steps:
 - The gym env checker (`my_check_env`), `test_a2c_torch` and the `python -m src` usage text still work.
 - **Not tested:** `--play --agent` (it needs a display), and a full-length training run.
 
-## Merge into `bentjh01_env`: two environments
-`bentjh01_env` was merged onto this layout. bentjh's env is ported as `src/gym_env/bentjh_gym.py` (`RocketLeagueSideSwipeGym`, gym id `bentjh01_2d_rocketleague_v1`). It sits alongside `RocketLeagueEnv` (`rocketleague_v1`).
-
-| | `rocketleague_v1` | `bentjh01_2d_rocketleague_v1` |
-|---|---|---|
-| Observation | `sim.get_state_norm(as_flat_array=True)` | 19-dim from `sim.get_state_norm()` (car orientation as sin, cos), built in `gym_env/sim2gym_layer.py` |
-| Action | `Discrete(36)` via `decode_action` | same |
-| Reward | `RocketLeagueEnv._calculate_reward` | `gym_env/reward.py` (`GymReward`): ball velocity towards the opponent goal, ±`BentjhGymConfig.score_gain` on a goal |
-
-- Both envs take `render_mode`, `bot_type` and `gif_path`. Both expose `observe(sim)`, which `RocketLeagueAgent.play()` uses so the observation matches the env the model was trained on.
-- `RocketLeagueAgent`, `train_agent` and `play_agent` take `env_id`.
-- `sim2gym_layer.sim_action_to_gym_action` is the inverse of `decode_action`.
-
-```bash
-python -m src --train --env bentjh [--episodes N]          # train A2C on bentjh's env
-python -m src --play --agent runs/<run>/model.pt --env bentjh
-python -m src --demo --bentjh_gym                          # drive with keyboard, prints reward
-```
+## Merge into `bentjh01_env`: two environments (removed)
+`bentjh01_env` briefly added a second env, `src/gym_env/bentjh_gym.py` (gym id `bentjh01_2d_rocketleague_v1`, with `reward.py`, `sim2gym_layer.py` and `BentjhGymConfig`). It has since been deprecated and deleted. `RocketLeagueEnv` (`rocketleague_v1`) is the only env, and the `--env` and `--demo --bentjh_gym` CLI options are gone. `RocketLeagueAgent`, `train_agent` and `play_agent` still accept `env_id`, defaulting to `rocketleague_v1`.

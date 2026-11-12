@@ -19,8 +19,6 @@ from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.learning_agents.head_to_head import play_head_to_head
 from src.config.nn_config import PPOConfig
 from src.agent.agent import train_agent, play_agent
-from src.gym_env.bentjh_gym import test_gym as demo_bentjh_gym
-from src.config.gym_config import GymConfig, BentjhGymConfig
 
 RUNS_DIR = f"{ROOT_DIR}/runs"
 
@@ -28,9 +26,6 @@ DEFAULT_BLUE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
 # DEFAULT_BLUE_MODEL = None # defaults to heuristics bot
 DEFAULT_ORANGE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
 # DEFAULT_ORANGE_MODEL = None # defaults to heuristics bot
-
-ENV_IDS = {"rocketleague": GymConfig.gym_id, "bentjh": BentjhGymConfig.gym_id}
-
 
 def _arg_value(flag: str, default=None):
     """Return the value following `flag` in sys.argv, or `default` if absent."""
@@ -43,10 +38,9 @@ def _arg_value(flag: str, default=None):
 
 
 def main():
-    env_id = ENV_IDS[_arg_value("--env", "rocketleague")]
     if "--play" in sys.argv:
         if "--agent" in sys.argv:
-            play_agent(_arg_value("--agent"), env_id=env_id)
+            play_agent(_arg_value("--agent"))
         elif "--headless" in sys.argv:
             play_headless(steps=300, enable_orange=True)
         else:
@@ -62,8 +56,6 @@ def main():
     elif "--demo" in sys.argv:
         if "--gym" in sys.argv:
             demo_gym()
-        elif "--bentjh_gym" in sys.argv:
-            demo_bentjh_gym(render_mode="human")
         elif "--dqn" in sys.argv:
             run_dqn_network(enable_dueling_dqn=False, enable_double_dqn=False)
         elif "--double_dqn" in sys.argv:
@@ -78,7 +70,6 @@ def main():
             print(
                 "Please specify a demo target:\n"
                 "  python -m src --demo --gym           # Gymnasium environment demo\n"
-                "  python -m src --demo --bentjh_gym    # bentjh env, keyboard-driven, prints reward\n"
                 "  python -m src --demo --dqn           # Vanilla DQN network test (PyTorch)\n"
                 "  python -m src --demo --double_dqn    # Double DQN network test (PyTorch)\n"
                 "  python -m src --demo --dueling_ddqn  # Dueling Double DQN network test (PyTorch) [alias: --ddqn]\n"
@@ -98,7 +89,6 @@ def main():
             train_agent(
                 number_of_episodes=int(_arg_value("--episodes", 100_000)),
                 pretrain_model_filepath=_arg_value("--pretrain"),
-                env_id=env_id,
             )
         else:
             print(
@@ -107,7 +97,7 @@ def main():
                 "  python -m src --train --double_dqn    # Train Double DQN agent\n"
                 "  python -m src --train --dqn           # Train Vanilla DQN agent\n"
                 "  python -m src --train --ppo           # Train PPO agent [alias: -ppo]\n"
-                "  python -m src --train --a2c [--episodes N] [--pretrain PATH] [--env rocketleague|bentjh]  # Train A2C agent"
+                "  python -m src --train --a2c [--episodes N] [--pretrain PATH]  # Train A2C agent"
             )
     elif "--eval" in sys.argv:
         render = "--render" in sys.argv
@@ -142,9 +132,9 @@ def main():
             "Usage:\n"
             "  python -m src --play                              # Play interactively\n"
             "  python -m src --play --headless                   # Run headless physics benchmark\n"
-            "  python -m src --play --agent PATH [--env rocketleague|bentjh]  # Watch a trained A2C agent play\n"
+            "  python -m src --play --agent PATH                 # Watch a trained A2C agent play\n"
             "  python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
-            "  python -m src --demo --gym|--bentjh_gym           # Demo Gymnasium environments\n"
+            "  python -m src --demo --gym                        # Demo Gymnasium environment\n"
             "  python -m src --demo --dqn|--double_dqn|--ddqn    # Test DQN neural network variants\n"
             "  python -m src --demo --a2c|--ppo                  # Test A2C / PPO neural networks\n"
             "  python -m src --train --dueling_ddqn|--ppo|--a2c  # Train Dueling Double DQN, PPO or A2C agent\n"
