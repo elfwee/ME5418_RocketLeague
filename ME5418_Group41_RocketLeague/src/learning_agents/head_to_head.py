@@ -1,13 +1,14 @@
 """
-Head-to-Head: pit two trained agents against each other (blue vs orange).
+Head-to-Head: pit a trained blue agent against orange (blue vs orange).
 
-Both cars are driven by AgentControl. The orange agent uses the mirrored perspective, so any
-blue-trained checkpoint can play either side. Run it with a Pygame window (render=True) or
-headlessly as fast as possible for a quick score tally.
+Orange is the heuristic bot by default, or a trained agent if given a model. Either way it plays
+through the mirrored perspective, so it only sees what a blue car would see. Run it with a Pygame
+window (render=True) or headlessly as fast as possible for a quick score tally.
 
-    python -m src --head_to_head [--headless] [--blue PATH] [--orange PATH]
+    python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]
 """
 
+import random
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -15,33 +16,47 @@ from typing import Dict, Optional
 from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
-from src.sim.core.control import CarControl
+from src.learning_agents.orange_perspective import OrangePerspectiveBot
 from src.sim.core.simulation import Simulation
-
-RUNS_DIR = Path(__file__).resolve().parents[2] / PPOConfig.runs_dir
-DEFAULT_BLUE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
-DEFAULT_ORANGE_MODEL = RUNS_DIR / "20261106_0911/model_ppo.pt"
-
+from src.sim.core.control import CarControl
 
 def play_head_to_head(
-    blue_model: str | Path = DEFAULT_BLUE_MODEL,
-    orange_model: str | Path = DEFAULT_ORANGE_MODEL,
+    blue_model: Optional[str | Path] = None,
+    orange_model: Optional[str | Path] = None,
     render: bool = True,
     max_goals: Optional[int] = None,
-    max_seconds: Optional[float] = 3000.0,
+    max_seconds: Optional[float] = 600.0,
+    random_spawn: bool = False,
+    seed: Optional[int] = None,
 ) -> Dict[str, float]:
     """Play blue agent vs orange agent until `max_goals` total goals or `max_seconds` of sim time
-    (either may be None; headless needs at least one limit). Returns the final score."""
+    (either may be None; headless needs at least one limit). `orange_model=None` plays the heuristic
+    bot on orange. `random_spawn` randomises every kickoff;
+    `seed` makes those spawns repeatable and has no effect without it. Returns the final score."""
     if not render and max_goals is None and max_seconds is None:
         raise ValueError("Headless head-to-head needs max_goals or max_seconds, otherwise it never ends.")
 
-    sim = Simulation(enable_orange=True)
-    blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
-    # blue = CarControl(control_type="heuristic_bot", team = "blue", sim=sim)
-    orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
-    # orange = CarControl(control_type="heuristic_bot", team = "orange", sim=sim)
-    print(f"[HeadToHead] Blue:   {Path(blue_model).name}")
-    print(f"[HeadToHead] Orange: {Path(orange_model).name}")
+    if seed is not None:
+        random.seed(seed)
+
+    if random_spawn:
+        sim = Simulation(enable_orange=True, random_spawn=random_spawn)
+    else:
+        sim = Simulation(enable_orange=True)
+
+    if orange_model is None:
+        # orange = OrangePerspectiveBot(sim)
+        orange = CarControl(control_type="heuristic_bot", team = "orange", sim=sim)
+    else:
+        orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
+
+    if orange_model is None:
+        blue = CarControl(control_type="heuristic_bot", team = "blue", sim=sim)
+    else:
+        blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
+
+    print(f"[HeadToHead] Blue:   {'heuristic bot' if blue_model is None else Path(blue_model).name}")
+    print(f"[HeadToHead] Orange: {'heuristic bot' if orange_model is None else Path(orange_model).name}")
 
     if render:
         import pygame
