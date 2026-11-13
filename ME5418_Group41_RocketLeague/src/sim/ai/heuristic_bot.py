@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from src.config.sim_config import BOT_AERIAL_MIN_BOOST, CAR_MAX_GROUND_SPEED, GRAVITY_MAG, SIM_HZ
+from src.config.sim_config import CAR_MAX_GROUND_SPEED, GRAVITY_MAG, SIM_HZ
 from src.sim.core.actions import CarAction
+
+BOT_AERIAL_MIN_BOOST = 15.0  # Minimum boost required to commit to an aerial launch
 
 
 class BotState(StrEnum):

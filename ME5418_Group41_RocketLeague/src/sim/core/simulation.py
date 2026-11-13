@@ -15,7 +15,6 @@ from src.config.sim_config import (
     COLLISION_BALL,
     COLLISION_CAR_BODY,
     COLLISION_GOAL_SENSOR,
-    ENABLE_ORANGE_CAR,
     FIELD_HEIGHT,
     FIELD_WIDTH,
     GRAVITY,
@@ -36,7 +35,7 @@ from src.sim.core.spawns import Spawn, kickoff_spawn, sample_random_spawns
 class Simulation:
     """Headless 2D physics simulation environment for Rocket League."""
 
-    def __init__(self, enable_orange: bool = ENABLE_ORANGE_CAR, random_spawn: bool = False, seed: int | None = None):
+    def __init__(self, enable_orange: bool = True, random_spawn: bool = False, seed: int | None = None):
         # Random spawns draw from this generator only (seed it for repeatable spawn sequences)
         self.rng = random.Random(seed)
         self.space = pymunk.Space()

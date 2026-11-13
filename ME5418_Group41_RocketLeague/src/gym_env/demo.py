@@ -7,7 +7,6 @@ import gymnasium as gym
 import numpy as np
 
 from src.config.gym_config import GymConfig
-from src.config.sim_config import ENABLE_ORANGE_CAR
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
 
 
@@ -22,8 +21,7 @@ def my_check_env():
 def demo_gym():
     """Check the env, then play one episode of random actions in a window."""
     my_check_env()
-    bot_type = "heuristic_bot" if ENABLE_ORANGE_CAR else "none"
-    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type=bot_type)
+    env = gym.make(GymConfig.gym_id, render_mode="human", bot_type="heuristic_bot")
 
     obs, info = env.reset()
     total_reward = 0.0

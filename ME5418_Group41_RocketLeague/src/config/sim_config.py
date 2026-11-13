@@ -151,7 +151,3 @@ COLLISION_ARENA = 1
 COLLISION_CAR_BODY = 2
 COLLISION_BALL = 4
 COLLISION_GOAL_SENSOR = 5
-
-# --- Opponent Car & Bot Settings ---
-ENABLE_ORANGE_CAR = True  # Default flag: whether Orange car is present (enabled by default in main.py)
-BOT_AERIAL_MIN_BOOST = 15.0  # Minimum boost required to commit to aerial launch
