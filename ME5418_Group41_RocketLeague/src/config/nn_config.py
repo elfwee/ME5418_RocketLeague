@@ -7,6 +7,8 @@ experiment with `dataclasses.replace(DQNConfig(), hidden_size=128)`.
 
 from dataclasses import dataclass
 
+from src.config.gym_config import GymConfig
+
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -22,6 +24,7 @@ class AgentConfig:
 
     # Environment & Checkpointing
     bot_type: str = "none"  # "none" or "heuristic_bot"
+    env_id: str = GymConfig.gym_id  # Registered gym id the agent trains / evaluates on
     eval_episodes: int = 5
     runs_dir: str = "runs"
     checkpoint_interval: int = 500  # Episodes between periodic checkpoints of the current model (0 disables)

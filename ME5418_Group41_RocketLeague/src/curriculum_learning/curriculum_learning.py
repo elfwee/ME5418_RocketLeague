@@ -12,9 +12,9 @@ Each stage (and each self-play round) is one ordinary training run of `PPOAgent`
 `DuelingDDQNAgent`, started from the previous stage's best weights, and stopped once the
 100-episode rolling mean return has not improved for `patience` episodes.
 
-Nothing outside this file is modified. The agents are steered through attributes they already read
-at `run()` time (`bot_type`, `env_id`, `hyperparameter_set`), and the opponent / plateau stop is
-provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv` registered under its own gym id.
+The agents are steered through their config (`bot_type`, `env_id`, `hyperparameter_set`), and the
+opponent / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv` registered
+under its own gym id.
 
 Usage:
     python -m src.curriculum_learning.curriculum_learning --agent ppo
@@ -22,27 +22,23 @@ Usage:
 """
 
 import argparse
-from pathlib import Path
 import shutil
-import sys
+from dataclasses import replace
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 import torch
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from src.config.gym_config import GymConfig
-from src.config.nn_config import PPOConfig
-from src.eval.agent_control import AgentControl
+from src.config.nn_config import DQNConfig, PPOConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv
-from src.learning_agents.agent_common import make_env, make_run_dir
 from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
+from src.learning_agents.env_factory import make_env
 from src.learning_agents.ppo_agent import PPOAgent
+from src.learning_agents.run_dirs import latest_model_path, make_run_dir
 from src.neural_nets.ppo_torch import ActorCritic
+from src.sim.control.policy import PolicyController
 
 CURRICULUM_ENV_ID = "rocketleague_curriculum_v1"
 
@@ -51,7 +47,7 @@ class CurriculumEnv(RocketLeagueEnv):
     """`RocketLeagueEnv` with two curriculum hooks.
 
     - `opponent_path`: the orange car is driven by a frozen policy loaded from this checkpoint
-      (`AgentControl`, mirrored so a blue-trained model can play orange) instead of the heuristic bot.
+      (`PolicyController`, mirrored so a blue-trained model can play orange) instead of the heuristic bot.
     - `on_episode_end(episode_return) -> bool`: called with each finished episode's return. When it
       returns True the env marks itself closed (`isopen = False`), which ends the agent's training
       loop through its existing "window closed" path (dashboard is still saved, run returns normally).
@@ -76,10 +72,10 @@ class CurriculumEnv(RocketLeagueEnv):
         if opponent_path is not None:
             if self.orange_control is None:
                 raise ValueError("Self-play needs an orange car: create the env with bot_type='heuristic_bot'.")
-            self.orange_control = AgentControl(
-                team="orange",
-                sim=self.sim,
-                model_path=opponent_path,
+            self.orange_control = PolicyController(
+                "orange",
+                self.sim,
+                opponent_path,
                 action_repeat=opponent_action_repeat,
             )
 
@@ -104,6 +100,7 @@ class CurriculumEnv(RocketLeagueEnv):
 class Curriculum:
     MIN_EPISODES = 20  # warm-up before a stage can set a best / plateau (matches TrainingLogger)
     BOT_TYPES = {"none": "none", "heuristic": "heuristic_bot", "self": "heuristic_bot"}
+    CONFIGS = {PPOAgent: PPOConfig, DuelingDDQNAgent: DQNConfig}
 
     def __init__(
         self,
@@ -116,9 +113,10 @@ class Curriculum:
         self.stages = ["none", "heuristic", "self"]
         self.patience = patience  # number of episodes to train for after last best model
         self.agent = agent  # either DuelingDDQNAgent or PPOAgent (the class)
+        self.config = self.CONFIGS[agent]()
         self.self_play_rounds = self_play_rounds
         self.max_stage_episodes = max_stage_episodes
-        self.model_name = model_name or agent().hyperparameter_set
+        self.model_name = model_name or self.config.hyperparameter_set
         self.highest_reward = [float("-inf"), 0]  # [highest_reward, episode]
 
         self.run_path: Path | None = None
@@ -127,7 +125,7 @@ class Curriculum:
         # Per-stage state read by the env factory / episode callback
         self._stage_rewards: list[float] = []
         self._opponent_path: Path | None = None
-        self._opponent_action_repeat = PPOConfig.action_repeat
+        self._opponent_action_repeat = self.config.action_repeat
 
         gym.envs.registry.pop(CURRICULUM_ENV_ID, None)
         gym.register(
@@ -175,17 +173,16 @@ class Curriculum:
         """
         self.run_path = make_run_dir(f"{self.model_name}_curriculum")
 
-        agent = self.agent(hyperparameter_set=self.model_name)
         is_ppo = issubclass(self.agent, PPOAgent)
-        factored = is_ppo and getattr(PPOConfig, "factored_action", False)
+        factored = is_ppo and self.config.factored_action
         env = make_env(bot_type="none", discrete_action=not factored, control_car="blue")
         try:
             obs_dim = env.observation_space.shape[0]
             if is_ppo:
                 action_dim = [int(n) for n in env.action_space.nvec] if factored else env.action_space.n
-                net = ActorCritic(obs_dim, action_dim, agent.fcl_nodes)
+                net = ActorCritic(obs_dim, action_dim, self.config.hidden_size)
             else:
-                net = agent._build_network(obs_dim, env.action_space.n)
+                net = self.agent(self.config)._build_network(obs_dim, env.action_space.n)
         finally:
             env.close()
 
@@ -211,19 +208,24 @@ class Curriculum:
         self._stage_rewards = []
         self._opponent_path = opponent_path
 
-        agent = self.agent(hyperparameter_set=f"{self.model_name}_{label}")
-        agent.bot_type = self.BOT_TYPES[stage]
-        agent.env_id = CURRICULUM_ENV_ID
-        self._opponent_action_repeat = agent.action_repeat
-        if first and hasattr(agent, "epsilon_finetune"):
+        cfg = replace(
+            self.config,
+            hyperparameter_set=f"{self.model_name}_{label}",
+            bot_type=self.BOT_TYPES[stage],
+            env_id=CURRICULUM_ENV_ID,
+        )
+        if first and isinstance(cfg, DQNConfig):
             # DQN drops to epsilon_finetune when given a checkpoint; the init weights are untrained
-            agent.epsilon_finetune = agent.epsilon_init
+            cfg = replace(cfg, epsilon_finetune=cfg.epsilon_init)
+        self._opponent_action_repeat = cfg.action_repeat
+        agent = self.agent(cfg)
 
         opponent = f" vs {opponent_path}" if opponent_path is not None else ""
         print(f"\n[Curriculum] ===== Stage '{label}'{opponent} | start weights: {self.weights_path} =====")
-        summary = agent.run(is_training=True, model_path=self.weights_path, num_episodes=self.max_stage_episodes)
+        summary = agent.train(num_episodes=self.max_stage_episodes, model_path=self.weights_path)
 
-        model_file = Path(agent.MODEL_FILE)
+        # Each stage has its own hyperparameter_set, so its latest run folder is the one just trained
+        model_file = latest_model_path(cfg.hyperparameter_set)
         if model_file.is_file():
             self.weights_path = model_file
         else:
