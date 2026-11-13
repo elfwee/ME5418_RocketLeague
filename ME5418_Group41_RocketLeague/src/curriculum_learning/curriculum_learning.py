@@ -31,6 +31,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
+from src.config.curriculum_learning import CurriculumConfig
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig, PPOConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv
@@ -41,7 +42,7 @@ from src.learning_agents.run_dirs import latest_model_path, make_run_dir
 from src.neural_nets.ppo_torch import ActorCritic
 from src.sim.control.policy import PolicyController
 
-CURRICULUM_ENV_ID = "rocketleague_curriculum_v1"
+CURRICULUM_ENV_ID = CurriculumConfig.env_id
 
 
 class CurriculumEnv(RocketLeagueEnv):
@@ -99,20 +100,20 @@ class CurriculumEnv(RocketLeagueEnv):
 
 
 class Curriculum:
-    MIN_EPISODES = 20  # warm-up before a stage can set a best / plateau (matches TrainingLogger)
-    BOT_TYPES = {"none": "none", "heuristic": "heuristic_bot", "self": "heuristic_bot"}
+    MIN_EPISODES = CurriculumConfig.min_episodes  # warm-up before a stage can set a best / plateau
+    BOT_TYPES = dict(CurriculumConfig.stages)  # stage -> env bot_type
     CONFIGS = {PPOAgent: PPOConfig, DuelingDDQNAgent: DQNConfig}
 
     def __init__(
         self,
         agent,
-        patience: int = 1000,
-        self_play_rounds: int = 5,
-        max_stage_episodes: int | None = None,
+        patience: int = CurriculumConfig.patience,
+        self_play_rounds: int = CurriculumConfig.self_play_rounds,
+        max_stage_episodes: int | None = CurriculumConfig.max_stage_episodes,
         model_name: str | None = None,
         config: PPOConfig | DQNConfig | None = None,
     ) -> None:
-        self.stages = ["none", "heuristic", "self"]
+        self.stages = [stage for stage, _ in CurriculumConfig.stages]
         self.patience = patience  # number of episodes to train for after last best model
         self.agent = agent  # either DuelingDDQNAgent or PPOAgent (the class)
         self.config = config if config is not None else self.CONFIGS[agent]()  # e.g. a DQN ablation variant
@@ -152,7 +153,7 @@ class Curriculum:
     def _on_episode_end(self, episode_return: float) -> bool:
         self._stage_rewards.append(episode_return)
         episode = len(self._stage_rewards) - 1
-        average_reward = float(np.mean(self._stage_rewards[-100:]))
+        average_reward = float(np.mean(self._stage_rewards[-CurriculumConfig.reward_window :]))
         plateau = self.check_plateu(average_reward, episode)
         if plateau:
             print(
@@ -261,10 +262,20 @@ class Curriculum:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Curriculum learning: none -> heuristic bot -> self-play")
     parser.add_argument("--agent", choices=("ppo", "dqn"), default="ppo", help="Learning agent to train")
-    parser.add_argument("--patience", type=int, default=1000, help="Episodes without a new best before a stage ends")
-    parser.add_argument("--self_play_rounds", type=int, default=5, help="Self-play rounds (opponent refreshes)")
     parser.add_argument(
-        "--max_stage_episodes", type=int, default=None, help="Optional hard cap on episodes per stage / round"
+        "--patience", type=int, default=CurriculumConfig.patience, help="Episodes without a new best before a stage ends"
+    )
+    parser.add_argument(
+        "--self_play_rounds",
+        type=int,
+        default=CurriculumConfig.self_play_rounds,
+        help="Self-play rounds (opponent refreshes)",
+    )
+    parser.add_argument(
+        "--max_stage_episodes",
+        type=int,
+        default=CurriculumConfig.max_stage_episodes,
+        help="Optional hard cap on episodes per stage / round",
     )
     parser.add_argument("--model_name", type=str, default=None, help="Run / model name (default: agent's)")
     args = parser.parse_args()

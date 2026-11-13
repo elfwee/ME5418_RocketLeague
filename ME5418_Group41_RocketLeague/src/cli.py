@@ -147,16 +147,27 @@ def train_parser() -> argparse.ArgumentParser:
 
 
 def curriculum_parser() -> argparse.ArgumentParser:
+    from src.config.curriculum_learning import CurriculumConfig
+
     parser = _sub_parser("curriculum", MODES["curriculum"])
     _add_algorithm_flags(parser)
     parser.add_argument(
-        "--patience", type=int, default=1000, help="episodes without a new best 100-ep mean before a stage ends"
+        "--patience",
+        type=int,
+        default=CurriculumConfig.patience,
+        help="episodes without a new best rolling mean return before a stage ends (default: %(default)s)",
     )
     parser.add_argument(
-        "--self_play_rounds", type=int, default=5, help="self-play rounds; the opponent is refreshed after each"
+        "--self_play_rounds",
+        type=int,
+        default=CurriculumConfig.self_play_rounds,
+        help="self-play rounds; the opponent is refreshed after each (default: %(default)s)",
     )
     parser.add_argument(
-        "--max_stage_episodes", type=int, default=None, help="hard cap on episodes per stage / round (default: none)"
+        "--max_stage_episodes",
+        type=int,
+        default=CurriculumConfig.max_stage_episodes,
+        help="hard cap on episodes per stage / round (default: until plateau)",
     )
     parser.add_argument("--model_name", default=None, help="run / model name (default: the algorithm name)")
     return parser
