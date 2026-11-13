@@ -1,9 +1,36 @@
 """Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
 
 import math
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any
 
 from src.config.sim_config import BOT_AERIAL_MIN_BOOST, CAR_MAX_GROUND_SPEED, GRAVITY_MAG, SIM_HZ
 from src.sim.core.actions import CarAction
+
+
+class BotState(StrEnum):
+    """Behaviour the bot is in (compares equal to its name as a string)."""
+
+    KICKOFF = "KICKOFF"
+    DEFEND = "DEFEND"
+    ATTACK = "ATTACK"
+    AERIAL = "AERIAL"
+    ROTATE_BACK = "ROTATE_BACK"
+
+
+@dataclass(frozen=True)
+class FrameContext:
+    """Per-frame quantities in the bot's team frame: distances are measured from its own goal line
+    (0 = own goal, field_w = opponent goal) and forward speeds point at the opponent goal."""
+
+    car: Any
+    car_d: float  # car distance from own goal line
+    ball_d: float  # ball distance from own goal line
+    ball_y: float  # ball height (world y)
+    v_fwd_ball: float  # ball speed towards the opponent goal
+    v_fwd_car: float  # car speed towards the opponent goal
+    field_w: float  # goal line to goal line
 
 
 class HeuristicBot:
@@ -11,7 +38,7 @@ class HeuristicBot:
 
     def __init__(self, team: str = "orange"):
         self.team = team
-        self.current_state = "KICKOFF"
+        self.current_state = BotState.KICKOFF
         self._is_kickoff = True
         self._jump_cooldown = 0.0
         self._jump_press_timer = 0
@@ -22,7 +49,7 @@ class HeuristicBot:
 
     def reset(self):
         """Reset internal timers and behavioral state upon kickoff."""
-        self.current_state = "KICKOFF"
+        self.current_state = BotState.KICKOFF
         self._is_kickoff = True
         self._jump_cooldown = 0.0
         self._jump_press_timer = 0
@@ -78,7 +105,7 @@ class HeuristicBot:
 
         return (pred_x, pred_y)
 
-    def determine_state(self, sim, car) -> str:
+    def determine_state(self, sim, car) -> BotState:
         """Evaluate match geometry to select the active behavioral state."""
         bx, by = sim.ball.position
         b_vx, b_vy = sim.ball.velocity
@@ -101,7 +128,7 @@ class HeuristicBot:
                 self._is_kickoff = False
 
         if self._is_kickoff:
-            return "KICKOFF"
+            return BotState.KICKOFF
 
         def_zone_depth = 8.5
         att_zone_depth = 7.5
@@ -112,47 +139,39 @@ class HeuristicBot:
         v_fwd_ball = b_vx * self._attack_dir
 
         # AERIAL Persistence: continue aerial approach while ball stays high in front of car
-        if self.current_state == "AERIAL" and not car.both_wheels_grounded:
+        if self.current_state == BotState.AERIAL and not car.both_wheels_grounded:
             if car.boost_amount > 5.0 and by > 3.5 and car_d < ball_d + 0.2:
                 if ball_d < aerial_def_depth:
-                    return "DEFEND"
-                return "AERIAL"
+                    return BotState.DEFEND
+                return BotState.AERIAL
 
         # 1. Defensive third or fast shot rushing own goal
         if ball_d < def_zone_depth or (look_d < 7.0 and v_fwd_ball < -3.5):
-            return "DEFEND"
+            return BotState.DEFEND
 
         # 2. Attacking pocket: keep pressure unless far out of position
         if ball_d > (field_w - att_zone_depth):
             if car_d >= ball_d + 1.5:
-                return "ROTATE_BACK"
+                return BotState.ROTATE_BACK
             if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
-                return "AERIAL"
-            return "ATTACK"
+                return BotState.AERIAL
+            return BotState.ATTACK
 
         # 3. Midfield: recover goal-side when caught ahead of current or immediate predicted ball position
         if car_d >= ball_d + 0.2 or (v_fwd_ball < -4.0 and car_d >= look_d + 0.2):
-            return "ROTATE_BACK"
+            return BotState.ROTATE_BACK
 
         # 4. Midfield aerial vs ground attack
         if by > 3.5 and car.boost_amount > BOT_AERIAL_MIN_BOOST and car.both_wheels_grounded:
-            return "AERIAL"
+            return BotState.AERIAL
 
-        return "ATTACK"
+        return BotState.ATTACK
 
     def _recover_behind_ball(
-        self,
-        action: CarAction,
-        car,
-        car_d: float,
-        ball_d: float,
-        pred_d: float,
-        by: float,
-        pred_by: float,
-        v_fwd_ball: float,
-        in_def_corner: bool = False,
+        self, action: CarAction, ctx: FrameContext, pred_d: float, pred_by: float, in_def_corner: bool = False
     ) -> CarAction:
         """Return to the goal-side of the ball without driving it toward our own corner/goal."""
+        car, car_d, ball_d, by, v_fwd_ball = ctx.car, ctx.car_d, ctx.ball_d, ctx.ball_y, ctx.v_fwd_ball
         _, cy = car.position
         _, cvy = car.velocity
         # Use min(actual_gap, pred_gap) so fast retreating balls don't mask immediate rear-end collisions.
@@ -238,8 +257,9 @@ class HeuristicBot:
         action.boost = gap > 5.0 and car.boost_amount > 25.0
         return self._finalize(action)
 
-    def _compute_unstick(self, sim, car, car_d: float, ball_d: float, field_w: float) -> CarAction:
+    def _compute_unstick(self, ctx: FrameContext) -> CarAction:
         """Recover when blocked by a wall or stationary opponent while avoiding own-goal hits."""
+        car, car_d, ball_d, field_w = ctx.car, ctx.car_d, ctx.ball_d, ctx.field_w
         action = CarAction()
         if car_d < 3.0:
             fwd = 1.0
@@ -252,8 +272,9 @@ class HeuristicBot:
         action.boost = car.boost_amount > 5.0
         return self._finalize(action)
 
-    def _compute_kickoff(self, sim, car, car_d: float, ball_d: float) -> CarAction:
+    def _compute_kickoff(self, sim, ctx: FrameContext) -> CarAction:
         """Fast kickoff approach with flat Jump 1 followed by directional dodge strike."""
+        car, car_d, ball_d = ctx.car, ctx.car_d, ctx.ball_d
         action = CarAction()
         dist_to_ball = abs(ball_d - car_d)
 
@@ -287,17 +308,10 @@ class HeuristicBot:
                     self._jump_press_timer = 0
         return self._finalize(action)
 
-    def _compute_defend(
-        self,
-        sim,
-        car,
-        car_d: float,
-        ball_d: float,
-        by: float,
-        v_fwd_ball: float,
-        v_fwd_car: float,
-    ) -> CarAction:
+    def _compute_defend(self, sim, ctx: FrameContext) -> CarAction:
         """Defend own goal mouth: clear downfield, jump high for crossbar saves, or safely vault corner balls."""
+        car, car_d, ball_d, by = ctx.car, ctx.car_d, ctx.ball_d, ctx.ball_y
+        v_fwd_ball, v_fwd_car = ctx.v_fwd_ball, ctx.v_fwd_car
         action = CarAction()
         _, cy = car.position
         lead_time = min(0.45, max(0.08, abs(car_d - ball_d) / (CAR_MAX_GROUND_SPEED + 0.1)))
@@ -328,9 +342,7 @@ class HeuristicBot:
                         action.jump = True
                 return self._finalize(action)
 
-            return self._recover_behind_ball(
-                action, car, car_d, ball_d, pred_d, by, pred_by, v_fwd_ball, in_def_corner=(pred_d < 3.4)
-            )
+            return self._recover_behind_ball(action, ctx, pred_d, pred_by, in_def_corner=(pred_d < 3.4))
 
         # Floating well above a low corner ball: drop onto ball instead of boosting over it into midfield
         if not car.is_grounded and by < 3.6 and pred_d < 4.0 and cy > by + 1.4:
@@ -374,11 +386,11 @@ class HeuristicBot:
                     action.jump = True
         return self._finalize(action)
 
-    def _compute_aerial(self, sim, car) -> CarAction:
+    def _compute_aerial(self, sim, ctx: FrameContext) -> CarAction:
         """Launch and boost onto the goal-scoring side of an airborne ball."""
         action = CarAction()
-        cx, cy = car.position
-        car_d = self._to_team_d(sim, cx)
+        car, car_d = ctx.car, ctx.car_d
+        _, cy = car.position
 
         pred_bx, pred_by = self.predict_ball_position(sim, 0.35)
         pred_d = self._to_team_d(sim, pred_bx)
@@ -417,18 +429,10 @@ class HeuristicBot:
                 action.jump = True
         return self._finalize(action)
 
-    def _compute_attack(
-        self,
-        sim,
-        car,
-        car_d: float,
-        ball_d: float,
-        by: float,
-        v_fwd_ball: float,
-        v_fwd_car: float,
-        field_w: float,
-    ) -> CarAction:
+    def _compute_attack(self, sim, ctx: FrameContext) -> CarAction:
         """Attack toward opponent's elevated goal, chipping ground balls upward and dodging cleanly."""
+        car, car_d, ball_d, by = ctx.car, ctx.car_d, ctx.ball_d, ctx.ball_y
+        v_fwd_ball, v_fwd_car, field_w = ctx.v_fwd_ball, ctx.v_fwd_car, ctx.field_w
         action = CarAction()
         _, cy = car.position
         pred_bx, pred_by = self.predict_ball_position(sim, 0.15)
@@ -438,9 +442,7 @@ class HeuristicBot:
         # If ahead of the ball (unless wedging a ball right on opponent goal mouth from above), recover behind it
         in_goal_pocket = pred_d > field_w - 2.0 and car_d > field_w - 2.2 and cy > by
         if car_d > pred_d + 0.5 and not in_goal_pocket:
-            return self._recover_behind_ball(
-                action, car, car_d, ball_d, pred_d, by, pred_by, v_fwd_ball, in_def_corner=False
-            )
+            return self._recover_behind_ball(action, ctx, pred_d, pred_by, in_def_corner=False)
 
         action.dir_x = 1.0 * self._attack_dir
         action.dir_y = 0.0
@@ -478,6 +480,33 @@ class HeuristicBot:
 
         return self._finalize(action)
 
+    def _compute_rotate_back(self, sim, ctx: FrameContext) -> CarAction:
+        """Get back goal-side of where the ball will be shortly."""
+        pred_bx, pred_by = self.predict_ball_position(sim, 0.25)
+        pred_d = self._to_team_d(sim, pred_bx)
+        return self._recover_behind_ball(CarAction(), ctx, pred_d, pred_by, in_def_corner=(pred_d < 3.4))
+
+    _STATE_HANDLERS = {
+        BotState.KICKOFF: _compute_kickoff,
+        BotState.ROTATE_BACK: _compute_rotate_back,
+        BotState.DEFEND: _compute_defend,
+        BotState.AERIAL: _compute_aerial,
+        BotState.ATTACK: _compute_attack,
+    }
+
+    def _frame_context(self, sim, car) -> FrameContext:
+        bx, by = sim.ball.position
+        b_vx, _ = sim.ball.velocity
+        return FrameContext(
+            car=car,
+            car_d=self._to_team_d(sim, car.position[0]),
+            ball_d=self._to_team_d(sim, bx),
+            ball_y=by,
+            v_fwd_ball=b_vx * self._attack_dir,
+            v_fwd_car=car.velocity[0] * self._attack_dir,
+            field_w=sim.arena.x_right - sim.arena.x_left,
+        )
+
     def compute_action(self, sim) -> CarAction:
         """Generate the control action (steering, throttle, jump, boost) for the bot car."""
         car = sim.orange_car if self.team == "orange" else sim.blue_car
@@ -488,46 +517,20 @@ class HeuristicBot:
             self.reset()
 
         self.current_state = self.determine_state(sim, car)
-
-        cx, _ = car.position
-        bx, by = sim.ball.position
-        b_vx, _ = sim.ball.velocity
         self._jump_cooldown = max(0.0, self._jump_cooldown - (1.0 / SIM_HZ))
-
-        car_d = self._to_team_d(sim, cx)
-        ball_d = self._to_team_d(sim, bx)
-        v_fwd_ball = b_vx * self._attack_dir
-        v_fwd_car = car.velocity[0] * self._attack_dir
-        field_w = sim.arena.x_right - sim.arena.x_left
+        ctx = self._frame_context(sim, car)
 
         # Obstacle stagnation detector
         if self._unstick_active > 0.0:
             self._unstick_active = max(0.0, self._unstick_active - (1.0 / SIM_HZ))
-            return self._compute_unstick(sim, car, car_d, ball_d, field_w)
+            return self._compute_unstick(ctx)
         if (car.is_grounded or car.can_ground_jump or car.wheel_contact_count >= 1) and abs(car.velocity[0]) < 0.20:
             self._stuck_timer += 1.0 / SIM_HZ
             if self._stuck_timer > 0.5:
                 self._stuck_timer = 0.0
                 self._unstick_active = 0.35
-                return self._compute_unstick(sim, car, car_d, ball_d, field_w)
+                return self._compute_unstick(ctx)
         else:
             self._stuck_timer = max(0.0, self._stuck_timer - (2.0 / SIM_HZ))
 
-        if self.current_state == "KICKOFF":
-            return self._compute_kickoff(sim, car, car_d, ball_d)
-
-        if self.current_state == "ROTATE_BACK":
-            pred_bx, pred_by = self.predict_ball_position(sim, 0.25)
-            pred_d = self._to_team_d(sim, pred_bx)
-            action = CarAction()
-            return self._recover_behind_ball(
-                action, car, car_d, ball_d, pred_d, by, pred_by, v_fwd_ball, in_def_corner=(pred_d < 3.4)
-            )
-
-        if self.current_state == "DEFEND":
-            return self._compute_defend(sim, car, car_d, ball_d, by, v_fwd_ball, v_fwd_car)
-
-        if self.current_state == "AERIAL":
-            return self._compute_aerial(sim, car)
-
-        return self._compute_attack(sim, car, car_d, ball_d, by, v_fwd_ball, v_fwd_car, field_w)
+        return self._STATE_HANDLERS[self.current_state](self, sim, ctx)

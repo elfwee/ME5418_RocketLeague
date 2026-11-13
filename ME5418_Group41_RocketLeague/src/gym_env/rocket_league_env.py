@@ -19,7 +19,8 @@ import numpy as np
 import pygame
 
 from src.config.gym_config import GymConfig
-from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
+from src.config.render_config import SCREEN_HEIGHT, SCREEN_WIDTH
+from src.config.sim_config import SIM_HZ
 from src.gym_env import action_codec
 from src.gym_env.rewards import ball_progress_reward, car_ball_distance, goal_reward, relative_team, shaping_reward
 from src.sim.control import HeuristicController, HumanController

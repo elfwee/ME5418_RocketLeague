@@ -9,7 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from src.config.sim_config import GIF_FRAME_SIZE
+from src.config.render_config import GIF_FRAME_SIZE
 from src.learning_agents.env_factory import obs_to_tensor, scored_goal
 
 MAX_GIF_FRAMES = 1200

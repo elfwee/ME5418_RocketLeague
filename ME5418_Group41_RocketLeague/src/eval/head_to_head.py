@@ -12,7 +12,8 @@ Run it with a Pygame window (render=True) or headlessly as fast as possible for 
 import time
 from pathlib import Path
 
-from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
+from src.config.render_config import SCREEN_HEIGHT, SCREEN_WIDTH
+from src.config.sim_config import SIM_HZ
 from src.sim.control import HeuristicController
 from src.sim.control.policy import PolicyController
 from src.sim.core.simulation import Simulation
