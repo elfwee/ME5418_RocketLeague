@@ -10,7 +10,6 @@ observation and the x component of the action are mirrored, so one policy can pl
 """
 
 import math
-import random
 
 import gymnasium as gym
 import numpy as np
@@ -21,7 +20,8 @@ from src.config.sim_config import ARENA_DIAGONAL, ENABLE_ORANGE_CAR, SCREEN_HEIG
 from src.gym_env import action_codec
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
-from src.sim.core.simulation import Simulation, _normalize_pos
+from src.sim.core.observation import normalize_position
+from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
 
 # register env as gym environment
@@ -147,18 +147,21 @@ class RocketLeagueEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
-            random.seed(seed)
+            self.sim.rng.seed(seed)
             np.random.seed(seed)
 
         options = options or {}
         reset_scores = (seed is not None) or options.get("reset_scores", False)
         if reset_scores:
             self._episode_count = 0
-        self.sim.goal_scored_this_step = None
-        self.sim.last_touch = None
-        self.sim._spawn_index = self._episode_count
+        spawn_index = self._episode_count
         self._episode_count += 1
-        self.sim.reset(reset_scores=reset_scores, random_spawn=options.get("random_spawn"))
+        self.sim.reset(
+            reset_scores=reset_scores,
+            spawn_index=spawn_index,
+            random_spawn=options.get("random_spawn"),
+            clear_events=True,
+        )
         for control in (self.blue_control, self.orange_control):
             if control is not None:
                 control.reset()
@@ -225,7 +228,7 @@ class RocketLeagueEnv(gym.Env):
 
     def _ball_progress_reward(self, last_touch):
         """Reward ball movement towards the opponent goal (+x in the ego frame)."""
-        ball_x, ball_y = _normalize_pos(self.sim.ball.position)
+        ball_x, ball_y = normalize_position(self.sim.ball.position)
         if self._ego_team == "orange":
             ball_x = -ball_x
         if self.ball_prev is None:

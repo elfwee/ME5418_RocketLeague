@@ -68,7 +68,6 @@ def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
             blue_control.reset()
             if orange_control is not None:
                 orange_control.reset()
-        sim.get_state_norm(as_flat_array=True)
 
         # --- Render ---
         renderer.render(sim)

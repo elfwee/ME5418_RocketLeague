@@ -788,28 +788,34 @@ class Car:
     # Main update
     # ------------------------------------------------------------------ #
 
+    def _update_facing(self, action: CarAction):
+        """Mirror the car left/right to follow the input (grounded) or the heading (airborne).
+
+        Facing is frozen while turtled on the ground, recovering, or flipping.
+        """
+        if self._is_turtled() or self._recovery_time > 0.0 or self._flip_active:
+            return
+        if self._grounded and abs(action.dir_x) > FACING_FLIP_THRESHOLD:
+            new_facing = 1 if action.dir_x > 0 else -1
+            if new_facing != self.facing_x:
+                self._set_facing(new_facing, snap=True)
+        elif not self._grounded and self._detect_nearby_boundary() is None:
+            # When airborne in open air, animation flips according to blue heading vector side
+            # only when right-side up to prevent inverting roof/wheels near boundaries or during aerial loops
+            if self.up_vector[1] > 0.0:
+                fwd_x = math.cos(self.body.angle)
+                if fwd_x > 0.05 and self.facing_x != 1:
+                    self._set_facing(1, snap=False)
+                elif fwd_x < -0.05 and self.facing_x != -1:
+                    self._set_facing(-1, snap=False)
+
     def update(self, action: CarAction, dt: float):
         """Advance the car controller by one physics sub-step (`action` itself is left unchanged)."""
         action = replace(action).clamp()
         self.is_boosting = False
         self.last_input_vector = (action.dir_x, action.dir_y)
 
-        # Update facing based on heading / input (unless turtled on the ground, recovering, or flipping)
-        if not (self._is_turtled() or self._recovery_time > 0.0 or self._flip_active):
-            if self._grounded and abs(action.dir_x) > FACING_FLIP_THRESHOLD:
-                new_facing = 1 if action.dir_x > 0 else -1
-                if new_facing != self.facing_x:
-                    self._set_facing(new_facing, snap=True)
-            elif not self._grounded and self._detect_nearby_boundary() is None:
-                # When airborne in open air, animation flips according to blue heading vector side
-                # only when right-side up to prevent inverting roof/wheels near boundaries or during aerial loops
-                if self.up_vector[1] > 0.0:
-                    fwd_x = math.cos(self.body.angle)
-                    if fwd_x > 0.05 and self.facing_x != 1:
-                        self._set_facing(1, snap=False)
-                    elif fwd_x < -0.05 and self.facing_x != -1:
-                        self._set_facing(-1, snap=False)
-
+        self._update_facing(action)
         self._sense_ground()
         self._update_recovery(action, dt)
         self._apply_attitude(action, dt)

@@ -290,7 +290,7 @@ def action_repeat_both_trajectory(*, seed: int, decisions: int, repeat: int = 4)
 def sim_bots_trajectory(*, frames: int = 1800, random_spawn: bool = False, seed: int = 0) -> dict[str, np.ndarray]:
     """Heuristic bot vs heuristic bot at sim level: raw physics state, bot states and both views."""
     seed_everything(seed)
-    sim = make_sim(enable_orange=True, random_spawn=random_spawn)
+    sim = make_sim(enable_orange=True, random_spawn=random_spawn, seed=seed)
     blue = make_bot_controller("blue", sim)
     orange = make_bot_controller("orange", sim)
     rec = {"state": [], "obs": [], "obs_mirror": [], "bot_states": [], "goal": []}
@@ -396,6 +396,7 @@ def short_training_run(algo: str, runs_dir: Path) -> tuple[str, dict]:
     def seeded_make_env(*args, **kwargs):
         env = original_make_env(*args, **kwargs)
         env.action_space.seed(0)
+        env.unwrapped.sim.rng.seed(0)  # spawn sampling
         return env
 
     patches = [(common, "RUNS_DIR", Path(runs_dir)), (agent_module, "make_env", seeded_make_env)]

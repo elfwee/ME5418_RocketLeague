@@ -8,7 +8,6 @@ window (render=True) or headlessly as fast as possible for a quick score tally.
     python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]
 """
 
-import random
 import time
 from pathlib import Path
 
@@ -34,10 +33,7 @@ def play_head_to_head(
     if not render and max_goals is None and max_seconds is None:
         raise ValueError("Headless head-to-head needs max_goals or max_seconds, otherwise it never ends.")
 
-    if seed is not None:
-        random.seed(seed)
-
-    sim = Simulation(enable_orange=True, random_spawn=random_spawn)
+    sim = Simulation(enable_orange=True, random_spawn=random_spawn, seed=seed)
 
     if orange_model is None:
         orange = CarControl(control_type="heuristic_bot", team="orange", sim=sim)

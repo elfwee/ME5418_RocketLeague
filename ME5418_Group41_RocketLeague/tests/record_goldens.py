@@ -1,9 +1,17 @@
 """Record the golden regression data in `tests/golden/` from the current code.
 
 Run once on the code you trust (the goldens in the repository were recorded at tag
-`pre-refactor`), and again only when a behaviour change is intended:
+`pre-refactor`), and again only for the groups whose behaviour is meant to change:
 
-    python tests/record_goldens.py
+    python tests/record_goldens.py                 # everything
+    python tests/record_goldens.py training        # only the named groups
+
+Groups: trajectories, architectures, training.
+
+History:
+- training: re-recorded when spawn sampling moved from the global `random` module onto the sim's
+  own generator (phase 4). The PPO run was checked to match the old golden exactly when the old
+  draw order is replayed; DQN's epsilon-greedy draws used to share that global stream.
 """
 
 import json
@@ -18,10 +26,7 @@ import scenarios as sc  # noqa: E402
 import torch  # noqa: E402
 
 
-def main():
-    out = sc.GOLDEN_DIR
-    out.mkdir(parents=True, exist_ok=True)
-
+def record_trajectories(out):
     for name, kwargs in sc.ENV_SCENARIOS.items():
         np.savez_compressed(out / f"{name}.npz", **sc.env_trajectory(**kwargs))
         print(f"recorded {name}")
@@ -42,6 +47,8 @@ def main():
     np.savez_compressed(out / "sim_bots_random.npz", **sc.sim_bots_trajectory(frames=1800, random_spawn=True, seed=5))
     print("recorded sim bots")
 
+
+def record_architectures(out):
     # Architectures: full-size parameter counts / state_dict keys, tiny checkpoints + their greedy actions
     arch = {}
     for name, build in sc.ARCHITECTURES.items():
@@ -67,6 +74,8 @@ def main():
     (out / "greedy_actions.json").write_text(json.dumps(greedy) + "\n")
     print("recorded architectures and checkpoints")
 
+
+def record_training(out):
     for algo in ("dueling_ddqn", "ppo"):
         with tempfile.TemporaryDirectory() as tmp:
             metrics, state_dict = sc.short_training_run(algo, Path(tmp))
@@ -75,5 +84,15 @@ def main():
         print(f"recorded {algo} training run")
 
 
+GROUPS = {"trajectories": record_trajectories, "architectures": record_architectures, "training": record_training}
+
+
+def main(groups: list[str]):
+    out = sc.GOLDEN_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    for group in groups or list(GROUPS):
+        GROUPS[group](out)
+
+
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
