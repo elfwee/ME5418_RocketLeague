@@ -23,6 +23,7 @@ class AgentConfig:
     bot_type: str = "heuristic_bot"  # "none" or "heuristic_bot"
     eval_episodes: int = 5
     runs_dir: str = "runs"
+    checkpoint_interval: int = 500  # Episodes between periodic checkpoints of the current model (0 disables)
 
 
 @dataclass(frozen=True)

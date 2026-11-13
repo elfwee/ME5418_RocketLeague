@@ -58,7 +58,7 @@ _(Alternatively, install the core dependencies via pip: `pip install torch gymna
 
 ### Step 3: Train & Evaluate Learning Agents
 
-All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
+All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
 
 #### Train a Learning Agent
 

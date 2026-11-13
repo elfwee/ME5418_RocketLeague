@@ -190,6 +190,30 @@ def load_state_dict_if_exists(path: str | Path) -> dict | None:
     return torch.load(path, map_location=device, weights_only=True)
 
 
+def save_periodic_checkpoint(
+    model: torch.nn.Module,
+    checkpoint_dir: str | Path,
+    model_name: str,
+    episode: int,
+    interval: int,
+) -> Path | None:
+    """Save the current weights every `interval` episodes; returns the path, or None when not due.
+
+    `episode` is the 0-based loop index, so the file is named after the number of episodes
+    completed: `<checkpoint_dir>/model_<model_name>_ep000500.pt`. Unlike the best-model file,
+    these are never overwritten. `interval <= 0` disables periodic checkpoints.
+    """
+    episodes_done = episode + 1
+    if interval <= 0 or episodes_done % interval != 0:
+        return None
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    path = checkpoint_dir / f"model_{model_name}_ep{episodes_done:06d}.pt"
+    torch.save(model.state_dict(), path)
+    print(f"Saved checkpoint after {episodes_done} episodes to: {path}")
+    return path
+
+
 def infer_ppo_arch(state_dict: dict) -> tuple[int, int | list[int] | None]:
     """(hidden_dim, action_dim) of an `ActorCritic` checkpoint. `action_dim` is a list for factored
     MultiDiscrete heads, an int for a flat Discrete head, or None if no actor layer is found."""

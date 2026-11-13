@@ -43,6 +43,7 @@ from src.learning_agents.agent_common import (
     rolling_mean,
     run_eval_episodes,
     save_gif,
+    save_periodic_checkpoint,
     save_training_dashboard,
     scored_goal,
     step_with_action_repeat,
@@ -107,6 +108,8 @@ class DuelingDDQNAgent:
 
         # SmoothL1Loss (Huber loss) prevents exploding gradients from large +/-20 goal rewards
         self.loss_fn = nn.SmoothL1Loss()
+        self.checkpoint_interval = DQNConfig.checkpoint_interval
+
         self.optimizer = None
 
     def _set_run_dir(self, run_dir: str | Path):
@@ -115,6 +118,7 @@ class DuelingDDQNAgent:
         self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
         self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
         self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
+        self.CHECKPOINT_DIR = os.path.join(run_dir, "checkpoints")
 
     # ----------------------------------------------------------------------------------------
     # Learning rule
@@ -415,6 +419,11 @@ class DuelingDDQNAgent:
                 if logger.is_new_best(episode, num_episodes):
                     logger.log_new_best(episode, step_count)
                     torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
+
+                # Periodic snapshot of the current model, independent of the best-model file
+                save_periodic_checkpoint(
+                    policy_dqn, self.CHECKPOINT_DIR, self.hyperparameter_set, episode, self.checkpoint_interval
+                )
 
                 if logger.graph_due():
                     save_graph(dpi=100)
