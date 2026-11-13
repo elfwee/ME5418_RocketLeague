@@ -39,7 +39,7 @@ class DuelingDDQNAgent:
            uses the online policy network to select argmax next actions while the target
            network evaluates them to mitigate maximization bias.
         2. Experience Replay (`ReplayMemory`):
-           Stores `(state, action, next_state, reward, terminated, truncated)` transitions.
+           Stores `(state, action, next_state, reward, terminated)` transitions.
         3. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
@@ -82,7 +82,7 @@ class DuelingDDQNAgent:
 
     def optimize(self, mini_batch, policy_dqn: DQN, target_dqn: DQN) -> float:
         """Perform a single Double/Dueling DQN gradient step on a sampled minibatch."""
-        state, action, next_state, reward, terminated, truncated = zip(*mini_batch, strict=True)
+        state, action, next_state, reward, terminated = zip(*mini_batch, strict=True)
 
         state = torch.stack(state)
         action = torch.stack(action)
@@ -147,10 +147,10 @@ class DuelingDDQNAgent:
         new_state: torch.Tensor,
         reward: float,
         terminated: bool,
-        truncated: bool,
     ):
+        """Truncation is not stored: the TD target bootstraps through time-limit cut-offs anyway."""
         reward_tensor = torch.tensor(reward, dtype=torch.float32, device=device)
-        memory.append((state, action, new_state, reward_tensor, terminated, truncated))
+        memory.append((state, action, new_state, reward_tensor, terminated))
 
     def _maybe_optimize(self, memory: ReplayMemory, step_count: int, policy_dqn: DQN, target_dqn: DQN) -> float | None:
         """Run one gradient step every `train_freq` decision steps once the replay memory has warmed
@@ -178,7 +178,7 @@ class DuelingDDQNAgent:
         return int(self._last_action.item())
 
     def observe(self, state: torch.Tensor, reward: float, next_state: torch.Tensor, terminated: bool, truncated: bool):
-        self._store_transition(self.memory, state, self._last_action, next_state, reward, terminated, truncated)
+        self._store_transition(self.memory, state, self._last_action, next_state, reward, terminated)
         self.steps_done += 1
 
         # Perform gradient update every `train_freq` decision steps inside the episode
@@ -263,7 +263,7 @@ class DuelingDDQNAgent:
             else:
                 print(f"[DuelingDDQN Train] Warning: Checkpoint '{model_path}' not found; training from scratch.")
 
-            self.memory = ReplayMemory(maxlen=self.cfg.buffer_size)
+            self.memory = ReplayMemory(maxlen=self.cfg.buffer_size, seed=self.cfg.seed)
             self.epsilon = self.cfg.epsilon_finetune if loaded_ckpt else self.cfg.epsilon_init
 
             self.target_dqn = self._build_network(num_states, num_actions)

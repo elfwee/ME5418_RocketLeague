@@ -12,6 +12,8 @@ History:
 - training: re-recorded when spawn sampling moved from the global `random` module onto the sim's
   own generator (phase 4). The PPO run was checked to match the old golden exactly when the old
   draw order is replayed; DQN's epsilon-greedy draws used to share that global stream.
+- training (DQN only): re-recorded when ReplayMemory got its own seeded generator (phase 6);
+  the PPO golden was unchanged by that step.
 """
 
 import json

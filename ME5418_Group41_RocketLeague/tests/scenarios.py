@@ -345,6 +345,7 @@ def build_tiny_checkpoints() -> dict[str, dict]:
 
 TRAINING_OVERRIDES = {
     "dueling_ddqn": dict(
+        seed=0,
         hidden_size=32,
         buffer_size=1_000,
         learning_start=64,
@@ -353,7 +354,7 @@ TRAINING_OVERRIDES = {
         target_update_interval=50,
         checkpoint_interval=2,
     ),
-    "ppo": dict(hidden_size=32, rollout_steps=64, minibatch_size=16, update_epochs=2, checkpoint_interval=2),
+    "ppo": dict(seed=0, hidden_size=32, rollout_steps=64, minibatch_size=16, update_epochs=2, checkpoint_interval=2),
 }
 TRAINING_EPISODES = 3
 TRAINING_MAX_EPISODE_STEPS = 300

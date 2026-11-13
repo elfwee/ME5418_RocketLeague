@@ -25,6 +25,7 @@ class AgentConfig:
     eval_episodes: int = 5
     runs_dir: str = "runs"
     checkpoint_interval: int = 500  # Episodes between periodic checkpoints of the current model (0 disables)
+    seed: int | None = None  # Seeds the agent's own generators (DQN replay sampling); None: fresh entropy
 
 
 @dataclass(frozen=True)
