@@ -15,13 +15,9 @@ from torch import nn
 
 from src.config.nn_config import DQNConfig, PPOConfig
 from src.gym_env.action_codec import NUM_DISCRETE_ACTIONS
-from src.learning_agents.agent_common import (
-    device,
-    latest_model_path,
-    make_env,
-    resolve_eval_episodes,
-    run_eval_episodes,
-)
+from src.learning_agents.env_factory import device, make_env
+from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
+from src.learning_agents.run_dirs import latest_model_path
 from src.neural_nets.checkpoint import DQN_KIND, PPO, PolicySpec, build_network, infer_spec, load_state_dict
 from src.neural_nets.policy import greedy_action
 from src.paths import RUNS_DIR

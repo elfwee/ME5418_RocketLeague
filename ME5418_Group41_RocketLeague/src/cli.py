@@ -195,7 +195,7 @@ def run_play(args: argparse.Namespace):
 
 def default_head_to_head_model() -> str | None:
     """Latest PPO checkpoint, else the latest Dueling DDQN one, else None (heuristic bot)."""
-    from src.learning_agents.agent_common import latest_model_path
+    from src.learning_agents.run_dirs import latest_model_path
 
     for model_name in ("ppo", "dueling_ddqn"):
         path = latest_model_path(model_name)

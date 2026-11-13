@@ -12,7 +12,7 @@ comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
   outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
 
 This file holds the PPO learning rule and its training loop. Environment creation, action repeat,
-the evaluation loop, logging and plotting are shared with DQN in `agent_common.py`.
+the evaluation loop, logging and plotting are shared with DQN (`env_factory`, `eval_loop`, `training_logger`, `dashboard`, `run_dirs`).
 """
 
 import itertools
@@ -28,22 +28,11 @@ from torch.nn import functional as F
 
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
-from src.learning_agents.agent_common import (
-    DashboardPanel,
-    TrainingLogger,
-    device,
-    latest_model_path,
-    make_env,
-    make_run_dir,
-    normalize_control_car,
-    obs_to_tensor,
-    resolve_eval_episodes,
-    run_eval_episodes,
-    save_periodic_checkpoint,
-    save_training_dashboard,
-    scored_goal,
-    summarize_episodes,
-)
+from src.learning_agents.dashboard import DashboardPanel, save_training_dashboard
+from src.learning_agents.env_factory import device, make_env, normalize_control_car, obs_to_tensor, scored_goal
+from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes, summarize_episodes
+from src.learning_agents.run_dirs import latest_model_path, make_run_dir, save_periodic_checkpoint
+from src.learning_agents.training_logger import TrainingLogger
 from src.neural_nets.checkpoint import infer_spec, load_state_dict
 from src.neural_nets.policy import greedy_action
 from src.neural_nets.ppo_torch import ActorCritic

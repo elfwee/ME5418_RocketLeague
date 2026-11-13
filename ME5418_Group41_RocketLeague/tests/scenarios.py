@@ -384,9 +384,9 @@ def short_training_run(algo: str, runs_dir: Path) -> tuple[str, dict]:
     """
     from dataclasses import replace
 
-    import src.learning_agents.agent_common as common
     import src.learning_agents.dueling_ddqn_agent as dqn_agent
     import src.learning_agents.ppo_agent as ppo_agent
+    import src.learning_agents.run_dirs as run_dirs
     from src.config.nn_config import DQNConfig, PPOConfig
 
     agent_module = dqn_agent if algo == "dueling_ddqn" else ppo_agent
@@ -399,7 +399,7 @@ def short_training_run(algo: str, runs_dir: Path) -> tuple[str, dict]:
         env.unwrapped.sim.rng.seed(0)  # spawn sampling
         return env
 
-    patches = [(common, "RUNS_DIR", Path(runs_dir)), (agent_module, "make_env", seeded_make_env)]
+    patches = [(run_dirs, "RUNS_DIR", Path(runs_dir)), (agent_module, "make_env", seeded_make_env)]
     with _Patch(patches):
         seed_everything(0)
         train = dqn_agent.train_dueling_ddqn if algo == "dueling_ddqn" else ppo_agent.train_ppo
