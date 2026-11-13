@@ -22,8 +22,8 @@ from src.config.gym_config import GymConfig
 from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
 from src.gym_env import action_codec
 from src.gym_env.rewards import ball_progress_reward, car_ball_distance, goal_reward, relative_team, shaping_reward
+from src.sim.control import HeuristicController, HumanController
 from src.sim.core.actions import CarAction
-from src.sim.core.control import CarControl
 from src.sim.core.observation import OBS_DIM, build_observation, normalize_position
 from src.sim.core.simulation import Simulation
 from src.sim.visualization.renderer import Renderer
@@ -87,9 +87,9 @@ class RocketLeagueEnv(gym.Env):
         self.blue_control = None
         self.orange_control = None
         if control_car == "blue" and bot_type == "heuristic_bot":
-            self.orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
+            self.orange_control = HeuristicController("orange", self.sim)
         elif control_car == "orange":
-            self.blue_control = CarControl(control_type="human", team="blue", sim=self.sim)
+            self.blue_control = HumanController()
 
         if self.discrete_action:
             self.action_space = gym.spaces.Discrete(action_codec.NUM_DISCRETE_ACTIONS)

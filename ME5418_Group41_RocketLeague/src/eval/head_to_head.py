@@ -1,9 +1,10 @@
 """
-Head-to-Head: pit a trained blue agent against orange (blue vs orange).
+Head-to-Head: a continuous match between two cars, each a trained checkpoint or the heuristic bot.
 
-Orange is the heuristic bot by default, or a trained agent if given a model. Either way it plays
-through the mirrored perspective, so it only sees what a blue car would see. Run it with a Pygame
-window (render=True) or headlessly as fast as possible for a quick score tally.
+A checkpoint on Orange plays through the mirrored perspective (`PolicyController`), exactly as the
+env's `control_car="both"` path used by `--eval --mix` does, so a model trained on Blue can play
+either side. Goals reset the kickoff and the match continues until `max_goals` / `max_seconds`.
+Run it with a Pygame window (render=True) or headlessly as fast as possible for a quick score tally.
 
     python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]
 """
@@ -12,8 +13,8 @@ import time
 from pathlib import Path
 
 from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
-from src.eval.agent_control import AgentControl
-from src.sim.core.control import CarControl
+from src.sim.control import HeuristicController
+from src.sim.control.policy import PolicyController
 from src.sim.core.simulation import Simulation
 
 
@@ -36,14 +37,14 @@ def play_head_to_head(
     sim = Simulation(enable_orange=True, random_spawn=random_spawn, seed=seed)
 
     if orange_model is None:
-        orange = CarControl(control_type="heuristic_bot", team="orange", sim=sim)
+        orange = HeuristicController("orange", sim)
     else:
-        orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
+        orange = PolicyController("orange", sim, orange_model)
 
     if blue_model is None:
-        blue = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
+        blue = HeuristicController("blue", sim)
     else:
-        blue = AgentControl(team="blue", sim=sim, model_path=blue_model)
+        blue = PolicyController("blue", sim, blue_model)
 
     print(f"[HeadToHead] Blue:   {'heuristic bot' if blue_model is None else Path(blue_model).name}")
     print(f"[HeadToHead] Orange: {'heuristic bot' if orange_model is None else Path(orange_model).name}")

@@ -77,9 +77,9 @@ def make_sim(**kwargs):
 
 
 def make_bot_controller(team: str, sim):
-    from src.sim.core.control import CarControl
+    from src.sim.control import HeuristicController
 
-    return CarControl(control_type="heuristic_bot", team=team, sim=sim)
+    return HeuristicController(team, sim)
 
 
 def bot_state(controller) -> str:
