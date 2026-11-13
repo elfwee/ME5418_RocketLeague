@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import random
@@ -11,9 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
-from src.sim.core.simulation import Simulation
+from src.sim.core.simulation import Simulation, _normalize_pos
 from src.sim.visualization.renderer import Renderer
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR, ARENA_DIAGONAL
 from src.config.gym_config import GymConfig
 
 # register env as gym environment
@@ -43,7 +44,7 @@ class RocketLeagueEnv(gym.Env):
         self.control_car = control_car
 
         enable_orange = (bot_type == "heuristic_bot") or (self.control_car in ("orange", "both"))
-        self.sim = Simulation(enable_orange=enable_orange, random_spawn=True)
+        self.sim = Simulation(enable_orange=enable_orange, random_spawn=False)
 
         if self.control_car == "blue":
             self.blue_control = None
@@ -64,6 +65,7 @@ class RocketLeagueEnv(gym.Env):
         self.dist_prev = None
         self.input_prev = None
         self._episode_count = 0
+        self._defer_obs = False
         self.isopen = True
         self.discrete_action = discrete_action
 
@@ -74,6 +76,8 @@ class RocketLeagueEnv(gym.Env):
             self.action_space = gym.spaces.MultiDiscrete([9, 2, 2])
         obs_dim = len(self.sim.get_state_norm(as_flat_array=True))
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
+        self._dummy_obs = (np.zeros(obs_dim, dtype=np.float32), np.zeros(obs_dim, dtype=np.float32))
+        self._dummy_idx = 0
 
         self.renderer = None
         self.clock = None
@@ -162,18 +166,29 @@ class RocketLeagueEnv(gym.Env):
         self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=act_orange)
         reward, terminated = self._calculate_reward()
         self.render()
+        goal_scored = self.sim.goal_scored_this_step
+        target_goal_team = "orange" if self.control_car == "orange" else "blue"
         info = {
-            "goal_scored": self.sim.goal_scored_this_step,
+            "goal_scored": goal_scored,
+            "is_success": bool(goal_scored == target_goal_team),
             "score": {"blue": self.sim.score_blue, "orange": self.sim.score_orange},
         }
+        if self._defer_obs and not terminated and self.isopen:
+            self._dummy_idx ^= 1
+            return self._dummy_obs[self._dummy_idx], reward, terminated, not self.isopen, info
         if self.control_car == "both":
             info["obs_orange"] = self._get_obs("orange")
         return self._get_obs(), reward, terminated, not self.isopen, info
 
     def _calculate_reward(self):
-        state = self.sim.get_state_norm_mirror() if self.control_car == "orange" else self.sim.get_state_norm()
-        last_touch = state["last_touch"]
-        goal = state["goal_scored_step"]
+        if self.control_car == "orange":
+            raw_touch = self.sim.last_touch
+            last_touch = "blue" if raw_touch == "orange" else ("orange" if raw_touch == "blue" else raw_touch)
+            raw_goal = self.sim.goal_scored_this_step
+            goal = "blue" if raw_goal == "orange" else ("orange" if raw_goal == "blue" else raw_goal)
+        else:
+            last_touch = self.sim.last_touch
+            goal = self.sim.goal_scored_this_step
 
         if goal is not None:
             self.ball_prev = None
@@ -186,7 +201,10 @@ class RocketLeagueEnv(gym.Env):
         reward = 0.0
 
         # ball progress towards opponent goal
-        ball_x, ball_y = state["ball"]["position"][:2]
+        bx_raw, by_raw = self.sim.ball.position
+        ball_x, ball_y = _normalize_pos((bx_raw, by_raw))
+        if self.control_car == "orange":
+            ball_x = -ball_x
         if self.ball_prev is None:
             self.ball_prev = ball_x
         delta_x = ball_x - self.ball_prev
@@ -201,7 +219,13 @@ class RocketLeagueEnv(gym.Env):
         self.ball_prev = ball_x
 
         # Potential-based car-to-ball approach shaping + distance and time penalty
-        dist = abs(state["relations"]["blue_car_to_ball"]["magnitude"])
+        ego_car = (
+            self.sim.orange_car
+            if (self.control_car == "orange" and self.sim.orange_car is not None)
+            else self.sim.blue_car
+        )
+        cx_raw, cy_raw = ego_car.position
+        dist = min(1.0, math.hypot(bx_raw - cx_raw, by_raw - cy_raw) / ARENA_DIAGONAL)
         if self.dist_prev is None:
             self.dist_prev = dist
         reward += (self.dist_prev - dist) * 1.5

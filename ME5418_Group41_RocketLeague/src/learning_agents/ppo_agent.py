@@ -219,7 +219,12 @@ class PPOAgent:
         else:
             held_action_orange = None
 
-        for sub in range(max(1, self.action_repeat)):
+        repeat = max(1, self.action_repeat)
+        unwrapped = env.unwrapped
+        deferred = False
+        for sub in range(repeat):
+            deferred = sub < (repeat - 1)
+            unwrapped._defer_obs = deferred
             act = action if sub == 0 else held_action
             if action_orange is not None:
                 act_orange = action_orange if sub == 0 else held_action_orange
@@ -227,8 +232,14 @@ class PPOAgent:
             else:
                 next_state, reward, terminated, truncated, info = env.step(act)
             total_reward += float(reward)
-            if terminated or truncated or not env.unwrapped.isopen:
+            if terminated or truncated or not unwrapped.isopen:
                 break
+
+        unwrapped._defer_obs = False
+        if deferred:
+            next_state = unwrapped._get_obs()
+            if unwrapped.control_car == "both":
+                info["obs_orange"] = unwrapped._get_obs("orange")
 
         return next_state, total_reward, terminated, truncated, info
 
@@ -254,6 +265,20 @@ class PPOAgent:
         )
         print(f"[PPO Eval] Saved evaluation GIF ({len(pil_images)} frames, {fps} FPS) to: {path}")
 
+    @staticmethod
+    def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float64)
+        n = len(arr)
+        if n == 0:
+            return arr
+        csum = np.empty(n + 1, dtype=np.float64)
+        csum[0] = 0.0
+        np.cumsum(arr, out=csum[1:])
+        idx = np.arange(n)
+        starts = np.maximum(0, idx - (window - 1))
+        counts = (idx - starts + 1).astype(np.float64)
+        return (csum[idx + 1] - csum[starts]) / counts
+
     def save_graph(
         self,
         rewards_per_episode: list[float],
@@ -261,6 +286,7 @@ class PPOAgent:
         steps_per_episode: list[int] | None = None,
         goals_per_episode: list[int] | None = None,
         value_loss_history: list[float] | None = None,
+        dpi: int = 150,
     ):
         """Plot and save a comprehensive 2x2 training dashboard.
 
@@ -281,17 +307,12 @@ class PPOAgent:
         )
         x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
 
-        # 100-episode rolling mean reward
-        mean_rewards = np.zeros(n)
-        for i in range(n):
-            mean_rewards[i] = np.mean(rewards_per_episode[max(0, i - 99) : i + 1])
+        # 100-episode rolling mean reward (vectorized O(N))
+        mean_rewards = self._rolling_mean(rewards_per_episode, 100)
 
-        # 100-episode rolling goal rate (%)
-        goal_rates = np.zeros(n)
+        # 100-episode rolling goal rate (%) (vectorized O(N))
         has_goals = goals_per_episode is not None and len(goals_per_episode) == n
-        if has_goals:
-            for i in range(n):
-                goal_rates[i] = np.mean(goals_per_episode[max(0, i - 99) : i + 1]) * 100.0
+        goal_rates = self._rolling_mean(goals_per_episode, 100) * 100.0 if has_goals else np.zeros(n)
 
         fig, axs = plt.subplots(2, 2, figsize=(14, 9))
 
@@ -332,9 +353,7 @@ class PPOAgent:
         if value_loss_history is not None and len(value_loss_history) == n:
             v_losses = np.array(value_loss_history)
             axs[1, 1].plot(x, v_losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw Value Loss")
-            smooth_loss = np.zeros(n)
-            for i in range(n):
-                smooth_loss[i] = np.mean(v_losses[max(0, i - 49) : i + 1])
+            smooth_loss = self._rolling_mean(v_losses, 50)
             axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
             axs[1, 1].legend(loc="upper right", framealpha=0.8)
         axs[1, 1].set_title("Critic Optimization Health (Value Loss)", fontsize=11, fontweight="bold")
@@ -344,7 +363,7 @@ class PPOAgent:
 
         fig.suptitle(f"PPO Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE, dpi=150)
+        plt.savefig(self.GRAPH_FILE, dpi=dpi)
         plt.close()
 
     def run(
@@ -628,13 +647,14 @@ class PPOAgent:
                         torch.save(policy_net.state_dict(), self.MODEL_FILE)
 
                     current_time = datetime.now()
-                    if current_time - last_graph_update_time > timedelta(seconds=10):
+                    if current_time - last_graph_update_time > timedelta(seconds=30):
                         self.save_graph(
                             rewards_per_episode,
                             entropy_history,
                             steps_per_episode=steps_history,
                             goals_per_episode=goals_per_episode,
                             value_loss_history=value_loss_history,
+                            dpi=100,
                         )
                         last_graph_update_time = current_time
 

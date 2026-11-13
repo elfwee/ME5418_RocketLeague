@@ -73,6 +73,7 @@ class DuelingDDQNAgent:
         self.train_freq = DQNConfig.train_freq
         self.action_repeat = DQNConfig.action_repeat
         self.epsilon_init = DQNConfig.epsilon_init
+        self.epsilon_finetune = getattr(DQNConfig, "epsilon_finetune", 0.20)
         self.epsilon_decay = DQNConfig.epsilon_decay
         self.epsilon_min = DQNConfig.epsilon_min
         self.network_sync_rate = DQNConfig.target_update_interval
@@ -151,7 +152,12 @@ class DuelingDDQNAgent:
         else:
             held_action_orange_idx = None
 
-        for sub in range(max(1, self.action_repeat)):
+        repeat = max(1, self.action_repeat)
+        unwrapped = env.unwrapped
+        deferred = False
+        for sub in range(repeat):
+            deferred = sub < (repeat - 1)
+            unwrapped._defer_obs = deferred
             act = action_idx if sub == 0 else held_action_idx
             if action_orange_idx is not None:
                 act_orange = action_orange_idx if sub == 0 else held_action_orange_idx
@@ -159,8 +165,14 @@ class DuelingDDQNAgent:
             else:
                 next_state, reward, terminated, truncated, info = env.step(act)
             total_reward += float(reward)
-            if terminated or truncated or not env.unwrapped.isopen:
+            if terminated or truncated or not unwrapped.isopen:
                 break
+
+        unwrapped._defer_obs = False
+        if deferred:
+            next_state = unwrapped._get_obs()
+            if unwrapped.control_car == "both":
+                info["obs_orange"] = unwrapped._get_obs("orange")
 
         return next_state, total_reward, terminated, truncated, info
 
@@ -186,6 +198,20 @@ class DuelingDDQNAgent:
         )
         print(f"[DQN Eval] Saved evaluation GIF ({len(pil_images)} frames, {fps} FPS) to: {path}")
 
+    @staticmethod
+    def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float64)
+        n = len(arr)
+        if n == 0:
+            return arr
+        csum = np.empty(n + 1, dtype=np.float64)
+        csum[0] = 0.0
+        np.cumsum(arr, out=csum[1:])
+        idx = np.arange(n)
+        starts = np.maximum(0, idx - (window - 1))
+        counts = (idx - starts + 1).astype(np.float64)
+        return (csum[idx + 1] - csum[starts]) / counts
+
     def save_graph(
         self,
         rewards_per_episode: list[float],
@@ -193,6 +219,7 @@ class DuelingDDQNAgent:
         steps_per_episode: list[int] | None = None,
         goals_per_episode: list[int] | None = None,
         loss_history: list[float] | None = None,
+        dpi: int = 150,
     ):
         """Plot and save a comprehensive 2x2 training dashboard.
 
@@ -213,17 +240,12 @@ class DuelingDDQNAgent:
         )
         x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
 
-        # 100-episode rolling mean reward
-        mean_rewards = np.zeros(n)
-        for i in range(n):
-            mean_rewards[i] = np.mean(rewards_per_episode[max(0, i - 99) : i + 1])
+        # 100-episode rolling mean reward (vectorized O(N))
+        mean_rewards = self._rolling_mean(rewards_per_episode, 100)
 
-        # 100-episode rolling goal rate (%)
-        goal_rates = np.zeros(n)
+        # 100-episode rolling goal rate (%) (vectorized O(N))
         has_goals = goals_per_episode is not None and len(goals_per_episode) == n
-        if has_goals:
-            for i in range(n):
-                goal_rates[i] = np.mean(goals_per_episode[max(0, i - 99) : i + 1]) * 100.0
+        goal_rates = self._rolling_mean(goals_per_episode, 100) * 100.0 if has_goals else np.zeros(n)
 
         fig, axs = plt.subplots(2, 2, figsize=(14, 9))
 
@@ -265,9 +287,7 @@ class DuelingDDQNAgent:
         if loss_history is not None and len(loss_history) == n:
             losses = np.array(loss_history)
             axs[1, 1].plot(x, losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw TD Loss")
-            smooth_loss = np.zeros(n)
-            for i in range(n):
-                smooth_loss[i] = np.mean(losses[max(0, i - 49) : i + 1])
+            smooth_loss = self._rolling_mean(losses, 50)
             axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
             axs[1, 1].legend(loc="upper right", framealpha=0.8)
         axs[1, 1].set_title("Bellman Optimization Health (TD Loss)", fontsize=11, fontweight="bold")
@@ -278,7 +298,7 @@ class DuelingDDQNAgent:
         agent_name = "Dueling Double DQN" if (self.enable_dueling_dqn and self.enable_double_dqn) else "DQN"
         fig.suptitle(f"{agent_name} Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE, dpi=150)
+        plt.savefig(self.GRAPH_FILE, dpi=dpi)
         plt.close()
 
     def run(
@@ -332,10 +352,12 @@ class DuelingDDQNAgent:
         ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
 
         if is_training:
+            loaded_ckpt = False
             if model_path is not None:
                 if os.path.exists(ckpt_file):
                     state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
                     policy_dqn.load_state_dict(state_dict)
+                    loaded_ckpt = True
                     print(f"[DuelingDDQN Train] Loaded model weights from: {ckpt_file}")
                 else:
                     print(f"[DuelingDDQN Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
@@ -343,7 +365,7 @@ class DuelingDDQNAgent:
                 print("[DuelingDDQN Train] Training from scratch; no model checkpoint specified.")
 
             memory = ReplayMemory(maxlen=self.replay_memory_size)
-            epsilon = self.epsilon_init
+            epsilon = self.epsilon_finetune if loaded_ckpt else self.epsilon_init
 
             target_dqn = DQN(
                 num_states,
@@ -513,13 +535,14 @@ class DuelingDDQNAgent:
                         torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
 
                     current_time = datetime.now()
-                    if current_time - last_graph_update_time > timedelta(seconds=10):
+                    if current_time - last_graph_update_time > timedelta(seconds=30):
                         self.save_graph(
                             rewards_per_episode,
                             epsilon_history,
                             steps_per_episode=steps_history,
                             goals_per_episode=goals_per_episode,
                             loss_history=loss_history,
+                            dpi=100,
                         )
                         last_graph_update_time = current_time
 
@@ -749,13 +772,22 @@ def evaluate_mixed_policies(
                 held_o = _clear_jump(act_o)
 
                 reward_sum = 0.0
-                for sub in range(max(1, action_repeat)):
+                repeat = max(1, action_repeat)
+                unwrapped = env.unwrapped
+                deferred = False
+                for sub in range(repeat):
+                    deferred = sub < (repeat - 1)
+                    unwrapped._defer_obs = deferred
                     ab = act_b if sub == 0 else held_b
                     ao = act_o if sub == 0 else held_o
                     next_state, r, terminated, truncated, info = env.step((ab, ao))
                     reward_sum += float(r)
-                    if terminated or truncated or not env.unwrapped.isopen:
+                    if terminated or truncated or not unwrapped.isopen:
                         break
+                unwrapped._defer_obs = False
+                if deferred:
+                    next_state = unwrapped._get_obs()
+                    info["obs_orange"] = unwrapped._get_obs("orange")
 
                 if save_gif and not gif_saved and len(gif_frames) < 1200:
                     frame = env.unwrapped.get_frame()

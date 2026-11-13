@@ -22,6 +22,7 @@ class DQNConfig:
 
     # Exploration Schedule (per-episode exponential decay)
     epsilon_init = 1.0
+    epsilon_finetune = 0.20
     epsilon_decay = 0.9995
     epsilon_min = 0.05
 

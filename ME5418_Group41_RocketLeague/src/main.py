@@ -177,12 +177,12 @@ def main():
 
             blue_model_path = None
             orange_model_path = None
-            for flag in ("--blue_model", "--model_path_blue"):
+            for flag in ("--blue_model", "--blue_model_path", "--model_path_blue"):
                 if flag in sys.argv:
                     idx = sys.argv.index(flag)
                     if idx + 1 < len(sys.argv):
                         blue_model_path = sys.argv[idx + 1]
-            for flag in ("--orange_model", "--model_path_orange"):
+            for flag in ("--orange_model", "--orange_model_path", "--model_path_orange"):
                 if flag in sys.argv:
                     idx = sys.argv.index(flag)
                     if idx + 1 < len(sys.argv):

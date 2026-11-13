@@ -508,7 +508,12 @@ class Simulation:
 
         return state
 
-    def get_state_norm(self, as_flat_array: bool = False) -> Any:
+    def get_state_norm(
+        self,
+        as_flat_array: bool = False,
+        _include_blue_rays: Optional[bool] = None,
+        _include_orange_rays: Optional[bool] = None,
+    ) -> Any:
         """Query normalized simulation state representation for RL observations or neural policies.
 
         Normalizations applied:
@@ -567,26 +572,27 @@ class Simulation:
         }
 
         # 3. Helper for normalizing a car
-        def _normalize_car(c: Car) -> Dict[str, Any]:
+        def _normalize_car(c: Car, include_rays: bool = True) -> Dict[str, Any]:
             cx, cy = c.position
             nx, ny = c.nose_position
             cvx, cvy = c.velocity
             c_ang = c.angle
             c_spin = c.body.angular_velocity
-            raycasts = c.compute_boundary_raycasts()
 
             norm_rays = []
-            for r in raycasts:
-                norm_rays.append(
-                    {
-                        "angle_relative_deg": r["angle_relative_deg"],
-                        "angle_world_rad": r["angle_world_rad"],
-                        "direction": r["direction"],
-                        "distance": min(1.0, max(0.0, r["distance"] / ARENA_DIAGONAL)),
-                        "hit_point": _normalize_pos(r["hit_point"]),
-                        "hit_normal": r["hit_normal"],
-                    }
-                )
+            if include_rays:
+                raycasts = c.compute_boundary_raycasts()
+                for r in raycasts:
+                    norm_rays.append(
+                        {
+                            "angle_relative_deg": r["angle_relative_deg"],
+                            "angle_world_rad": r["angle_world_rad"],
+                            "direction": r["direction"],
+                            "distance": min(1.0, max(0.0, r["distance"] / ARENA_DIAGONAL)),
+                            "hit_point": _normalize_pos(r["hit_point"]),
+                            "hit_normal": r["hit_normal"],
+                        }
+                    )
 
             return {
                 "position": _normalize_pos((cx, cy)),
@@ -611,13 +617,16 @@ class Simulation:
                 "boundary_distances": [r["distance"] for r in norm_rays],
             }
 
+        inc_blue = True if _include_blue_rays is None else _include_blue_rays
+        inc_orange = (not as_flat_array) if _include_orange_rays is None else _include_orange_rays
+
         has_opp = bool(self.enable_orange and self.orange_car is not None)
         state_norm = {
             "time": self.time_elapsed,
             "match_time": self.match_time,
             "goal_scored_step": self.goal_scored_this_step,
             "ball": ball_norm,
-            "blue_car": _normalize_car(self.blue_car),
+            "blue_car": _normalize_car(self.blue_car, include_rays=inc_blue),
             "relations": relations_norm,
             "score": {"blue": self.score_blue, "orange": self.score_orange},
             "last_goal": self.last_goal_team,
@@ -627,7 +636,7 @@ class Simulation:
         }
 
         if self.orange_car is not None:
-            state_norm["car_orange"] = _normalize_car(self.orange_car)
+            state_norm["car_orange"] = _normalize_car(self.orange_car, include_rays=inc_orange)
 
         if not as_flat_array:
             return state_norm
@@ -715,27 +724,35 @@ class Simulation:
         Orange car (right-to-left) with zero extra raycast queries by reusing the cached
         per-frame boundary raycasts and reversing the 8-ray cyclic ordering `(8 - i) % 8`.
         """
-        base = self.get_state_norm(as_flat_array=False)
+        base = self.get_state_norm(
+            as_flat_array=False,
+            _include_blue_rays=not as_flat_array,
+            _include_orange_rays=True,
+        )
         if self.orange_car is None or base.get("car_orange") is None:
             return self._flatten_state_norm(base) if as_flat_array else base
 
         def _mirror_car_dict(c: Dict[str, Any]) -> Dict[str, Any]:
             d = c["boundary_distances"]
             r = c["boundary_raycasts"]
-            mirrored_distances = [d[0], d[7], d[6], d[5], d[4], d[3], d[2], d[1]]
-            mirrored_raycasts = []
-            for idx, orig_idx in enumerate((0, 7, 6, 5, 4, 3, 2, 1)):
-                ray = r[orig_idx]
-                mirrored_raycasts.append(
-                    {
-                        "angle_relative_deg": idx * 45.0,
-                        "angle_world_rad": math.pi - ray["angle_world_rad"],
-                        "direction": (-ray["direction"][0], ray["direction"][1]),
-                        "distance": ray["distance"],
-                        "hit_point": (-ray["hit_point"][0], ray["hit_point"][1]),
-                        "hit_normal": (-ray["hit_normal"][0], ray["hit_normal"][1]),
-                    }
-                )
+            if len(d) == 8 and len(r) == 8:
+                mirrored_distances = [d[0], d[7], d[6], d[5], d[4], d[3], d[2], d[1]]
+                mirrored_raycasts = []
+                for idx, orig_idx in enumerate((0, 7, 6, 5, 4, 3, 2, 1)):
+                    ray = r[orig_idx]
+                    mirrored_raycasts.append(
+                        {
+                            "angle_relative_deg": idx * 45.0,
+                            "angle_world_rad": math.pi - ray["angle_world_rad"],
+                            "direction": (-ray["direction"][0], ray["direction"][1]),
+                            "distance": ray["distance"],
+                            "hit_point": (-ray["hit_point"][0], ray["hit_point"][1]),
+                            "hit_normal": (-ray["hit_normal"][0], ray["hit_normal"][1]),
+                        }
+                    )
+            else:
+                mirrored_distances = []
+                mirrored_raycasts = []
             return {
                 "position": (-c["position"][0], c["position"][1]),
                 "nose_position": (-c["nose_position"][0], c["nose_position"][1]),
