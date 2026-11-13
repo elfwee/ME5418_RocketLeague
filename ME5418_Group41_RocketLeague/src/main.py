@@ -12,8 +12,7 @@ from src.learning_agents.dueling_ddqn_agent import (
     train_dueling_ddqn,
 )
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.neural_nets.dueling_ddqn_torch import run_dqn_network
-from src.neural_nets.ppo_torch import run_ppo_network
+from src.neural_nets.demos import run_dqn_network, run_ppo_network
 from src.paths import RUNS_DIR
 from src.sim.game import play_headless, play_interactive
 
