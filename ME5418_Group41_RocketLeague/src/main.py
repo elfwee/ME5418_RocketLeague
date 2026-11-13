@@ -16,6 +16,7 @@ from src.learning_agents.dueling_ddqn_agent import (
     evaluate_dueling_ddqn,
     train_dueling_ddqn,
 )
+from src.learning_agents.agent_common import latest_model_path
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.eval.head_to_head import play_head_to_head
 from src.eval.mixed_eval import evaluate_mixed_policies
@@ -26,8 +27,8 @@ RUNS_DIR = f"{ROOT_DIR}/runs"
 def _resolve_default_h2h_model():
     """Return the first available trained checkpoint for --head_to_head, or None for HeuristicBot."""
     candidates = (
-        f"{RUNS_DIR}/model_ppo.pt",
-        f"{RUNS_DIR}/model_dueling_ddqn.pt",
+        str(latest_model_path("ppo")),
+        str(latest_model_path("dueling_ddqn")),
         f"{RUNS_DIR}/20261106_0911/model_ppo.pt",
     )
     for path in candidates:

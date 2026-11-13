@@ -8,7 +8,8 @@ comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
   and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
-- Identical logging, checkpointing (`runs/model_ppo.pt`), and 100-episode rolling metrics (`runs/graph_ppo.png`).
+- Identical logging, checkpointing and 100-episode rolling metrics; each training run writes its
+  outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
 
 This file holds the PPO learning rule and its training loop. Environment creation, action repeat,
 the evaluation loop, logging and plotting are shared with DQN in `agent_common.py`.
@@ -39,8 +40,10 @@ from src.learning_agents.agent_common import (
     control_car_from_args,
     device,
     infer_ppo_arch,
+    latest_model_path,
     load_state_dict_if_exists,
     make_env,
+    make_run_dir,
     normalize_control_car,
     obs_to_tensor,
     resolve_eval_episodes,
@@ -53,9 +56,6 @@ from src.learning_agents.agent_common import (
     summarize_episodes,
 )
 from src.neural_nets.ppo_torch import ActorCritic
-
-RUNS_DIR = ROOT_DIR / PPOConfig.runs_dir
-os.makedirs(RUNS_DIR, exist_ok=True)
 
 
 class RolloutBuffer:
@@ -174,10 +174,12 @@ class PPOAgent:
 
         self.optimizer = None
 
-        self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
+    def _set_run_dir(self, run_dir: str | Path):
+        """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
+        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
+        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
+        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
 
     # ----------------------------------------------------------------------------------------
     # Learning rule
@@ -428,8 +430,9 @@ class PPOAgent:
         """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         control_car = normalize_control_car(control_car)
 
-        # Training only reads a checkpoint when one is given (fine-tuning); evaluation always tries to
-        ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
+        # Training only reads a checkpoint when one is given (fine-tuning); evaluation always tries
+        # to, defaulting to the checkpoint of the most recent training run
+        ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.hyperparameter_set))
         state_dict = load_state_dict_if_exists(ckpt_file) if (not is_training or model_path is not None) else None
         factored, hidden_dim, action_dim = self._resolve_architecture(state_dict)
 
@@ -457,6 +460,9 @@ class PPOAgent:
                     print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
                 else:
                     print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
+                run_dir = make_run_dir(self.hyperparameter_set)
+                self._set_run_dir(run_dir)
+                print(f"[PPO Train] Saving outputs to: {run_dir}")
                 return self._train(env, policy_net, num_episodes, action_dim)
 
             if state_dict is not None:
@@ -464,7 +470,7 @@ class PPOAgent:
             else:
                 print(f"[PPO Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
             if save_gif and gif_path is None:
-                gif_path = os.path.join(RUNS_DIR, f"eval_{self.hyperparameter_set}.gif")
+                gif_path = Path(ckpt_file).parent / f"eval_{self.hyperparameter_set}.gif"
             return self._evaluate(env, policy_net, num_episodes, control_car, gif_path if save_gif else None)
         finally:
             env.close()

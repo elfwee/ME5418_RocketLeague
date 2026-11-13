@@ -7,14 +7,14 @@ Supports:
 3. Parsing existing `.log` checkpoint records if `.csv` metrics are not yet available.
 
 Usage:
-    # Auto-discover all metrics in runs/ and generate comparison plot:
+    # Auto-discover all metrics in runs/ and its per-run folders and generate comparison plot:
     python -m src.learning_agents.plot_learning_curves
 
-    # Plot comparison between specific runs:
-    python -m src.learning_agents.plot_learning_curves --runs runs/metrics_ppo.csv runs/metrics_dueling_ddqn.csv
+    # Plot comparison between specific runs (each training run has its own runs/YYYYMMDD_hhmm_<model>/ folder):
+    python -m src.learning_agents.plot_learning_curves --runs runs/20261113_1655_ppo/metrics_ppo.csv runs/20261113_1702_dueling_ddqn/metrics_dueling_ddqn.csv
 
-    # Generate single 4-panel dashboard for a specific CSV:
-    python -m src.learning_agents.plot_learning_curves --dashboard runs/metrics_ppo.csv --output runs/dashboard_ppo.png
+    # Generate single 4-panel dashboard for a specific CSV (saved next to it unless --output is given):
+    python -m src.learning_agents.plot_learning_curves --dashboard runs/20261113_1655_ppo/metrics_ppo.csv
 """
 
 import argparse
@@ -35,6 +35,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 RUNS_DIR = ROOT_DIR / "runs"
+
+
+def run_label(path: Path, prefix: str) -> str:
+    """Legend label for a metrics/log file: the model name, prefixed with the run folder's
+    timestamp when the file lives in a per-run folder (`runs/YYYYMMDD_hhmm_<model>/`)."""
+    name = path.stem.replace(prefix, "").upper()
+    stamp = re.match(r"\d{8}_\d{4}", path.parent.name)
+    return f"{stamp.group(0)} {name}" if stamp else name
 
 
 def load_metrics_csv(csv_path: str | Path) -> dict[str, np.ndarray]:
@@ -254,18 +262,18 @@ def main(args_list: list[str] | None = None):
             print(f"[Plotting] Error: File '{path}' does not exist.")
             return
         data = load_metrics_csv(path) if path.suffix == ".csv" else parse_log_file(path)
-        out = args.output if args.output else RUNS_DIR / f"dashboard_{path.stem}.png"
+        out = args.output if args.output else path.parent / f"dashboard_{path.stem}.png"
         plot_single_dashboard(data, title=path.stem, output_path=out)
         return
 
     # Multi-run comparison
     run_files = args.runs
     if not run_files:
-        # Search for all metrics CSVs in runs/
-        run_files = list(RUNS_DIR.glob("metrics_*.csv"))
+        # Search for all metrics CSVs in runs/ and its per-run folders
+        run_files = sorted(RUNS_DIR.glob("metrics_*.csv")) + sorted(RUNS_DIR.glob("*/metrics_*.csv"))
         if not run_files:
             # Fallback to .log files
-            run_files = list(RUNS_DIR.glob("run_*.log"))
+            run_files = sorted(RUNS_DIR.glob("run_*.log")) + sorted(RUNS_DIR.glob("*/run_*.log"))
 
     if not run_files:
         print("[Plotting] No metrics or log files found in runs/ directory.")
@@ -275,11 +283,11 @@ def main(args_list: list[str] | None = None):
     for rf in run_files:
         path = Path(rf)
         if path.suffix == ".csv":
-            runs_data[path.stem.replace("metrics_", "").upper()] = load_metrics_csv(path)
+            runs_data[run_label(path, "metrics_")] = load_metrics_csv(path)
         elif path.suffix == ".log":
             parsed = parse_log_file(path)
             if len(parsed.get("step", [])) > 0:
-                runs_data[path.stem.replace("run_", "").upper()] = parsed
+                runs_data[run_label(path, "run_")] = parsed
 
     out = args.output if args.output else RUNS_DIR / "comparison_learning_curves.png"
     if len(runs_data) == 1:

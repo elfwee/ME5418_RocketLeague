@@ -33,8 +33,10 @@ from src.learning_agents.agent_common import (
     build_arg_parser,
     control_car_from_args,
     device,
+    latest_model_path,
     load_state_dict_if_exists,
     make_env,
+    make_run_dir,
     normalize_control_car,
     obs_to_tensor,
     resolve_eval_episodes,
@@ -48,9 +50,6 @@ from src.learning_agents.agent_common import (
 )
 from src.learning_agents.experience_replay import ReplayMemory
 from src.neural_nets.dueling_ddqn_torch import DQN
-
-RUNS_DIR = ROOT_DIR / DQNConfig.runs_dir
-os.makedirs(RUNS_DIR, exist_ok=True)
 
 
 class DuelingDDQNAgent:
@@ -110,10 +109,12 @@ class DuelingDDQNAgent:
         self.loss_fn = nn.SmoothL1Loss()
         self.optimizer = None
 
-        self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
+    def _set_run_dir(self, run_dir: str | Path):
+        """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
+        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
+        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
+        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
 
     # ----------------------------------------------------------------------------------------
     # Learning rule
@@ -293,10 +294,16 @@ class DuelingDDQNAgent:
         try:
             policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
             if is_training:
+                run_dir = make_run_dir(self.hyperparameter_set)
+                self._set_run_dir(run_dir)
+                print(f"[DuelingDDQN Train] Saving outputs to: {run_dir}")
                 return self._train(env, policy_dqn, num_episodes, model_path)
 
+            # Evaluation defaults to the checkpoint of the most recent training run
+            if model_path is None:
+                model_path = latest_model_path(self.hyperparameter_set)
             if save_gif and gif_path is None:
-                gif_path = os.path.join(RUNS_DIR, f"eval_{self.hyperparameter_set}.gif")
+                gif_path = Path(model_path).parent / f"eval_{self.hyperparameter_set}.gif"
             return self._evaluate(
                 env, policy_dqn, num_episodes, model_path, control_car, gif_path if save_gif else None
             )
@@ -427,12 +434,12 @@ class DuelingDDQNAgent:
         env: gym.Env,
         policy_dqn: DQN,
         num_episodes: int | None,
-        model_path: str | Path | None,
+        model_path: str | Path,
         control_car: str,
         gif_path: str | Path | None,
     ) -> dict[str, float]:
         """Greedy evaluation; with `control_car="both"` the same network also drives the orange car."""
-        ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
+        ckpt_file = str(model_path)
         if self._load_checkpoint(policy_dqn, ckpt_file):
             print(f"[DuelingDDQN Eval] Loaded trained model weights from: {ckpt_file}")
         else:

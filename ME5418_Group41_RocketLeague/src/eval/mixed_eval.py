@@ -18,6 +18,7 @@ from src.learning_agents.agent_common import (
     device,
     infer_dqn_arch,
     infer_ppo_arch,
+    latest_model_path,
     load_state_dict_if_exists,
     make_env,
     resolve_eval_episodes,
@@ -80,12 +81,8 @@ def _build_policy_selector(
 ) -> Callable[[torch.Tensor], int | list[int]]:
     """Load `policy_type`'s network and return a greedy `observation -> env action` function."""
     is_ppo = policy_type == "ppo"
-    runs_dir = PPOConfig.runs_dir if is_ppo else DQNConfig.runs_dir
-    ckpt_file = (
-        str(ckpt_override)
-        if ckpt_override is not None
-        else os.path.join(ROOT_DIR, runs_dir, f"model_{policy_type}.pt")
-    )
+    # Default to the checkpoint of this policy's most recent training run
+    ckpt_file = str(ckpt_override) if ckpt_override is not None else str(latest_model_path(policy_type))
 
     if is_ppo:
         net, loaded = _load_ppo_net(num_states, ckpt_file)

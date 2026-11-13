@@ -2,7 +2,7 @@
 Shared plumbing for the learning agents (`dueling_ddqn_agent.py`, `ppo_agent.py`, `mixed_eval.py`).
 
 Everything here is algorithm-agnostic: environment creation, action repeat, checkpoint loading,
-the evaluation episode loop, training bookkeeping (CSV / log / best-model tracking), the 2x2
+per-run output folders, the evaluation episode loop, training bookkeeping (CSV / log / best-model tracking), the 2x2
 training dashboard, GIF export and the command-line parser. The learning rules themselves
 (replay + TD targets, GAE + clipped surrogate) stay in the agent files.
 """
@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import itertools
 import os
 from pathlib import Path
+import re
 from typing import Callable, Sequence
 
 import gymnasium as gym
@@ -21,9 +22,12 @@ import numpy as np
 import torch
 
 from src.config.gym_config import GymConfig
+from src.config.nn_config import AgentConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+RUNS_DIR = ROOT_DIR / AgentConfig.runs_dir
+RUN_DIR_TIME_FORMAT = "%Y%m%d_%H%M"
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 MAX_GIF_FRAMES = 1200
 
@@ -132,6 +136,46 @@ def step_with_action_repeat(env: gym.Env, action, action_orange=None, action_rep
             info["obs_orange"] = unwrapped._get_obs("orange")
 
     return next_state, total_reward, terminated, truncated, info
+
+
+# --------------------------------------------------------------------------------------------
+# Run directories
+# --------------------------------------------------------------------------------------------
+
+
+def make_run_dir(model_name: str) -> Path:
+    """Create and return this training run's output folder, `runs/YYYYMMDD_hhmm_<model_name>/`.
+
+    A second run of the same model started within the same minute gets a `_2`, `_3`, ... suffix,
+    so a run never overwrites or appends to another run's files.
+    """
+    base = f"{datetime.now().strftime(RUN_DIR_TIME_FORMAT)}_{model_name}"
+    for suffix in itertools.chain([""], (f"_{n}" for n in itertools.count(2))):
+        run_dir = RUNS_DIR / f"{base}{suffix}"
+        try:
+            run_dir.mkdir(parents=True)
+            return run_dir
+        except FileExistsError:
+            continue
+
+
+def latest_model_path(model_name: str) -> Path:
+    """Default checkpoint for `model_name`: the one in its most recent run folder.
+
+    Falls back to the legacy flat `runs/model_<model_name>.pt` when no run folder holds a
+    checkpoint (the returned path may not exist; callers handle a missing file).
+    """
+    model_file = f"model_{model_name}.pt"
+    run_dir_pattern = re.compile(rf"(\d{{8}}_\d{{4}})_{re.escape(model_name)}(?:_(\d+))?")
+    candidates = []
+    if RUNS_DIR.is_dir():
+        for run_dir in RUNS_DIR.iterdir():
+            match = run_dir_pattern.fullmatch(run_dir.name)
+            if match and (run_dir / model_file).is_file():
+                candidates.append((match.group(1), int(match.group(2) or 1), run_dir / model_file))
+    if candidates:
+        return max(candidates)[2]
+    return RUNS_DIR / model_file
 
 
 # --------------------------------------------------------------------------------------------
