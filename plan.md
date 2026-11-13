@@ -255,3 +255,7 @@ output identical to `pre-refactor`.
 - `--plot --dashboard` figures use the same panel titles as the training dashboards.
 
 **Left as is:** the README control tables list gamepad buttons, but only the keyboard is read (pre-existing).
+
+**Update:** the `tests/` suite (with `tests/golden/`), `pyproject.toml` and the `pytest` / `ruff` dependencies
+were removed afterwards at the team's request; the verification above was done before their removal. The
+control tables in the docs now state that input is keyboard only.

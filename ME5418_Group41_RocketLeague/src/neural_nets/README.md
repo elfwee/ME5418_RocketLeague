@@ -12,4 +12,4 @@ PyTorch networks shared by training, evaluation and the demos. The network modul
 | [`demos.py`](demos.py) | `--demo --dqn / --double_dqn / --dueling_ddqn / --ppo`: one forward pass on a real observation and one backward pass. |
 
 Parameter counts at the default width (256): Dueling DQN and flat-head PPO 150,949; factored-head
-PPO 147,982; plain DQN 89,636 (checked by `tests/test_networks.py`).
+PPO 147,982; plain DQN 89,636.

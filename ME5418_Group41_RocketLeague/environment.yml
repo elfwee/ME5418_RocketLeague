@@ -14,5 +14,3 @@ dependencies:
           - pymunk>=6.5.0
           - torch>=2.0.0
           - pillow
-          - pytest>=8.0
-          - ruff>=0.6

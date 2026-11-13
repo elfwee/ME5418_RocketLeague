@@ -167,15 +167,6 @@ python -m src --demo --dqn
 python -m src --demo --ppo
 ```
 
-### Step 5: Run the Tests
-
-```bash
-python -m pytest -m "not slow"   # fast checks (~10 s)
-python -m pytest                 # everything, including CLI smoke tests and seeded training runs (~1.5 min)
-```
-
-The suite compares observations, rewards, bot behaviour and short training runs against goldens recorded from the original code (see [`src/README.md`](./src/README.md#5-tests)).
-
 ---
 
 ## AI Tool Declaration

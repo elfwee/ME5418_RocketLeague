@@ -11,8 +11,8 @@ The project represents a generational evolution from **V1** (a top-down planar s
 |                                    ME5418 Sandbox                                     |
 |                                                                                       |
 |     +-------------------+       +---------------------+       +-----------------+     |
-|     |  User / Gamepad   | ----> |      CarAction      | <---- |   HeuristicBot  |     |
-|     |     (WASD/Pad)    |       | (dir_x,dir_y,j,bst) |       |     (HZISM)     |     |
+|     |  User Keyboard    | ----> |      CarAction      | <---- |   HeuristicBot  |     |
+|     |  (WASD / Arrows)  |       | (dir_x,dir_y,j,bst) |       |     (HZISM)     |     |
 |     +-------------------+       +---------------------+       +-----------------+     |
 |                                            |                                          |
 |                                            v                                          |
@@ -48,11 +48,9 @@ The codebase is organized modularly under `src/`. For ease of navigation and spe
 ME5418_Group41_RocketLeague/
 ├── README.md                     # High-level project overview & quickstart
 ├── environment.yml               # Conda environment configuration
-├── pyproject.toml                # ruff + pytest configuration
-├── tests/                        # pytest suite with goldens recorded from the original code
 └── src/
     ├── __main__.py / cli.py      # `python -m src` command-line interface
-    ├── README.md                 # Full module tree, Gymnasium RL documentation, tests
+    ├── README.md                 # Full module tree and Gymnasium RL documentation
     ├── config/                   # sim_config (physics, geometry), render_config, gym_config, nn_config
     ├── gym_env/                  # RocketLeagueEnv, action codec, rewards, ActionRepeat wrapper
     ├── neural_nets/              # DQN / ActorCritic networks, checkpoint loading, demos
@@ -198,7 +196,7 @@ Y (meters)
 
 ---
 
-## 5. Hierarchical Zone & Intercept State Machine (HZISM) AI (`src/ai/heuristic_bot.py`)
+## 5. Hierarchical Zone & Intercept State Machine (HZISM) AI (`src/sim/ai/heuristic_bot.py`)
 
 The automated Orange opponent operates on an asynchronous finite state machine structured around match geometry, ball trajectory prediction, and zone partitioning:
 
@@ -236,7 +234,7 @@ The automated Orange opponent operates on an asynchronous finite state machine s
 
 ---
 
-## 6. Visualization & Telemetry Interface (`src/visualization/renderer.py`)
+## 6. Visualization & Telemetry Interface (`src/sim/visualization/renderer.py`)
 
 The Pygame rendering pipeline runs at 40 pixels per meter ($\text{PPM} = 40.0$), displaying a $1400 \times 720$ canvas.
 
@@ -281,15 +279,17 @@ The Pygame rendering pipeline runs at 40 pixels per meter ($\text{PPM} = 40.0$),
 
 ## 7. Control Scheme
 
-| Action | Keyboard Mapping | Gamepad (Xbox / DualShock / DirectInput) | Description |
-| :--- | :--- | :--- | :--- |
-| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys` | Left Analog Thumbstick | Analog / cardinal orientation command |
-| **Jump / Flip** | `Spacebar` | Button A (Button 0) | Jump 1 from ground; Jump 2 (Double jump / 360° flip) in air |
-| **Rocket Boost** | `Left/Right Shift`, `O`, `J` | Button B (Button 1) or Right Trigger (Button 5) | High-thrust directional aerial acceleration |
-| **Reset Field** | `R` | — | Resets car, ball, and kickoff positions |
-| **Toggle AI Bot** | `B` | — | Dynamically adds or removes Orange AI opponent |
-| **Toggle Boundary Raycasts** | `L` or Click HUD button | — | Shows/hides 8 egocentric 45° field raycasts |
-| **Exit** | `Escape` | — | Closes simulation window |
+Input is keyboard only (a connected gamepad is detected and named at startup, but its buttons are not read).
+
+| Action | Keyboard Mapping | Description |
+| :--- | :--- | :--- |
+| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys` | Cardinal / diagonal orientation command |
+| **Jump / Flip** | `Spacebar` | Jump 1 from ground; Jump 2 (Double jump / 360° flip) in air |
+| **Rocket Boost** | `Left/Right Shift`, `O`, `J` | High-thrust directional aerial acceleration |
+| **Reset Field** | `R` | Resets car, ball, and kickoff positions |
+| **Toggle AI Bot** | `B` | Dynamically adds or removes Orange AI opponent |
+| **Toggle Boundary Raycasts** | `L` or Click HUD button | Shows/hides 8 egocentric 45° field raycasts |
+| **Exit** | `Escape` | Closes simulation window |
 
 ---
 
@@ -392,33 +392,7 @@ obs_orange = build_observation(sim, "orange")  # 52 floats, mirrored
 
 ---
 
-## 9. Verification & Automated Test Suite
-
-The `tests/` pytest suite (configured in `pyproject.toml`) runs from the project root:
-
-```bash
-python -m pytest -m "not slow"   # ~10 s
-python -m pytest                 # full suite, ~1.5 min
-```
-
-* **Golden regression (`test_golden_trajectories.py`)**: observation and reward trajectories recorded from the
-  original code (tag `pre-refactor`) must be reproduced bit for bit: Blue vs. the heuristic bot (fixed and random
-  spawns), the policy on both cars, the mirrored Orange view, Blue alone, scripted goals covering every terminal
-  reward, the action-repeat paths, and a 1,800-frame heuristic bot-vs-bot match (physics state and bot states).
-* **Observation (`test_observation.py`)**: contiguous 52-float layout, the mirror is an involution, Orange's view
-  matches Blue's at a symmetric kickoff, seeded spawns repeat.
-* **Environment, rewards, wrappers (`test_env.py`, `test_rewards_and_wrappers.py`)**: `check_env`, all 36 action
-  encodings, jump release under action repeat, reward terms, seeding without touching global RNGs.
-* **Networks (`test_networks.py`)**: `state_dict` layouts and the 150,949-parameter count, checkpoint loading and
-  greedy actions for every architecture.
-* **Controllers (`test_controllers.py`)**: `--eval --mix` and `--head_to_head` give both cars identical inputs.
-* **Training (`test_training.py`)**: short seeded DQN and PPO runs reproduce their metrics CSV and weights exactly.
-* **CLI (`test_cli.py`, `test_cli_parsing.py`)**: every documented `python -m src ...` command runs, in a
-  temporary copy of `src/` so `runs/` is untouched.
-
----
-
-## 10. Quickstart Commands
+## 9. Quickstart Commands
 
 ### Interactive Simulation
 ```bash
@@ -429,11 +403,8 @@ python -m src --play
 python -m src --play --no-orange
 ```
 
-### Headless Benchmark / Continuous Integration
+### Headless Benchmark
 ```bash
 # Run 300 headless simulation steps with telemetry logging
 python -m src --play --headless
-
-# Execute the test suite
-python -m pytest
 ```

@@ -79,7 +79,6 @@ src/
         ├── event_handling.py    # Window / keyboard / mouse events
         └── README.md            # Coordinate mapping, HUD specs, and visual features
 
-tests/                           # pytest suite (see "Tests" below)
 ```
 
 ---
@@ -167,38 +166,21 @@ env = ActionRepeat(env, 4)
 
 ## 4. Control Scheme
 
-| Action                  | Keyboard Mapping                | Gamepad       | Description                                         |
-| :---------------------- | :------------------------------ | :------------ | :-------------------------------------------------- |
-| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys` | Left Stick    | Cardinal / analog steering input                    |
-| **Jump / Flip**         | `Spacebar`                      | Button A      | Jump 1 from ground; Jump 2 (neutral or flip) in air |
-| **Rocket Boost**        | `Shift`, `O`, `J`               | Button B / R2 | Aerial propulsion thrust                            |
-| **Reset Field**         | `R`                             | —             | Resets car and ball to kickoff positions            |
-| **Toggle AI Bot**       | `B`                             | —             | Adds or removes the Orange bot                      |
-| **Toggle Raycasts**     | `L`                             | —             | Shows/hides 8 radial boundary raycasts              |
-| **Quit**                | `Escape`                        | —             | Exits simulation                                    |
+Input is keyboard only (a connected gamepad is detected and named at startup, but its buttons are not read).
+
+| Action                  | Keyboard Mapping                     | Description                                         |
+| :---------------------- | :----------------------------------- | :-------------------------------------------------- |
+| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys`      | Cardinal / diagonal steering input                  |
+| **Jump / Flip**         | `Spacebar`                           | Jump 1 from ground; Jump 2 (neutral or flip) in air |
+| **Rocket Boost**        | `Left/Right Shift`, `O`, `J`         | Aerial propulsion thrust                            |
+| **Reset Field**         | `R`                                  | Resets car and ball to kickoff positions            |
+| **Toggle AI Bot**       | `B`                                  | Adds or removes the Orange car                      |
+| **Toggle Raycasts**     | `L` or click the HUD button          | Shows/hides 8 radial boundary raycasts              |
+| **Quit**                | `Escape`                             | Exits simulation                                    |
 
 ---
 
-## 5. Tests
-
-From the project root (`ME5418_Group41_RocketLeague/`), with the `me5418_projenv` environment:
-
-```bash
-python -m pytest -m "not slow"   # ~10 s: goldens, observation, rewards, networks, controllers, CLI parsing
-python -m pytest                 # + CLI smoke tests of every documented command and seeded training runs (~1.5 min)
-ruff check src tests && ruff format --check src tests
-```
-
-`tests/golden/` holds data recorded from the pre-refactor code (tag `pre-refactor`): observation and reward
-trajectories for Blue, the mirrored Orange view, both-car play and random spawns, scripted goals, the
-action-repeat paths, a heuristic bot-vs-bot match, network layouts and checkpoints, and short seeded DQN / PPO
-training runs. Observations are compared bit for bit. `tests/scenarios.py` is the only adapter between the
-tests and the code; `python tests/record_goldens.py <group>` re-records a group when a behaviour change is
-intended.
-
----
-
-## 6. Module Deep Dives
+## 5. Module Deep Dives
 
 For exhaustive mathematical equations and subsystem specifications, see:
 
