@@ -208,3 +208,50 @@ Defaults are what the plan assumes unless told otherwise.
 - **Trainer abstraction** (phase 6) can hide algorithm differences such as PPO's next-value backfill and truncation bootstrapping. Mitigation: a short seeded training run must produce the same metrics CSV before and after.
 - **Solver-order body swap** in `Simulation` is fragile; it is out of scope except for tests.
 - **Parallel work**: teammates' branches will conflict with file moves. Land phases 1 to 3 quickly and announce the moves in phases 4, 6, and 7 before starting them.
+
+## 7. Execution status (2026-11-14)
+
+All phases 0 to 9 are done on `major_refactor` (one or more commits per phase, pure moves committed
+separately). The starting point is tagged `pre-refactor` (decision D4). Nothing has been pushed or opened as
+a PR yet. Decisions D1 to D3 and D5 were taken at their defaults.
+
+**Verification.** `python -m pytest` (118 tests, ~1.5 min; `-m "not slow"` ~10 s) and `ruff check` /
+`ruff format --check` pass. The sim is bit-deterministic, so observation goldens are compared exactly
+(phase 0 exit criterion needed no relaxation). Every README command was re-run; every checkpoint in `runs/`
+loads; evaluations and a seeded random-spawn head-to-head with the trained PPO and Dueling DDQN models print
+output identical to `pre-refactor`.
+
+**Goldens that changed, and why** (all other goldens are unchanged since phase 0):
+- Phase 4, both seeded training runs: spawn sampling moved off the global `random` module onto the sim's own
+  generator. Replaying the old draw order reproduces the old PPO golden exactly.
+- Phase 6, the seeded DQN training run: `ReplayMemory` samples from its own generator. Sampling from the global
+  stream again reproduces the previous DQN golden exactly. The PPO golden did not change.
+
+**Deviations from the plan as written**
+- Phase 1 also removed `agent_common.build_arg_parser` (planned for phase 3): its only callers were the
+  per-module `__main__` blocks.
+- Phase 5: `reset(seed)` seeds the sim's spawn generator with the reset seed directly instead of deriving it
+  from `self.np_random`, which keeps every random-spawn sequence identical. The "don't build the observation"
+  path is a `Frame(action, action_orange, build_obs)` step input rather than a `step(..., build_obs=False)`
+  keyword, because gym's wrappers (TimeLimit, OrderEnforcing, env checker) only forward the action.
+- Phase 6: `AgentConfig.seed` (default None) was added to seed the replay sampler. The dashboard panel
+  definitions live in one table (`dashboard.METRIC_PANELS`) used by the trainer and `--plot`, not in the agents.
+- Phase 7 (D3): the two Orange pipelines gave identical inputs to both cars for 2,400 frames, for three
+  checkpoint pairs; `tests/test_controllers.py` keeps that. They still differ in episode structure, by design:
+  eval resets after every goal and at the time limit, head-to-head is one continuous match.
+- Phase 8: renderer output was checked pixel-identical on 21 frames, but that check is not in the suite (font
+  rendering is machine-dependent).
+- Also done: `ENABLE_ORANGE_CAR` / `BOT_AERIAL_MIN_BOOST` left `sim_config.py` (section 2, config misuse);
+  `TECHNICAL_SUMMARY.md` needed more than path fixes (wrong observation layout, `get_state()` keys, solver
+  iterations, quickstart).
+
+**Intentional behaviour changes** (none affect physics, observations, rewards, checkpoints or run layout)
+- CLI: unknown, abbreviated or conflicting flags are errors; the D2 aliases are gone; `--head_to_head` has no
+  hard-coded `runs/20261106_0911` fallback.
+- `get_state_norm(as_flat_array=False)` and the nested mirror dict are removed (no callers). An Orange view
+  with no Orange car raises instead of returning 44 floats.
+- `Simulation.reset(spawn_index=...)` no longer forces a fixed kickoff (it had no callers); `env.reset(seed)`
+  no longer reseeds global `random` / `np.random`.
+- `--plot --dashboard` figures use the same panel titles as the training dashboards.
+
+**Left as is:** the README control tables list gamepad buttons, but only the keyboard is read (pre-existing).
