@@ -1,5 +1,7 @@
 """Environment creation for training and evaluation, plus the tensor/device conventions the agents share."""
 
+import os
+
 import gymnasium as gym
 import torch
 
@@ -7,7 +9,10 @@ from src.config.gym_config import GymConfig
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
 from src.gym_env.wrappers import ActionRepeat
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# CPU by default: the 150k-parameter networks act on one state at a time, where GPU launch and
+# transfer overhead makes CUDA ~3x slower than CPU (0.87 ms vs 0.28 ms per action). Set
+# RL_DEVICE=cuda to use the GPU anyway (e.g. for much larger networks).
+device = os.environ.get("RL_DEVICE", "cpu")
 
 
 def normalize_control_car(control_car: str) -> str:

@@ -14,6 +14,7 @@ from src.config.sim_config import (
     BALL_RADIUS,
     BALL_RESTITUTION,
     BALL_SPIN_DRAG,
+    CATEGORY_DYNAMIC,
     COLLISION_BALL,
 )
 
@@ -34,6 +35,7 @@ class Ball:
         self.shape.elasticity = BALL_RESTITUTION
         self.shape.friction = BALL_FRICTION
         self.shape.collision_type = COLLISION_BALL
+        self.shape.filter = pymunk.ShapeFilter(categories=CATEGORY_DYNAMIC)
 
         self.space.add(self.body, self.shape)
 

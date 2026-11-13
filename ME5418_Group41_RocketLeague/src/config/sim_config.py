@@ -151,3 +151,9 @@ COLLISION_ARENA = 1
 COLLISION_CAR_BODY = 2
 COLLISION_BALL = 4
 COLLISION_GOAL_SENSOR = 5
+
+# --- Shape filter category bits ---
+# Every shape's mask stays at "all", so these never change which shapes collide; they only let
+# spatial queries ask for arena walls alone (see `Car._query_nearby_boundary`).
+CATEGORY_ARENA = 0b01
+CATEGORY_DYNAMIC = 0b10  # cars and ball

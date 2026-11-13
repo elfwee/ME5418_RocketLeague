@@ -51,6 +51,8 @@ from src.config.sim_config import (
     CENTER_Y,
     CHASSIS_ELASTICITY,
     CHASSIS_FRICTION,
+    CATEGORY_ARENA,
+    CATEGORY_DYNAMIC,
     COLLISION_ARENA,
     COLLISION_CAR_BODY,
     FACING_FLIP_THRESHOLD,
@@ -75,6 +77,9 @@ from src.config.sim_config import (
     WHEEL_REAR_X,
 )
 from src.sim.core.actions import CarAction
+
+# Query filter that matches arena walls only (the goal sensors also match; callers check collision_type)
+_ARENA_ONLY = pymunk.ShapeFilter(mask=CATEGORY_ARENA)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -142,7 +147,7 @@ class Car:
         # Own shapes share a filter group so the suspension raycasts ignore the car itself
         Car._next_filter_group += 1
         self._filter_group = Car._next_filter_group
-        self._query_filter = pymunk.ShapeFilter(group=self._filter_group)
+        self._query_filter = pymunk.ShapeFilter(group=self._filter_group, categories=CATEGORY_DYNAMIC)
 
         self.chassis_shape = pymunk.Poly(self.body, self.base_chassis_vertices, radius=0.03)
         self.chassis_shape.elasticity = CHASSIS_ELASTICITY
@@ -158,6 +163,9 @@ class Car:
         self.is_boosting: bool = False
         self._is_boost_recovery: bool = False
         self._prev_jump_action: bool = False
+        # (pose, result) of the last `_detect_nearby_boundary` query; the arena is static, so the
+        # result only changes when the car's position, angle or facing does
+        self._boundary_cache: tuple[tuple, object] | None = None
 
         # Rocket League Jump 2 / Dodge state
         self.has_jump2: bool = True
@@ -412,6 +420,16 @@ class Car:
         Returns:
             (min_distance, inward_normal) or None if no boundary is within range.
         """
+        pos = self.body.position
+        pose = (pos.x, pos.y, self.body.angle, self.facing_x)
+        if self._boundary_cache is not None and self._boundary_cache[0] == pose:
+            return self._boundary_cache[1]
+        result = self._query_nearby_boundary()
+        self._boundary_cache = (pose, result)
+        return result
+
+    def _query_nearby_boundary(self) -> tuple[float, tuple[float, float]] | None:
+        """Uncached body of `_detect_nearby_boundary`: point-query the arena around five probe points."""
         p_rear = self.body.local_to_world(self.rear_wheel_local)
         p_front = self.body.local_to_world(self.front_wheel_local)
         probe_points = [
@@ -426,7 +444,7 @@ class Car:
         best_normal: tuple[float, float] | None = None
 
         for pt in probe_points:
-            queries = self.space.point_query(pt, BOUNDARY_ALIGN_DIST, pymunk.ShapeFilter())
+            queries = self.space.point_query(pt, BOUNDARY_ALIGN_DIST, _ARENA_ONLY)
             for q in queries:
                 if q.shape.collision_type != COLLISION_ARENA:
                     continue

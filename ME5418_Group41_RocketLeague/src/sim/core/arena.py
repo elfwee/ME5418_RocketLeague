@@ -6,6 +6,7 @@ import pymunk
 
 from src.config.sim_config import (
     ARENA_SEGMENT_RADIUS,
+    CATEGORY_ARENA,
     COLLISION_ARENA,
     COLLISION_GOAL_SENSOR,
     CORNER_RADIUS,
@@ -67,6 +68,7 @@ class Arena:
         seg.elasticity = elasticity
         seg.friction = friction
         seg.collision_type = COLLISION_ARENA
+        seg.filter = pymunk.ShapeFilter(categories=CATEGORY_ARENA)
         self.space.add(seg)
         self.segments.append(seg)
         return seg
