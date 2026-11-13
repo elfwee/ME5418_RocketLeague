@@ -111,6 +111,7 @@ obs, info = env.reset(seed=0)  # the seed fixes the random spawn sequence
 
 # The agents decide every 4 frames (15 Hz), releasing jump after the first frame
 from src.gym_env.wrappers import ActionRepeat
+
 env = ActionRepeat(env, 4)
 ```
 
