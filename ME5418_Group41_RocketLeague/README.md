@@ -58,7 +58,7 @@ _(Alternatively, install the core dependencies via pip: `pip install torch gymna
 
 ### Step 3: Train & Evaluate Learning Agents
 
-All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Checkpoints, training logs, and reward/loss plots are automatically saved to `runs/`.
+All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
 
 #### Train a Learning Agent
 
@@ -104,21 +104,21 @@ python -m src --eval --mix --ppo --dueling_ddqn [--render] [--blue_model path_b.
 Run a continuous scoreboard match (goal kickoffs reset automatically; supports PPO, Dueling DDQN/DQN checkpoints via `--blue`/`--orange`, or `none`/`bot` for `HeuristicBot`).
 
 ```bash
-# Default resolved checkpoints in runs/ (or specify checkpoints / 'none' for HeuristicBot)
+# Default: checkpoint of the most recent training run in runs/ (or specify checkpoints / 'none' for HeuristicBot)
 python -m src --head_to_head [--blue PATH|none] [--orange PATH|none] [--random_spawn] [--seed N]
 
 # Headless match with score/time limits
-python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/model_dueling_ddqn.pt --orange none
+python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/YYYYMMDD_hhmm_dueling_ddqn/model_dueling_ddqn.pt --orange none
 ```
 
 #### Plot Learning Curves & Dashboards
 
 ```bash
-# Auto-discover runs/ metrics and generate multi-algorithm comparative curves
+# Auto-discover metrics in runs/ (including per-run folders) and generate multi-algorithm comparative curves
 python -m src --plot
 
 # Generate a 4-panel dashboard for a specific agent run
-python -m src --plot --dashboard runs/metrics_ppo.csv
+python -m src --plot --dashboard runs/YYYYMMDD_hhmm_ppo/metrics_ppo.csv
 ```
 
 ### Step 4: Interactive Play & Component Demos

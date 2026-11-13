@@ -30,7 +30,9 @@ src/
 │   ├── orange_perspective.py    # Mirrored Orange observation adapter (delegates to Simulation.get_state_norm_mirror) & OrangePerspectiveBot
 │   ├── head_to_head.py          # Continuous agent-vs-agent scoreboard match runner (--head_to_head)
 │   ├── experience_replay.py     # ReplayMemory FIFO circular transition buffer for off-policy DQN
-│   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent (--train / --eval / --mix for Dueling DDQN, DDQN, DQN)
+│   ├── agent_common.py          # Shared agent plumbing: env creation, action repeat, eval loop, TrainingLogger, dashboard, CLI
+│   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent (--train / --eval for Dueling DDQN, DDQN, DQN)
+│   ├── mixed_eval.py            # evaluate_mixed_policies (--mix: any DQN variant / PPO as Blue vs. mirrored Orange)
 │   ├── ppo_agent.py             # PPOAgent (--train / --eval with RolloutBuffer, GAE, clipped PPO)
 │   └── plot_learning_curves.py  # Multi-run training curve comparison and dashboard plotting (--plot)
 │

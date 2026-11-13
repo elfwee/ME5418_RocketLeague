@@ -4,10 +4,11 @@ Dueling Double DQN (D3QN) Learning Agent — Training & Validation/Evaluation Pi
 Adapted from johnnycode8's PyTorch DQN tutorial (https://github.com/johnnycode8/dqn_pytorch)
 and integrated with `src/neural_nets/dueling_ddqn_torch.py`, `src/config/nn_config.py`, and
 `src/gym_env/rocket_league_env.py`.
+
+This file holds the DQN learning rule and its training loop. Environment creation, action repeat,
+the evaluation loop, logging and plotting are shared with PPO in `agent_common.py`.
 """
 
-import argparse
-from datetime import datetime, timedelta
 import itertools
 import os
 from pathlib import Path
@@ -15,7 +16,6 @@ import random
 import sys
 
 import gymnasium as gym
-import matplotlib
 import numpy as np
 import torch
 from torch import nn
@@ -27,17 +27,30 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
-from src.gym_env.rocket_league_env import RocketLeagueEnv
+from src.learning_agents.agent_common import (
+    DashboardPanel,
+    TrainingLogger,
+    build_arg_parser,
+    control_car_from_args,
+    device,
+    latest_model_path,
+    load_state_dict_if_exists,
+    make_env,
+    make_run_dir,
+    normalize_control_car,
+    obs_to_tensor,
+    resolve_eval_episodes,
+    rolling_mean,
+    run_eval_episodes,
+    save_gif,
+    save_periodic_checkpoint,
+    save_training_dashboard,
+    scored_goal,
+    step_with_action_repeat,
+    summarize_episodes,
+)
 from src.learning_agents.experience_replay import ReplayMemory
 from src.neural_nets.dueling_ddqn_torch import DQN
-
-DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
-RUNS_DIR = ROOT_DIR / DQNConfig.runs_dir
-os.makedirs(RUNS_DIR, exist_ok=True)
-
-matplotlib.use("Agg")  # Use a non-interactive backend for matplotlib
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class DuelingDDQNAgent:
@@ -56,6 +69,10 @@ class DuelingDDQNAgent:
         4. Truncation-Aware Value Bootstrapping (`optimize`):
            Bootstraps V(s') on time-limit `truncated` episodes and only zeroes future value
            on true goal `terminated` states (`target_q = r + (1 - terminated) * gamma * next_q`).
+
+    One training decision step (`_train`):
+        `_select_action` -> `_step_with_action_repeat` -> `_store_transition` -> `_maybe_optimize`
+        -> `_sync_target_network` (every `network_sync_rate` steps); `_decay_epsilon` once per episode.
     """
 
     def __init__(
@@ -91,12 +108,21 @@ class DuelingDDQNAgent:
 
         # SmoothL1Loss (Huber loss) prevents exploding gradients from large +/-20 goal rewards
         self.loss_fn = nn.SmoothL1Loss()
+        self.checkpoint_interval = DQNConfig.checkpoint_interval
+
         self.optimizer = None
 
-        self.LOG_FILE = os.path.join(RUNS_DIR, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(RUNS_DIR, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(RUNS_DIR, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(RUNS_DIR, f"metrics_{self.hyperparameter_set}.csv")
+    def _set_run_dir(self, run_dir: str | Path):
+        """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
+        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
+        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
+        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
+        self.CHECKPOINT_DIR = os.path.join(run_dir, "checkpoints")
+
+    # ----------------------------------------------------------------------------------------
+    # Learning rule
+    # ----------------------------------------------------------------------------------------
 
     def optimize(self, mini_batch, policy_dqn: DQN, target_dqn: DQN) -> float:
         """Perform a single Double/Dueling DQN gradient step on a sampled minibatch."""
@@ -128,89 +154,78 @@ class DuelingDDQNAgent:
         self.optimizer.step()
         return float(loss.item())
 
-    def _step_with_action_repeat(
-        self,
-        env: gym.Env,
-        action_idx: int,
-        action_orange_idx: int | None = None,
-    ):
+    # ----------------------------------------------------------------------------------------
+    # Algorithm steps
+    # ----------------------------------------------------------------------------------------
+
+    def _build_network(self, num_states: int, num_actions: int) -> DQN:
+        return DQN(num_states, num_actions, self.fcl_nodes, enable_dueling_dqn=self.enable_dueling_dqn).to(device)
+
+    def _load_checkpoint(self, policy_dqn: DQN, ckpt_file: str) -> bool:
+        """Load weights into `policy_dqn`; returns False when the checkpoint file does not exist."""
+        state_dict = load_state_dict_if_exists(ckpt_file)
+        if state_dict is None:
+            return False
+        policy_dqn.load_state_dict(state_dict)
+        return True
+
+    def _greedy_action(self, policy_dqn: DQN, state: torch.Tensor) -> torch.Tensor:
+        """argmax_a Q(s, a) as a 0-dim int64 tensor."""
+        with torch.no_grad():
+            return policy_dqn(state.unsqueeze(0)).squeeze(0).argmax()
+
+    def _select_action(self, env: gym.Env, policy_dqn: DQN, state: torch.Tensor, epsilon: float) -> torch.Tensor:
+        """Epsilon-greedy: a uniformly random action with probability `epsilon`, else the greedy one."""
+        if random.random() < epsilon:
+            return torch.tensor(env.action_space.sample(), dtype=torch.int64, device=device)
+        return self._greedy_action(policy_dqn, state)
+
+    def _step_with_action_repeat(self, env: gym.Env, action_idx: int, action_orange_idx: int | None = None):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
         edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
-        total_reward = 0.0
-        terminated = False
-        truncated = False
-        info = {}
-        next_state = None
+        return step_with_action_repeat(env, action_idx, action_orange_idx, self.action_repeat)
 
-        # Clear jump bit on repeat frames > 0 so _prev_jump_action resets between decisions
-        jump_bit = (action_idx % 4) // 2
-        held_action_idx = (action_idx - 2) if jump_bit == 1 else action_idx
+    def _store_transition(
+        self,
+        memory: ReplayMemory,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        new_state: torch.Tensor,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+    ):
+        reward_tensor = torch.tensor(reward, dtype=torch.float32, device=device)
+        memory.append((state, action, new_state, reward_tensor, terminated, truncated))
 
-        if action_orange_idx is not None:
-            jump_bit_orange = (action_orange_idx % 4) // 2
-            held_action_orange_idx = (action_orange_idx - 2) if jump_bit_orange == 1 else action_orange_idx
-        else:
-            held_action_orange_idx = None
+    def _maybe_optimize(self, memory: ReplayMemory, step_count: int, policy_dqn: DQN, target_dqn: DQN) -> float | None:
+        """Run one gradient step every `train_freq` decision steps once the replay memory has warmed
+        up; returns the TD loss, or None when no update happened."""
+        warmed_up = len(memory) >= max(self.learning_starts, self.mini_batch_size)
+        if not warmed_up or step_count % self.train_freq != 0:
+            return None
+        mini_batch = memory.sample(self.mini_batch_size)
+        return self.optimize(mini_batch, policy_dqn, target_dqn)
 
-        repeat = max(1, self.action_repeat)
-        unwrapped = env.unwrapped
-        deferred = False
-        for sub in range(repeat):
-            deferred = sub < (repeat - 1)
-            unwrapped._defer_obs = deferred
-            act = action_idx if sub == 0 else held_action_idx
-            if action_orange_idx is not None:
-                act_orange = action_orange_idx if sub == 0 else held_action_orange_idx
-                next_state, reward, terminated, truncated, info = env.step((act, act_orange))
-            else:
-                next_state, reward, terminated, truncated, info = env.step(act)
-            total_reward += float(reward)
-            if terminated or truncated or not unwrapped.isopen:
-                break
+    def _sync_target_network(self, policy_dqn: DQN, target_dqn: DQN):
+        """Hard update: copy the online network's weights into the target network."""
+        target_dqn.load_state_dict(policy_dqn.state_dict())
 
-        unwrapped._defer_obs = False
-        if deferred:
-            next_state = unwrapped._get_obs()
-            if unwrapped.control_car == "both":
-                info["obs_orange"] = unwrapped._get_obs("orange")
+    def _decay_epsilon(self, epsilon: float) -> float:
+        """Per-episode exponential decay, floored at `epsilon_min`."""
+        return max(epsilon * self.epsilon_decay, self.epsilon_min)
 
-        return next_state, total_reward, terminated, truncated, info
+    # ----------------------------------------------------------------------------------------
+    # Plotting / GIF helpers
+    # ----------------------------------------------------------------------------------------
 
     def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
         """Compile and save a list of RGB frames as an optimized animated GIF."""
-        from PIL import Image
-
-        if not frames:
-            return
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        # Downscale by 50% (700x360) for smooth playback and lightweight GIF file size
-        pil_images = [
-            Image.fromarray(f).resize((700, 360), Image.Resampling.BILINEAR)
-            for f in frames
-        ]
-        pil_images[0].save(
-            str(path),
-            save_all=True,
-            append_images=pil_images[1:],
-            duration=int(1000 / fps),
-            loop=0,
-            optimize=True,
-        )
-        print(f"[DQN Eval] Saved evaluation GIF ({len(pil_images)} frames, {fps} FPS) to: {path}")
+        save_gif(frames, path, fps=fps, tag="DQN")
 
     @staticmethod
     def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
-        arr = np.asarray(values, dtype=np.float64)
-        n = len(arr)
-        if n == 0:
-            return arr
-        csum = np.empty(n + 1, dtype=np.float64)
-        csum[0] = 0.0
-        np.cumsum(arr, out=csum[1:])
-        idx = np.arange(n)
-        starts = np.maximum(0, idx - (window - 1))
-        counts = (idx - starts + 1).astype(np.float64)
-        return (csum[idx + 1] - csum[starts]) / counts
+        return rolling_mean(values, window)
 
     def save_graph(
         self,
@@ -229,77 +244,32 @@ class DuelingDDQNAgent:
             3. Exploration Schedule: Epsilon decay (ε) vs. Environment Steps.
             4. Bellman Optimization Health: TD / Huber Loss (with 50-ep smoothing) vs. Environment Steps.
         """
-        import matplotlib.pyplot as plt
-
-        n = len(rewards_per_episode)
-        if n == 0:
-            return
-
-        x = np.array(
-            steps_per_episode if steps_per_episode is not None and len(steps_per_episode) == n else list(range(1, n + 1))
-        )
-        x_label = "Environment Steps" if steps_per_episode is not None else "Episodes"
-
-        # 100-episode rolling mean reward (vectorized O(N))
-        mean_rewards = self._rolling_mean(rewards_per_episode, 100)
-
-        # 100-episode rolling goal rate (%) (vectorized O(N))
-        has_goals = goals_per_episode is not None and len(goals_per_episode) == n
-        goal_rates = self._rolling_mean(goals_per_episode, 100) * 100.0 if has_goals else np.zeros(n)
-
-        fig, axs = plt.subplots(2, 2, figsize=(14, 9))
-
-        # 1. Sample Efficiency
-        axs[0, 0].plot(x, rewards_per_episode, color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
-        axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
-        axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-        axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
-        axs[0, 0].set_xlabel(x_label)
-        axs[0, 0].set_ylabel("Episodic Return")
-        axs[0, 0].grid(True, alpha=0.3, linestyle="--")
-        axs[0, 0].legend(loc="upper left", framealpha=0.8)
-
-        # 2. Objective Goal Conversion Rate (%)
-        if has_goals:
-            axs[0, 1].plot(x, goal_rates, color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
-            axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
-            axs[0, 1].set_ylim([-2, 105])
-        axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
-        axs[0, 1].set_xlabel(x_label)
-        axs[0, 1].set_ylabel("Goal Rate (%)")
-        axs[0, 1].grid(True, alpha=0.3, linestyle="--")
-        axs[0, 1].legend(loc="upper left", framealpha=0.8)
-
-        # 3. Epsilon Decay
-        eps_arr = np.array(epsilon_history) if epsilon_history is not None else np.array([])
-        if len(eps_arr) == n:
-            axs[1, 0].plot(x, eps_arr, color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
-        elif len(eps_arr) > 0:
-            axs[1, 0].plot(eps_arr, color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
-        axs[1, 0].set_title("Exploration Schedule (Epsilon Decay)", fontsize=11, fontweight="bold")
-        axs[1, 0].set_xlabel(x_label)
-        axs[1, 0].set_ylabel("Epsilon (ε)")
-        axs[1, 0].set_ylim([-0.02, 1.05])
-        axs[1, 0].grid(True, alpha=0.3, linestyle="--")
-        axs[1, 0].legend(loc="upper right", framealpha=0.8)
-
-        # 4. TD Huber Loss
-        if loss_history is not None and len(loss_history) == n:
-            losses = np.array(loss_history)
-            axs[1, 1].plot(x, losses, color="#d62728", alpha=0.25, linewidth=0.8, label="Raw TD Loss")
-            smooth_loss = self._rolling_mean(losses, 50)
-            axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
-            axs[1, 1].legend(loc="upper right", framealpha=0.8)
-        axs[1, 1].set_title("Bellman Optimization Health (TD Loss)", fontsize=11, fontweight="bold")
-        axs[1, 1].set_xlabel(x_label)
-        axs[1, 1].set_ylabel("Huber Loss")
-        axs[1, 1].grid(True, alpha=0.3, linestyle="--")
-
         agent_name = "Dueling Double DQN" if (self.enable_dueling_dqn and self.enable_double_dqn) else "DQN"
-        fig.suptitle(f"{agent_name} Training Dashboard ({self.hyperparameter_set})", fontsize=13, fontweight="bold")
-        plt.tight_layout()
-        plt.savefig(self.GRAPH_FILE, dpi=dpi)
-        plt.close()
+        save_training_dashboard(
+            self.GRAPH_FILE,
+            f"{agent_name} Training Dashboard ({self.hyperparameter_set})",
+            rewards_per_episode,
+            steps_per_episode,
+            goals_per_episode,
+            exploration=DashboardPanel(
+                values=epsilon_history,
+                title="Exploration Schedule (Epsilon Decay)",
+                ylabel="Epsilon (ε)",
+                label="Epsilon (ε)",
+                ylim=(-0.02, 1.05),
+            ),
+            loss=DashboardPanel(
+                values=loss_history,
+                title="Bellman Optimization Health (TD Loss)",
+                ylabel="Huber Loss",
+                label="Raw TD Loss",
+            ),
+            dpi=dpi,
+        )
+
+    # ----------------------------------------------------------------------------------------
+    # Training / evaluation loops
+    # ----------------------------------------------------------------------------------------
 
     def run(
         self,
@@ -314,108 +284,88 @@ class DuelingDDQNAgent:
         random_spawn: bool = True,
     ) -> dict[str, float]:
         """Run training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
-        if control_car in ("bot_vs_bot", "bots", "both"):
-            control_car = "both"
-
-        make_kwargs = {}
-        if max_episode_steps is not None:
-            make_kwargs["max_episode_steps"] = max_episode_steps
-
-        if render:
-            render_mode = "human"
-        elif save_gif:
-            render_mode = "rgb_array"
-        else:
-            render_mode = None
-
-        env = gym.make(
-            self.env_id,
-            render_mode=render_mode,
+        control_car = normalize_control_car(control_car)
+        env = make_env(
             bot_type=self.bot_type,
             discrete_action=True,
             control_car="blue" if is_training else control_car,
+            render=render,
+            save_gif=save_gif,
             random_spawn=random_spawn,
-            **make_kwargs,
+            max_episode_steps=max_episode_steps,
+            env_id=self.env_id,
+        )
+        try:
+            policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
+            if is_training:
+                run_dir = make_run_dir(self.hyperparameter_set)
+                self._set_run_dir(run_dir)
+                print(f"[DuelingDDQN Train] Saving outputs to: {run_dir}")
+                return self._train(env, policy_dqn, num_episodes, model_path)
+
+            # Evaluation defaults to the checkpoint of the most recent training run
+            if model_path is None:
+                model_path = latest_model_path(self.hyperparameter_set)
+            if save_gif and gif_path is None:
+                gif_path = Path(model_path).parent / f"eval_{self.hyperparameter_set}.gif"
+            return self._evaluate(
+                env, policy_dqn, num_episodes, model_path, control_car, gif_path if save_gif else None
+            )
+        finally:
+            env.close()
+
+    def _train(
+        self,
+        env: gym.Env,
+        policy_dqn: DQN,
+        num_episodes: int | None,
+        model_path: str | Path | None,
+    ) -> dict[str, float]:
+        """Off-policy training loop: act epsilon-greedily, store transitions, learn from replay."""
+        loaded_ckpt = False
+        if model_path is None:
+            print("[DuelingDDQN Train] Training from scratch; no model checkpoint specified.")
+        elif self._load_checkpoint(policy_dqn, str(model_path)):
+            loaded_ckpt = True
+            print(f"[DuelingDDQN Train] Loaded model weights from: {model_path}")
+        else:
+            print(f"[DuelingDDQN Train] Warning: Checkpoint '{model_path}' not found; training from scratch.")
+
+        memory = ReplayMemory(maxlen=self.replay_memory_size)
+        epsilon = self.epsilon_finetune if loaded_ckpt else self.epsilon_init
+
+        target_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
+        self._sync_target_network(policy_dqn, target_dqn)
+        target_dqn.eval()
+
+        self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
+
+        logger = TrainingLogger(self.LOG_FILE, self.METRICS_FILE, extra_columns=("epsilon", "td_loss"))
+        epsilon_history = []
+        loss_history = []
+        step_count = 0
+        current_loss = 0.0
+
+        def save_graph(dpi: int = 150):
+            self.save_graph(
+                logger.rewards,
+                epsilon_history,
+                steps_per_episode=logger.steps,
+                goals_per_episode=logger.goals,
+                loss_history=loss_history,
+                dpi=dpi,
+            )
+
+        print(
+            f"[DuelingDDQN Train] Device={device} | Dueling={self.enable_dueling_dqn} | "
+            f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
         )
 
-        num_states = env.observation_space.shape[0]
-        num_actions = env.action_space.n
-
-        rewards_per_episode = []
-        goals_per_episode = []
-
-        policy_dqn = DQN(
-            num_states,
-            num_actions,
-            self.fcl_nodes,
-            enable_dueling_dqn=self.enable_dueling_dqn,
-        ).to(device)
-
-        ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
-
-        if is_training:
-            loaded_ckpt = False
-            if model_path is not None:
-                if os.path.exists(ckpt_file):
-                    state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                    policy_dqn.load_state_dict(state_dict)
-                    loaded_ckpt = True
-                    print(f"[DuelingDDQN Train] Loaded model weights from: {ckpt_file}")
-                else:
-                    print(f"[DuelingDDQN Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
-            else:
-                print("[DuelingDDQN Train] Training from scratch; no model checkpoint specified.")
-
-            memory = ReplayMemory(maxlen=self.replay_memory_size)
-            epsilon = self.epsilon_finetune if loaded_ckpt else self.epsilon_init
-
-            target_dqn = DQN(
-                num_states,
-                num_actions,
-                self.fcl_nodes,
-                enable_dueling_dqn=self.enable_dueling_dqn,
-            ).to(device)
-            target_dqn.load_state_dict(policy_dqn.state_dict())
-            target_dqn.eval()
-
-            step_count = 0
-            epsilon_history = []
-            steps_history = []
-            loss_history = []
-            current_loss = 0.0
-            self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
-
-            best_mean_reward = float("-inf")
-            last_graph_update_time = datetime.now()
-            print(
-                f"[DuelingDDQN Train] Device={device} | Dueling={self.enable_dueling_dqn} | "
-                f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
-            )
-        else:
-            if os.path.exists(ckpt_file):
-                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                policy_dqn.load_state_dict(state_dict)
-                print(f"[DuelingDDQN Eval] Loaded trained model weights from: {ckpt_file}")
-            else:
-                print(f"[DuelingDDQN Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
-            policy_dqn.eval()
-            step_count = 0
-            epsilon = 0.0
-
-        gif_frames = []
-        gif_saved = False
-
         episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
-
         try:
             for episode in episode_iter:
-                state, reset_info = env.reset()
-                state = torch.tensor(state, dtype=torch.float32, device=device)
-                state_orange = (
-                    torch.tensor(reset_info["obs_orange"], dtype=torch.float32, device=device)
-                    if (not is_training and control_car == "both" and "obs_orange" in reset_info)
-                    else None
-                )
+                state, _ = env.reset()
+                state = obs_to_tensor(state)
 
                 if not env.unwrapped.isopen:
                     break
@@ -423,154 +373,100 @@ class DuelingDDQNAgent:
                 terminated = False
                 truncated = False
                 episode_reward = 0.0
-                scored_goal = 0
+                goal = 0
 
                 while not (terminated or truncated):
-                    if is_training and random.random() < epsilon:
-                        action_idx = env.action_space.sample()
-                        action = torch.tensor(action_idx, dtype=torch.int64, device=device)
-                    else:
-                        with torch.no_grad():
-                            action = policy_dqn(state.unsqueeze(0)).squeeze(0).argmax()
-                            action_idx = int(action.item())
-
-                    action_orange_idx = None
-                    if not is_training and control_car == "both" and state_orange is not None:
-                        with torch.no_grad():
-                            action_orange = policy_dqn(state_orange.unsqueeze(0)).squeeze(0).argmax()
-                            action_orange_idx = int(action_orange.item())
-
+                    action = self._select_action(env, policy_dqn, state, epsilon)
                     next_state, reward, terminated, truncated, info = self._step_with_action_repeat(
-                        env, action_idx, action_orange_idx
+                        env, int(action.item())
                     )
 
-                    if not is_training and save_gif and not gif_saved and len(gif_frames) < 1200:
-                        frame = env.unwrapped.get_frame()
-                        if frame is not None:
-                            gif_frames.append(frame)
-
                     episode_reward += reward
-                    if info.get("is_success", False) or (terminated and reward > 0.0):
-                        scored_goal = 1
+                    if scored_goal(info, terminated, reward):
+                        goal = 1
 
-                    new_state = torch.tensor(next_state, dtype=torch.float32, device=device)
-                    if not is_training and control_car == "both" and "obs_orange" in info:
-                        state_orange = torch.tensor(info["obs_orange"], dtype=torch.float32, device=device)
-                    reward_tensor = torch.tensor(reward, dtype=torch.float32, device=device)
+                    new_state = obs_to_tensor(next_state)
+                    self._store_transition(memory, state, action, new_state, reward, terminated, truncated)
+                    step_count += 1
 
-                    if is_training:
-                        memory.append((state, action, new_state, reward_tensor, terminated, truncated))
-                        step_count += 1
+                    # Perform gradient update every `train_freq` decision steps inside the episode
+                    loss = self._maybe_optimize(memory, step_count, policy_dqn, target_dqn)
+                    if loss is not None:
+                        current_loss = loss
 
-                        # Perform gradient update every `train_freq` decision steps inside the episode
-                        if (
-                            len(memory) >= max(self.learning_starts, self.mini_batch_size)
-                            and step_count % self.train_freq == 0
-                        ):
-                            mini_batch = memory.sample(self.mini_batch_size)
-                            current_loss = self.optimize(mini_batch, policy_dqn, target_dqn)
-
-                        # Sync target network every `network_sync_rate` decision steps
-                        if step_count % self.network_sync_rate == 0:
-                            target_dqn.load_state_dict(policy_dqn.state_dict())
+                    # Sync target network every `network_sync_rate` decision steps
+                    if step_count % self.network_sync_rate == 0:
+                        self._sync_target_network(policy_dqn, target_dqn)
 
                     state = new_state
 
                     if not env.unwrapped.isopen:
                         break
 
-                rewards_per_episode.append(episode_reward)
-                goals_per_episode.append(scored_goal)
-
-                if not is_training and save_gif and not gif_saved and len(gif_frames) > 0:
-                    out_gif = (
-                        gif_path if gif_path is not None else os.path.join(RUNS_DIR, f"eval_{self.hyperparameter_set}.gif")
-                    )
-                    self._save_gif(gif_frames, out_gif)
-                    gif_saved = True
-                mean_reward_100 = float(np.mean(rewards_per_episode[-100:]))
-                goal_rate_100 = float(np.mean(goals_per_episode[-100:])) * 100.0
-                score_blue = int(env.unwrapped.sim.score_blue)
-                score_orange = int(env.unwrapped.sim.score_orange)
-
+                mean_reward_100, goal_rate_100 = logger.record_episode(episode_reward, goal)
                 print(
                     f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
                     f"Mean(100) = {mean_reward_100:7.2f} | GoalRate(100) = {goal_rate_100:5.1f}% | "
                     f"Eps = {epsilon:.3f} | Steps = {step_count}"
-                    if is_training
-                    else f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
-                    f"Score(Blue-Orange) = {score_blue}-{score_orange} | "
-                    f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
                 )
 
-                if is_training:
-                    epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
-                    epsilon_history.append(epsilon)
-                    steps_history.append(step_count)
-                    loss_history.append(current_loss)
+                epsilon = self._decay_epsilon(epsilon)
+                epsilon_history.append(epsilon)
+                loss_history.append(current_loss)
+                logger.write_metrics(episode, step_count, extras=(epsilon, current_loss))
 
-                    # Append metrics to CSV log for flexible offline plotting & evaluation
-                    write_header = not os.path.exists(self.METRICS_FILE) or os.path.getsize(self.METRICS_FILE) == 0
-                    with open(self.METRICS_FILE, "a", newline="") as f:
-                        if write_header:
-                            f.write("episode,step,reward,mean_reward_100,goal,goal_rate_100,epsilon,td_loss\n")
-                        f.write(
-                            f"{episode},{step_count},{episode_reward:.4f},{mean_reward_100:.4f},"
-                            f"{scored_goal},{goal_rate_100:.2f},{epsilon:.4f},{current_loss:.6f}\n"
-                        )
+                # Save best model based on 100-episode rolling mean reward
+                if logger.is_new_best(episode, num_episodes):
+                    logger.log_new_best(episode, step_count)
+                    torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
 
-                    # Save best model based on 100-episode rolling mean reward
-                    should_save_best = (len(rewards_per_episode) >= 20 and mean_reward_100 > best_mean_reward) or (
-                        num_episodes is not None and episode == num_episodes - 1 and best_mean_reward == float("-inf")
-                    )
-                    if should_save_best:
-                        best_mean_reward = mean_reward_100
-                        log_message = (
-                            f"{datetime.now().strftime(DATE_FORMAT)} - New best 100-ep mean reward: "
-                            f"{mean_reward_100:.2f} (Goal rate: {goal_rate_100:.1f}%, Ep reward: {episode_reward:.2f}) "
-                            f"at episode {episode} (step {step_count}). Saving model."
-                        )
-                        print(log_message)
-                        with open(self.LOG_FILE, "a") as log_file:
-                            log_file.write(log_message + "\n")
+                # Periodic snapshot of the current model, independent of the best-model file
+                save_periodic_checkpoint(
+                    policy_dqn, self.CHECKPOINT_DIR, self.hyperparameter_set, episode, self.checkpoint_interval
+                )
 
-                        torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
+                if logger.graph_due():
+                    save_graph(dpi=100)
 
-                    current_time = datetime.now()
-                    if current_time - last_graph_update_time > timedelta(seconds=30):
-                        self.save_graph(
-                            rewards_per_episode,
-                            epsilon_history,
-                            steps_per_episode=steps_history,
-                            goals_per_episode=goals_per_episode,
-                            loss_history=loss_history,
-                            dpi=100,
-                        )
-                        last_graph_update_time = current_time
-
-                    if not env.unwrapped.isopen:
-                        print("Exiting environment.")
-                        break
+                if not env.unwrapped.isopen:
+                    print("Exiting environment.")
+                    break
         finally:
-            final_score_blue = int(env.unwrapped.sim.score_blue)
-            final_score_orange = int(env.unwrapped.sim.score_orange)
-            if is_training and len(rewards_per_episode) > 0:
-                self.save_graph(
-                    rewards_per_episode,
-                    epsilon_history,
-                    steps_per_episode=steps_history,
-                    goals_per_episode=goals_per_episode,
-                    loss_history=loss_history,
-                )
-            env.close()
+            # Also runs on Ctrl-C, so an interrupted training run still gets its final dashboard
+            if logger.rewards:
+                save_graph()
 
-        return {
-            "episodes": len(rewards_per_episode),
-            "mean_reward": float(np.mean(rewards_per_episode)) if rewards_per_episode else 0.0,
-            "goal_rate": float(np.mean(goals_per_episode)) * 100.0 if goals_per_episode else 0.0,
-            "score_blue": final_score_blue,
-            "score_orange": final_score_orange,
-        }
+        return summarize_episodes(env, logger.rewards, logger.goals)
+
+    def _evaluate(
+        self,
+        env: gym.Env,
+        policy_dqn: DQN,
+        num_episodes: int | None,
+        model_path: str | Path,
+        control_car: str,
+        gif_path: str | Path | None,
+    ) -> dict[str, float]:
+        """Greedy evaluation; with `control_car="both"` the same network also drives the orange car."""
+        ckpt_file = str(model_path)
+        if self._load_checkpoint(policy_dqn, ckpt_file):
+            print(f"[DuelingDDQN Eval] Loaded trained model weights from: {ckpt_file}")
+        else:
+            print(f"[DuelingDDQN Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
+        policy_dqn.eval()
+
+        def select(state: torch.Tensor) -> int:
+            return int(self._greedy_action(policy_dqn, state).item())
+
+        return run_eval_episodes(
+            env,
+            select_blue=select,
+            select_orange=select if control_car == "both" else None,
+            action_repeat=self.action_repeat,
+            num_episodes=num_episodes,
+            gif_path=gif_path,
+            gif_tag="DQN",
+        )
 
 
 # Backwards-compatible alias
@@ -619,16 +515,11 @@ def evaluate_dueling_ddqn(
         enable_dueling_dqn=enable_dueling_dqn,
         enable_double_dqn=enable_double_dqn,
     )
-    episodes = (
-        None
-        if (render and num_episodes is None and not save_gif)
-        else (num_episodes if num_episodes is not None else DQNConfig.eval_episodes)
-    )
     return agent.run(
         is_training=False,
         render=render,
         max_episode_steps=max_episode_steps,
-        num_episodes=episodes,
+        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, DQNConfig.eval_episodes),
         model_path=model_path,
         save_gif=save_gif,
         gif_path=gif_path,
@@ -637,256 +528,8 @@ def evaluate_dueling_ddqn(
     )
 
 
-def evaluate_mixed_policies(
-    blue_policy: str = "dueling_ddqn",
-    orange_policy: str = "ppo",
-    blue_model_path: str | Path | None = None,
-    orange_model_path: str | Path | None = None,
-    num_episodes: int | None = DQNConfig.eval_episodes,
-    render: bool = False,
-    max_episode_steps: int | None = None,
-    save_gif: bool = False,
-    gif_path: str | Path | None = None,
-    random_spawn: bool = True,
-) -> dict[str, float]:
-    """Evaluate two potentially different policies head-to-head (Blue policy vs. mirrored Orange policy).
-
-    Supports any combination of ('dueling_ddqn', 'double_dqn', 'dqn', 'ppo') for Blue and Orange.
-    """
-    from src.config.nn_config import PPOConfig
-    from src.neural_nets.ppo_torch import ActorCritic
-
-    def _norm_policy_name(name: str) -> str:
-        n = name.strip().lstrip("-").lower()
-        if n in ("ddqn", "dueling_ddqn"):
-            return "dueling_ddqn"
-        if n in ("double_dqn", "dqn", "ppo"):
-            return n
-        raise ValueError(f"Unsupported policy type '{name}'. Choose from: dueling_ddqn, double_dqn, dqn, ppo.")
-
-    blue_pol = _norm_policy_name(blue_policy)
-    orange_pol = _norm_policy_name(orange_policy)
-
-    make_kwargs = {}
-    if max_episode_steps is not None:
-        make_kwargs["max_episode_steps"] = max_episode_steps
-
-    if render:
-        render_mode = "human"
-    elif save_gif:
-        render_mode = "rgb_array"
-    else:
-        render_mode = None
-
-    env = gym.make(
-        GymConfig.gym_id,
-        render_mode=render_mode,
-        bot_type=DQNConfig.bot_type,
-        discrete_action=True,
-        control_car="both",
-        random_spawn=random_spawn,
-        **make_kwargs,
-    )
-    num_states = env.observation_space.shape[0]
-
-    def _build_policy_selector(team_label: str, pol_type: str, ckpt_override: str | Path | None):
-        if pol_type == "ppo":
-            default_ckpt = os.path.join(ROOT_DIR, PPOConfig.runs_dir, "model_ppo.pt")
-            ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
-            state_dict = None
-            factored = getattr(PPOConfig, "factored_action", True)
-            hidden_dim = PPOConfig.hidden_size
-            action_dim: int | list[int] = list(PPOConfig.action_dims) if factored else 36
-            if os.path.exists(ckpt_file):
-                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                hidden_dim = state_dict["fc1.weight"].shape[0]
-                if "actor_heads.0.weight" in state_dict:
-                    n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("actor_heads.")})
-                    action_dim = [state_dict[f"actor_heads.{i}.weight"].shape[0] for i in range(n_heads)]
-                elif "actor.weight" in state_dict:
-                    action_dim = state_dict["actor.weight"].shape[0]
-            net = ActorCritic(num_states, action_dim, hidden_dim).to(device)
-            if state_dict is not None:
-                net.load_state_dict(state_dict)
-                print(f"[Mix Eval ({team_label}: PPO)] Loaded trained weights from: {ckpt_file}")
-            else:
-                print(f"[Mix Eval ({team_label}: PPO)] Warning: Checkpoint '{ckpt_file}' not found; using initial weights.")
-            net.eval()
-
-            def _select(obs_t: torch.Tensor):
-                with torch.no_grad():
-                    logits, _ = net(obs_t.unsqueeze(0))
-                    if net.is_factored:
-                        return [int(l.squeeze(0).argmax().item()) for l in logits]
-                    return int(logits.squeeze(0).argmax().item())
-
-            return _select
-        else:
-            default_ckpt = os.path.join(ROOT_DIR, DQNConfig.runs_dir, f"model_{pol_type}.pt")
-            ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
-            enable_dueling = pol_type == "dueling_ddqn"
-            hidden_dim = DQNConfig.hidden_size
-            action_dim = 36
-            state_dict = None
-            if os.path.exists(ckpt_file):
-                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                hidden_dim = state_dict["fc1.weight"].shape[0]
-                enable_dueling = "advantages.weight" in state_dict
-                out_key = "advantages.weight" if enable_dueling else "fc3.weight"
-                action_dim = state_dict[out_key].shape[0]
-            net = DQN(num_states, action_dim, hidden_dim, enable_dueling_dqn=enable_dueling).to(device)
-            if state_dict is not None:
-                net.load_state_dict(state_dict)
-                print(f"[Mix Eval ({team_label}: {pol_type})] Loaded trained weights from: {ckpt_file}")
-            else:
-                print(
-                    f"[Mix Eval ({team_label}: {pol_type})] Warning: Checkpoint '{ckpt_file}' not found; using initial weights."
-                )
-            net.eval()
-
-            def _select(obs_t: torch.Tensor):
-                with torch.no_grad():
-                    return int(net(obs_t.unsqueeze(0)).squeeze(0).argmax().item())
-
-            return _select
-
-    def _clear_jump(act):
-        if isinstance(act, (list, tuple, np.ndarray)):
-            return [int(act[0]), 0, int(act[2])]
-        jump_bit = (int(act) % 4) // 2
-        return (int(act) - 2) if jump_bit == 1 else int(act)
-
-    select_blue = _build_policy_selector("Blue", blue_pol, blue_model_path)
-    select_orange = _build_policy_selector("Orange", orange_pol, orange_model_path)
-
-    episodes = (
-        None
-        if (render and num_episodes is None and not save_gif)
-        else (num_episodes if num_episodes is not None else DQNConfig.eval_episodes)
-    )
-    episode_iter = range(episodes) if episodes is not None else itertools.count()
-    action_repeat = DQNConfig.action_repeat
-
-    rewards_per_episode = []
-    goals_per_episode = []
-    gif_frames = []
-    gif_saved = False
-    helper_agent = DuelingDDQNAgent()
-
-    try:
-        for episode in episode_iter:
-            state, reset_info = env.reset()
-            state_b = torch.tensor(state, dtype=torch.float32, device=device)
-            state_o = torch.tensor(reset_info["obs_orange"], dtype=torch.float32, device=device)
-
-            if not env.unwrapped.isopen:
-                break
-
-            terminated = False
-            truncated = False
-            episode_reward = 0.0
-            scored_goal = 0
-
-            while not (terminated or truncated):
-                act_b = select_blue(state_b)
-                act_o = select_orange(state_o)
-                held_b = _clear_jump(act_b)
-                held_o = _clear_jump(act_o)
-
-                reward_sum = 0.0
-                repeat = max(1, action_repeat)
-                unwrapped = env.unwrapped
-                deferred = False
-                for sub in range(repeat):
-                    deferred = sub < (repeat - 1)
-                    unwrapped._defer_obs = deferred
-                    ab = act_b if sub == 0 else held_b
-                    ao = act_o if sub == 0 else held_o
-                    next_state, r, terminated, truncated, info = env.step((ab, ao))
-                    reward_sum += float(r)
-                    if terminated or truncated or not unwrapped.isopen:
-                        break
-                unwrapped._defer_obs = False
-                if deferred:
-                    next_state = unwrapped._get_obs()
-                    info["obs_orange"] = unwrapped._get_obs("orange")
-
-                if save_gif and not gif_saved and len(gif_frames) < 1200:
-                    frame = env.unwrapped.get_frame()
-                    if frame is not None:
-                        gif_frames.append(frame)
-
-                episode_reward += reward_sum
-                if info.get("is_success", False) or (terminated and reward_sum > 0.0):
-                    scored_goal = 1
-
-                state_b = torch.tensor(next_state, dtype=torch.float32, device=device)
-                state_o = torch.tensor(info["obs_orange"], dtype=torch.float32, device=device)
-
-                if not env.unwrapped.isopen:
-                    break
-
-            rewards_per_episode.append(episode_reward)
-            goals_per_episode.append(scored_goal)
-
-            if save_gif and not gif_saved and len(gif_frames) > 0:
-                out_gif = (
-                    gif_path
-                    if gif_path is not None
-                    else os.path.join(RUNS_DIR, f"eval_mix_{blue_pol}_vs_{orange_pol}.gif")
-                )
-                helper_agent._save_gif(gif_frames, out_gif)
-                gif_saved = True
-
-            score_blue = int(env.unwrapped.sim.score_blue)
-            score_orange = int(env.unwrapped.sim.score_orange)
-            print(
-                f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
-                f"Score(Blue-Orange) = {score_blue}-{score_orange} | "
-                f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
-            )
-    finally:
-        final_score_blue = int(env.unwrapped.sim.score_blue)
-        final_score_orange = int(env.unwrapped.sim.score_orange)
-        env.close()
-
-    return {
-        "blue_policy": blue_pol,
-        "orange_policy": orange_pol,
-        "episodes": len(rewards_per_episode),
-        "mean_reward": float(np.mean(rewards_per_episode)) if rewards_per_episode else 0.0,
-        "goal_rate": float(np.mean(goals_per_episode)) * 100.0 if goals_per_episode else 0.0,
-        "score_blue": final_score_blue,
-        "score_orange": final_score_orange,
-    }
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Dueling Double DQN Agent for Rocket League")
-    parser.add_argument(
-        "--hyperparameter_set",
-        type=str,
-        default=DQNConfig.hyperparameter_set,
-        help="Specify the hyperparameter set / run name",
-    )
-    parser.add_argument("--train", action="store_true", help="Run the agent in training mode")
-    parser.add_argument("--eval", action="store_true", help="Run the agent in evaluation/validation mode")
-    parser.add_argument("--render", action="store_true", help="Render the environment in a Pygame window")
-    parser.add_argument("--episodes", type=int, default=None, help="Maximum number of episodes to run")
-    parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
-    parser.add_argument("--gif", action="store_true", help="Record and save an animated GIF of the evaluation episode")
-    parser.add_argument("--gif_path", type=str, default=None, help="Optional custom output path for the GIF")
-    parser.add_argument("--blue", action="store_true", help="Policy controls Blue car vs HeuristicBot Orange (default)")
-    parser.add_argument("--orange", action="store_true", help="Policy controls Orange car (mirrored) vs Human Blue")
-    parser.add_argument(
-        "--bot-vs-bot",
-        "--bots",
-        "--both",
-        dest="bot_vs_bot",
-        action="store_true",
-        help="Policy controls both Blue and Orange cars",
-    )
-    args = parser.parse_args()
+    args = build_arg_parser("Dueling Double DQN Agent for Rocket League", DQNConfig.hyperparameter_set).parse_args()
 
     if args.train:
         train_dueling_ddqn(
@@ -895,12 +538,6 @@ if __name__ == "__main__":
             hyperparameter_set=args.hyperparameter_set,
         )
     else:
-        if args.orange:
-            ctrl_car = "orange"
-        elif args.bot_vs_bot:
-            ctrl_car = "both"
-        else:
-            ctrl_car = "blue"
         eval_eps = args.episodes if args.episodes is not None else (None if args.render else DQNConfig.eval_episodes)
         evaluate_dueling_ddqn(
             num_episodes=eval_eps,
@@ -909,5 +546,5 @@ if __name__ == "__main__":
             hyperparameter_set=args.hyperparameter_set,
             save_gif=args.gif,
             gif_path=args.gif_path,
-            control_car=ctrl_car,
+            control_car=control_car_from_args(args),
         )

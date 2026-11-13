@@ -1,64 +1,74 @@
 # nn_config
+"""Hyperparameters for the DQN and PPO agents.
+
+Read defaults straight off the class (`DQNConfig.hidden_size`), or build a variant for an
+experiment with `dataclasses.replace(DQNConfig(), hidden_size=128)`.
+"""
 from dataclasses import dataclass
 
 
-@dataclass
-class DQNConfig:
+@dataclass(frozen=True)
+class AgentConfig:
+    """Settings shared by both agents, kept identical so DQN and PPO runs are comparable."""
+
+    # Architecture
+    hidden_size: int = 256
+
+    # Optimization
+    learning_rate: float = 3e-4
+    discount_factor: float = 0.99
+    action_repeat: int = 4  # Simulation steps per agent decision
+
+    # Environment & Checkpointing
+    bot_type: str = "heuristic_bot"  # "none" or "heuristic_bot"
+    eval_episodes: int = 5
+    runs_dir: str = "runs"
+    checkpoint_interval: int = 500  # Episodes between periodic checkpoints of the current model (0 disables)
+
+
+@dataclass(frozen=True)
+class DQNConfig(AgentConfig):
     # Architecture (150,949 trainable parameters when enable_dueling_dqn=True)
-    hidden_size = 256
-    enable_double_dqn = True
-    enable_dueling_dqn = True
+    enable_double_dqn: bool = True
+    enable_dueling_dqn: bool = True
 
     # Optimization & Replay Buffer
-    learning_rate = 3e-4
-    discount_factor = 0.99
-    buffer_size = 100_000
-    learning_start = 2_000
-    batch_size = 64
-    train_freq = 4
-    action_repeat = 4
-    target_update_interval = 1_000
-    max_grad_norm = 10.0
+    buffer_size: int = 100_000
+    learning_start: int = 2_000
+    batch_size: int = 64
+    train_freq: int = 4
+    target_update_interval: int = 1_000
+    max_grad_norm: float = 10.0
 
     # Exploration Schedule (per-episode exponential decay)
-    epsilon_init = 1.0
-    epsilon_finetune = 0.20
-    epsilon_decay = 0.9995
-    epsilon_min = 0.05
+    epsilon_init: float = 1.0
+    epsilon_finetune: float = 0.20
+    epsilon_decay: float = 0.9995
+    epsilon_min: float = 0.05
 
-    # Environment & Checkpointing
-    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
-    eval_episodes = 5
-    runs_dir = "runs"
-    hyperparameter_set = "dueling_ddqn"
+    # Checkpointing
+    hyperparameter_set: str = "dueling_ddqn"
 
 
-@dataclass
-class PPOConfig:
+@dataclass(frozen=True)
+class PPOConfig(AgentConfig):
     # Architecture
-    hidden_size = 256
-    factored_action = True              # Use MultiDiscrete([9, 2, 2])
-    action_dims = (9, 2, 2)             # (direction: 9, jump: 2, boost: 2)
+    factored_action: bool = True                 # Use MultiDiscrete([9, 2, 2])
+    action_dims: tuple[int, int, int] = (9, 2, 2)  # (direction: 9, jump: 2, boost: 2)
 
-    # Optimization & Returns (matched with DQNConfig where applicable)
-    learning_rate = 3e-4
-    discount_factor = 0.99
-    gae_lambda = 0.95
-    clip_coef = 0.2
-    value_loss_coef = 0.5
-    entropy_coef = 0.01
-    max_grad_norm = 0.5
-    target_kl = 0.02  # Early stopping threshold to preserve trust region
+    # Optimization & Returns
+    gae_lambda: float = 0.95
+    clip_coef: float = 0.2
+    value_loss_coef: float = 0.5
+    entropy_coef: float = 0.01
+    max_grad_norm: float = 0.5
+    target_kl: float = 0.02  # Early stopping threshold to preserve trust region
 
-    # Rollout, Action Repeat & Multi-Epoch Minibatch Schedule
-    action_repeat = 4
-    rollout_steps = 4096
-    update_epochs = 6
-    minibatch_size = 256
-    demo_rollout_steps = 32
+    # Rollout & Multi-Epoch Minibatch Schedule
+    rollout_steps: int = 4096
+    update_epochs: int = 6
+    minibatch_size: int = 256
+    demo_rollout_steps: int = 32
 
-    # Environment & Checkpointing
-    bot_type = "heuristic_bot"  # "none" or "heuristic_bot"
-    eval_episodes = 5
-    runs_dir = "runs"
-    hyperparameter_set = "ppo"
+    # Checkpointing
+    hyperparameter_set: str = "ppo"

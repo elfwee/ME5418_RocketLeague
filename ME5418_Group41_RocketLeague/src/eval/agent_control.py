@@ -5,7 +5,7 @@ from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
-from src.learning_agents.orange_perspective import get_orange_perspective_obs, mirror_action
+from src.eval.orange_perspective import get_orange_perspective_obs, mirror_action
 from typing import Optional
 
 
