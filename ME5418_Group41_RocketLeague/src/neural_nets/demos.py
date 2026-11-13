@@ -11,6 +11,8 @@ from torch.nn import functional as F
 import src.gym_env.rocket_league_env  # noqa: F401  (import registers the gym env id)
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig, PPOConfig
+from src.gym_env import action_codec
+from src.learning_agents.ppo_agent import compute_gae
 from src.neural_nets.dueling_ddqn_torch import DQN
 from src.neural_nets.ppo_torch import ActorCritic
 
@@ -57,9 +59,6 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     q_values = policy_dqn(state_tensor)  # Shape: (1, 36)
     action_idx = q_values.argmax(dim=-1).item()
 
-    # Decode discrete action index (0..35) into (direction, jump, boost)
-    dir_idx, jump_bit, boost_bit = action_idx // 4, (action_idx % 4) // 2, action_idx % 2
-
     print("\n" + "=" * 65)
     print("2. FORWARD PASS (INPUT -> OUTPUT)")
     print("=" * 65)
@@ -67,9 +66,7 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
     print(f"Output Q(s, .) Shape: {q_values.shape}")
     print(f"Output Q(s, .) Sample (first 6 actions): {q_values[0, :6].detach().cpu().numpy().round(4)}")
-    print(
-        f"Selected Action   : {action_idx} -> dir={GymConfig.directions[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}"
-    )
+    print(f"Selected Action   : {action_idx} -> {action_codec.describe(action_idx)}")
 
     # Step environment once with the selected action to observe transition (s, a, r, s', done)
     next_state, reward, terminated, truncated, _ = env.step(action_idx)
@@ -122,36 +119,10 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     env.close()
 
 
-def compute_gae(
-    rewards: torch.Tensor,
-    values: torch.Tensor,
-    dones: torch.Tensor,
-    next_value: torch.Tensor,
-    gamma: float = PPOConfig.discount_factor,
-    gae_lambda: float = PPOConfig.gae_lambda,
-):
-    """Generalized Advantage Estimation over a rollout of length T.
-
-    delta_t = r_t + gamma * (1 - done_t) * V(s_{t+1}) - V(s_t)
-    A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
-    """
-    T = rewards.shape[0]
-    advantages = torch.zeros_like(rewards)
-    last_gae = torch.zeros_like(next_value)
-    for t in reversed(range(T)):
-        next_v = next_value if t == T - 1 else values[t + 1]
-        not_done = 1.0 - dones[t]
-        delta = rewards[t] + gamma * not_done * next_v - values[t]
-        last_gae = delta + gamma * gae_lambda * not_done * last_gae
-        advantages[t] = last_gae
-    returns = advantages + values
-    return advantages, returns
-
-
 def run_ppo_network():
     """Assignment 2 Demo: Network Instantiation, Forward Pass & Backward Pass (Headless)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    factored = getattr(PPOConfig, "factored_action", False)
+    factored = PPOConfig.factored_action
     env = gym.make(GymConfig.gym_id, render_mode=None, bot_type=PPOConfig.bot_type, discrete_action=not factored)
 
     num_states = env.observation_space.shape[0]
@@ -186,7 +157,6 @@ def run_ppo_network():
     logits, value = agent(state_tensor)
     if agent.is_factored:
         action_parts = [l.squeeze(0).argmax().item() for l in logits]
-        dir_idx, jump_bit, boost_bit = action_parts[0], action_parts[1], action_parts[2]
         dir_probs = F.softmax(logits[0], dim=-1)
         print("\n" + "=" * 65)
         print("2. FORWARD PASS (INPUT -> OUTPUT)")
@@ -196,14 +166,10 @@ def run_ppo_network():
         print(f"Output Logits Shapes: {[list(l.shape) for l in logits]}")
         print(f"Output Direction pi Sample (first 5 actions): {dir_probs[0, :5].detach().cpu().numpy().round(4)}")
         print(f"Output V(s)         : {value.item():.6f}")
-        print(
-            f"Greedy Action     : {action_parts} -> dir={GymConfig.directions[dir_idx]}, "
-            f"jump={bool(jump_bit)}, boost={bool(boost_bit)}"
-        )
+        print(f"Greedy Action     : {action_parts} -> {action_codec.describe(action_parts)}")
     else:
         probs = F.softmax(logits, dim=-1)
         action_idx = probs.argmax(dim=-1).item()
-        dir_idx, jump_bit, boost_bit = action_idx // 4, (action_idx % 4) // 2, action_idx % 2
         print("\n" + "=" * 65)
         print("2. FORWARD PASS (INPUT -> OUTPUT)")
         print("=" * 65)
@@ -212,10 +178,7 @@ def run_ppo_network():
         print(f"Output Logits Shape : {logits.shape}")
         print(f"Output pi(.|s) Sample (first 6 actions): {probs[0, :6].detach().cpu().numpy().round(4)}")
         print(f"Output V(s)         : {value.item():.6f}")
-        print(
-            f"Greedy Action     : {action_idx} -> dir={GymConfig.directions[dir_idx]}, "
-            f"jump={bool(jump_bit)}, boost={bool(boost_bit)}"
-        )
+        print(f"Greedy Action     : {action_idx} -> {action_codec.describe(action_idx)}")
 
     # Collect a short on-policy rollout of transitions (s, a, log pi_old(a|s), r, done, V(s))
     states, actions, log_probs, rewards, dones, values = [], [], [], [], [], []
@@ -247,7 +210,9 @@ def run_ppo_network():
     dones = torch.tensor(dones, dtype=torch.float32, device=device)  # Shape: (T,)
 
     # 3. Backward Pass (GAE, Clipped Surrogate Loss & Gradient Backpropagation)
-    advantages, returns = compute_gae(rewards, values, dones, next_value.squeeze(0), gamma, gae_lambda)
+    # Bootstrap targets V(s_{t+1}): the next step's value, or 0.0 where the episode ended
+    next_values = torch.cat([values[1:], next_value.reshape(1)]) * (1.0 - dones)
+    advantages, returns = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda)
     norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Re-evaluate rollout actions under the current policy

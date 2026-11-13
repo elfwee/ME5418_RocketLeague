@@ -12,6 +12,7 @@ the evaluation loop, logging and plotting are shared with PPO in `agent_common.p
 import itertools
 import os
 import random
+from dataclasses import replace
 from pathlib import Path
 
 import gymnasium as gym
@@ -25,7 +26,6 @@ from src.learning_agents.agent_common import (
     TrainingLogger,
     device,
     latest_model_path,
-    load_state_dict_if_exists,
     make_env,
     make_run_dir,
     normalize_control_car,
@@ -39,7 +39,9 @@ from src.learning_agents.agent_common import (
     summarize_episodes,
 )
 from src.learning_agents.experience_replay import ReplayMemory
+from src.neural_nets.checkpoint import load_state_dict
 from src.neural_nets.dueling_ddqn_torch import DQN
+from src.neural_nets.policy import greedy_action
 
 
 class DuelingDDQNAgent:
@@ -61,48 +63,21 @@ class DuelingDDQNAgent:
 
     One training decision step (`_train`):
         `_select_action` -> `step_with_action_repeat` -> `_store_transition` -> `_maybe_optimize`
-        -> `_sync_target_network` (every `network_sync_rate` steps); `_decay_epsilon` once per episode.
+        -> `_sync_target_network` (every `target_update_interval` steps); `_decay_epsilon` once per episode.
     """
 
-    def __init__(
-        self,
-        hyperparameter_set: str = DQNConfig.hyperparameter_set,
-        enable_dueling_dqn: bool | None = None,
-        enable_double_dqn: bool | None = None,
-    ):
-        self.hyperparameter_set = hyperparameter_set
-        self.env_id = GymConfig.gym_id
-        self.bot_type = DQNConfig.bot_type
-        self.replay_memory_size = DQNConfig.buffer_size
-        self.mini_batch_size = DQNConfig.batch_size
-        self.learning_starts = DQNConfig.learning_start
-        self.train_freq = DQNConfig.train_freq
-        self.action_repeat = DQNConfig.action_repeat
-        self.epsilon_init = DQNConfig.epsilon_init
-        self.epsilon_finetune = getattr(DQNConfig, "epsilon_finetune", 0.20)
-        self.epsilon_decay = DQNConfig.epsilon_decay
-        self.epsilon_min = DQNConfig.epsilon_min
-        self.network_sync_rate = DQNConfig.target_update_interval
-        self.learning_rate_a = DQNConfig.learning_rate
-        self.discount_factor_g = DQNConfig.discount_factor
-        self.fcl_nodes = DQNConfig.hidden_size
-        self.max_grad_norm = DQNConfig.max_grad_norm
-
-        self.enable_double_dqn = enable_double_dqn if enable_double_dqn is not None else DQNConfig.enable_double_dqn
-        self.enable_dueling_dqn = enable_dueling_dqn if enable_dueling_dqn is not None else DQNConfig.enable_dueling_dqn
-
+    def __init__(self, config: DQNConfig | None = None):
+        self.cfg = config or DQNConfig()
         # SmoothL1Loss (Huber loss) prevents exploding gradients from large +/-20 goal rewards
         self.loss_fn = nn.SmoothL1Loss()
-        self.checkpoint_interval = DQNConfig.checkpoint_interval
-
         self.optimizer = None
 
     def _set_run_dir(self, run_dir: str | Path):
         """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
-        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
+        self.LOG_FILE = os.path.join(run_dir, f"run_{self.cfg.hyperparameter_set}.log")
+        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.cfg.hyperparameter_set}.pt")
+        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.cfg.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.cfg.hyperparameter_set}.csv")
         self.CHECKPOINT_DIR = os.path.join(run_dir, "checkpoints")
 
     # ----------------------------------------------------------------------------------------
@@ -120,14 +95,14 @@ class DuelingDDQNAgent:
         terminated = torch.tensor(terminated, dtype=torch.float32, device=device)
 
         with torch.no_grad():
-            if self.enable_double_dqn:
+            if self.cfg.enable_double_dqn:
                 next_actions = policy_dqn(next_state).argmax(dim=1, keepdim=True)
                 next_q = target_dqn(next_state).gather(dim=1, index=next_actions).squeeze(1)
             else:
                 next_q = target_dqn(next_state).max(dim=1)[0]
 
             # Bootstrap on time-limit truncation; only zero out future value on true goal termination
-            target_q = reward + (1.0 - terminated) * self.discount_factor_g * next_q
+            target_q = reward + (1.0 - terminated) * self.cfg.discount_factor * next_q
 
         current_q = policy_dqn(state).gather(dim=1, index=action.unsqueeze(dim=1)).squeeze(1)
 
@@ -135,7 +110,7 @@ class DuelingDDQNAgent:
 
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(policy_dqn.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(policy_dqn.parameters(), max_norm=self.cfg.max_grad_norm)
         self.optimizer.step()
         return float(loss.item())
 
@@ -144,11 +119,13 @@ class DuelingDDQNAgent:
     # ----------------------------------------------------------------------------------------
 
     def _build_network(self, num_states: int, num_actions: int) -> DQN:
-        return DQN(num_states, num_actions, self.fcl_nodes, enable_dueling_dqn=self.enable_dueling_dqn).to(device)
+        return DQN(num_states, num_actions, self.cfg.hidden_size, enable_dueling_dqn=self.cfg.enable_dueling_dqn).to(
+            device
+        )
 
     def _load_checkpoint(self, policy_dqn: DQN, ckpt_file: str) -> bool:
         """Load weights into `policy_dqn`; returns False when the checkpoint file does not exist."""
-        state_dict = load_state_dict_if_exists(ckpt_file)
+        state_dict = load_state_dict(ckpt_file, device)
         if state_dict is None:
             return False
         policy_dqn.load_state_dict(state_dict)
@@ -156,8 +133,7 @@ class DuelingDDQNAgent:
 
     def _greedy_action(self, policy_dqn: DQN, state: torch.Tensor) -> torch.Tensor:
         """argmax_a Q(s, a) as a 0-dim int64 tensor."""
-        with torch.no_grad():
-            return policy_dqn(state.unsqueeze(0)).squeeze(0).argmax()
+        return torch.tensor(greedy_action(policy_dqn, state), dtype=torch.int64, device=device)
 
     def _select_action(self, env: gym.Env, policy_dqn: DQN, state: torch.Tensor, epsilon: float) -> torch.Tensor:
         """Epsilon-greedy: a uniformly random action with probability `epsilon`, else the greedy one."""
@@ -181,10 +157,10 @@ class DuelingDDQNAgent:
     def _maybe_optimize(self, memory: ReplayMemory, step_count: int, policy_dqn: DQN, target_dqn: DQN) -> float | None:
         """Run one gradient step every `train_freq` decision steps once the replay memory has warmed
         up; returns the TD loss, or None when no update happened."""
-        warmed_up = len(memory) >= max(self.learning_starts, self.mini_batch_size)
-        if not warmed_up or step_count % self.train_freq != 0:
+        warmed_up = len(memory) >= max(self.cfg.learning_start, self.cfg.batch_size)
+        if not warmed_up or step_count % self.cfg.train_freq != 0:
             return None
-        mini_batch = memory.sample(self.mini_batch_size)
+        mini_batch = memory.sample(self.cfg.batch_size)
         return self.optimize(mini_batch, policy_dqn, target_dqn)
 
     def _sync_target_network(self, policy_dqn: DQN, target_dqn: DQN):
@@ -193,7 +169,7 @@ class DuelingDDQNAgent:
 
     def _decay_epsilon(self, epsilon: float) -> float:
         """Per-episode exponential decay, floored at `epsilon_min`."""
-        return max(epsilon * self.epsilon_decay, self.epsilon_min)
+        return max(epsilon * self.cfg.epsilon_decay, self.cfg.epsilon_min)
 
     # ----------------------------------------------------------------------------------------
     # Plotting
@@ -216,10 +192,10 @@ class DuelingDDQNAgent:
             3. Exploration Schedule: Epsilon decay (ε) vs. Environment Steps.
             4. Bellman Optimization Health: TD / Huber Loss (with 50-ep smoothing) vs. Environment Steps.
         """
-        agent_name = "Dueling Double DQN" if (self.enable_dueling_dqn and self.enable_double_dqn) else "DQN"
+        agent_name = "Dueling Double DQN" if (self.cfg.enable_dueling_dqn and self.cfg.enable_double_dqn) else "DQN"
         save_training_dashboard(
             self.GRAPH_FILE,
-            f"{agent_name} Training Dashboard ({self.hyperparameter_set})",
+            f"{agent_name} Training Dashboard ({self.cfg.hyperparameter_set})",
             rewards_per_episode,
             steps_per_episode,
             goals_per_episode,
@@ -258,28 +234,28 @@ class DuelingDDQNAgent:
         """Run training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         control_car = normalize_control_car(control_car)
         env = make_env(
-            bot_type=self.bot_type,
+            bot_type=self.cfg.bot_type,
             discrete_action=True,
             control_car="blue" if is_training else control_car,
             render=render,
             save_gif=save_gif,
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
-            env_id=self.env_id,
+            env_id=GymConfig.gym_id,
         )
         try:
             policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
             if is_training:
-                run_dir = make_run_dir(self.hyperparameter_set)
+                run_dir = make_run_dir(self.cfg.hyperparameter_set)
                 self._set_run_dir(run_dir)
                 print(f"[DuelingDDQN Train] Saving outputs to: {run_dir}")
                 return self._train(env, policy_dqn, num_episodes, model_path)
 
             # Evaluation defaults to the checkpoint of the most recent training run
             if model_path is None:
-                model_path = latest_model_path(self.hyperparameter_set)
+                model_path = latest_model_path(self.cfg.hyperparameter_set)
             if save_gif and gif_path is None:
-                gif_path = Path(model_path).parent / f"eval_{self.hyperparameter_set}.gif"
+                gif_path = Path(model_path).parent / f"eval_{self.cfg.hyperparameter_set}.gif"
             return self._evaluate(
                 env, policy_dqn, num_episodes, model_path, control_car, gif_path if save_gif else None
             )
@@ -303,14 +279,14 @@ class DuelingDDQNAgent:
         else:
             print(f"[DuelingDDQN Train] Warning: Checkpoint '{model_path}' not found; training from scratch.")
 
-        memory = ReplayMemory(maxlen=self.replay_memory_size)
-        epsilon = self.epsilon_finetune if loaded_ckpt else self.epsilon_init
+        memory = ReplayMemory(maxlen=self.cfg.buffer_size)
+        epsilon = self.cfg.epsilon_finetune if loaded_ckpt else self.cfg.epsilon_init
 
         target_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
         self._sync_target_network(policy_dqn, target_dqn)
         target_dqn.eval()
 
-        self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
+        self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.cfg.learning_rate)
 
         logger = TrainingLogger(self.LOG_FILE, self.METRICS_FILE, extra_columns=("epsilon", "td_loss"))
         epsilon_history = []
@@ -329,8 +305,8 @@ class DuelingDDQNAgent:
             )
 
         print(
-            f"[DuelingDDQN Train] Device={device} | Dueling={self.enable_dueling_dqn} | "
-            f"Double={self.enable_double_dqn} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
+            f"[DuelingDDQN Train] Device={device} | Dueling={self.cfg.enable_dueling_dqn} | "
+            f"Double={self.cfg.enable_double_dqn} | Bot={self.cfg.bot_type} | Model={self.MODEL_FILE}"
         )
 
         episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
@@ -350,7 +326,7 @@ class DuelingDDQNAgent:
                 while not (terminated or truncated):
                     action = self._select_action(env, policy_dqn, state, epsilon)
                     next_state, reward, terminated, truncated, info = step_with_action_repeat(
-                        env, int(action.item()), action_repeat=self.action_repeat
+                        env, int(action.item()), action_repeat=self.cfg.action_repeat
                     )
 
                     episode_reward += reward
@@ -367,7 +343,7 @@ class DuelingDDQNAgent:
                         current_loss = loss
 
                     # Sync target network every `network_sync_rate` decision steps
-                    if step_count % self.network_sync_rate == 0:
+                    if step_count % self.cfg.target_update_interval == 0:
                         self._sync_target_network(policy_dqn, target_dqn)
 
                     state = new_state
@@ -394,7 +370,7 @@ class DuelingDDQNAgent:
 
                 # Periodic snapshot of the current model, independent of the best-model file
                 save_periodic_checkpoint(
-                    policy_dqn, self.CHECKPOINT_DIR, self.hyperparameter_set, episode, self.checkpoint_interval
+                    policy_dqn, self.CHECKPOINT_DIR, self.cfg.hyperparameter_set, episode, self.cfg.checkpoint_interval
                 )
 
                 if logger.graph_due():
@@ -428,33 +404,45 @@ class DuelingDDQNAgent:
         policy_dqn.eval()
 
         def select(state: torch.Tensor) -> int:
-            return int(self._greedy_action(policy_dqn, state).item())
+            return greedy_action(policy_dqn, state)
 
         return run_eval_episodes(
             env,
             select_blue=select,
             select_orange=select if control_car == "both" else None,
-            action_repeat=self.action_repeat,
+            action_repeat=self.cfg.action_repeat,
             num_episodes=num_episodes,
             gif_path=gif_path,
             gif_tag="DQN",
         )
 
 
+def _resolve_config(
+    config: DQNConfig | None,
+    enable_dueling_dqn: bool | None,
+    enable_double_dqn: bool | None,
+    hyperparameter_set: str | None,
+) -> DQNConfig:
+    """`config` (default `DQNConfig()`) with any explicitly given variant settings applied."""
+    overrides = {
+        "enable_dueling_dqn": enable_dueling_dqn,
+        "enable_double_dqn": enable_double_dqn,
+        "hyperparameter_set": hyperparameter_set,
+    }
+    return replace(config or DQNConfig(), **{k: v for k, v in overrides.items() if v is not None})
+
+
 def train_dueling_ddqn(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    enable_dueling_dqn: bool = True,
-    enable_double_dqn: bool = True,
-    hyperparameter_set: str = DQNConfig.hyperparameter_set,
+    enable_dueling_dqn: bool | None = None,
+    enable_double_dqn: bool | None = None,
+    hyperparameter_set: str | None = None,
+    config: DQNConfig | None = None,
 ) -> dict[str, float]:
-    """Train the Dueling Double DQN agent."""
-    agent = DuelingDDQNAgent(
-        hyperparameter_set=hyperparameter_set,
-        enable_dueling_dqn=enable_dueling_dqn,
-        enable_double_dqn=enable_double_dqn,
-    )
+    """Train the Dueling Double DQN agent (or a plain / Double DQN variant via the flags)."""
+    agent = DuelingDDQNAgent(_resolve_config(config, enable_dueling_dqn, enable_double_dqn, hyperparameter_set))
     return agent.run(
         is_training=True,
         render=False,
@@ -469,25 +457,22 @@ def evaluate_dueling_ddqn(
     render: bool = False,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    enable_dueling_dqn: bool = True,
-    enable_double_dqn: bool = True,
-    hyperparameter_set: str = DQNConfig.hyperparameter_set,
+    enable_dueling_dqn: bool | None = None,
+    enable_double_dqn: bool | None = None,
+    hyperparameter_set: str | None = None,
     save_gif: bool = False,
     gif_path: str | Path | None = None,
     control_car: str = "blue",
     random_spawn: bool = True,
+    config: DQNConfig | None = None,
 ) -> dict[str, float]:
     """Evaluate/validate a trained Dueling Double DQN agent."""
-    agent = DuelingDDQNAgent(
-        hyperparameter_set=hyperparameter_set,
-        enable_dueling_dqn=enable_dueling_dqn,
-        enable_double_dqn=enable_double_dqn,
-    )
+    agent = DuelingDDQNAgent(_resolve_config(config, enable_dueling_dqn, enable_double_dqn, hyperparameter_set))
     return agent.run(
         is_training=False,
         render=render,
         max_episode_steps=max_episode_steps,
-        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, DQNConfig.eval_episodes),
+        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, agent.cfg.eval_episodes),
         model_path=model_path,
         save_gif=save_gif,
         gif_path=gif_path,

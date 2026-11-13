@@ -17,6 +17,7 @@ the evaluation loop, logging and plotting are shared with DQN in `agent_common.p
 
 import itertools
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import gymnasium as gym
@@ -31,9 +32,7 @@ from src.learning_agents.agent_common import (
     DashboardPanel,
     TrainingLogger,
     device,
-    infer_ppo_arch,
     latest_model_path,
-    load_state_dict_if_exists,
     make_env,
     make_run_dir,
     normalize_control_car,
@@ -46,7 +45,44 @@ from src.learning_agents.agent_common import (
     step_with_action_repeat,
     summarize_episodes,
 )
+from src.neural_nets.checkpoint import infer_spec, load_state_dict
+from src.neural_nets.policy import greedy_action
 from src.neural_nets.ppo_torch import ActorCritic
+
+
+def compute_gae(
+    rewards: torch.Tensor,
+    values: torch.Tensor,
+    next_values: torch.Tensor,
+    dones: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Generalized Advantage Estimation (GAE) with truncation-aware bootstrapping.
+
+        delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)
+        A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
+
+    Args:
+        rewards: Shape (T,), step rewards.
+        values: Shape (T,), critic estimates V(s_t).
+        next_values: Shape (T,), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
+                     and `V(s_timeout)` where `truncated=True`).
+        dones: Shape (T,), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
+
+    Returns:
+        (advantages, returns), each of shape (T,).
+    """
+    T = rewards.shape[0]
+    advantages = torch.zeros_like(rewards)
+    last_gae = 0.0
+    for t in reversed(range(T)):
+        not_done = 1.0 - dones[t]
+        delta = rewards[t] + gamma * next_values[t] - values[t]
+        last_gae = delta + gamma * gae_lambda * not_done * last_gae
+        advantages[t] = last_gae
+    returns = advantages + values
+    return advantages, returns
 
 
 class RolloutBuffer:
@@ -144,35 +180,16 @@ class PPOAgent:
         -> `_update_from_rollout` (every `rollout_steps` steps: `_compute_gae` then `optimize`).
     """
 
-    def __init__(self, hyperparameter_set: str = PPOConfig.hyperparameter_set):
-        self.hyperparameter_set = hyperparameter_set
-        self.env_id = GymConfig.gym_id
-        self.bot_type = PPOConfig.bot_type
-        self.fcl_nodes = PPOConfig.hidden_size
-        self.learning_rate = PPOConfig.learning_rate
-        self.discount_factor_g = PPOConfig.discount_factor
-        self.gae_lambda = PPOConfig.gae_lambda
-        self.clip_coef = PPOConfig.clip_coef
-        self.value_loss_coef = PPOConfig.value_loss_coef
-        self.entropy_coef = PPOConfig.entropy_coef
-        self.max_grad_norm = PPOConfig.max_grad_norm
-        self.target_kl = getattr(PPOConfig, "target_kl", 0.02)
-
-        self.action_repeat = PPOConfig.action_repeat
-        self.rollout_steps = PPOConfig.rollout_steps
-        self.update_epochs = PPOConfig.update_epochs
-        self.mini_batch_size = PPOConfig.minibatch_size
-
-        self.checkpoint_interval = PPOConfig.checkpoint_interval
-
+    def __init__(self, config: PPOConfig | None = None):
+        self.cfg = config or PPOConfig()
         self.optimizer = None
 
     def _set_run_dir(self, run_dir: str | Path):
         """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
-        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
+        self.LOG_FILE = os.path.join(run_dir, f"run_{self.cfg.hyperparameter_set}.log")
+        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.cfg.hyperparameter_set}.pt")
+        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.cfg.hyperparameter_set}.png")
+        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.cfg.hyperparameter_set}.csv")
         self.CHECKPOINT_DIR = os.path.join(run_dir, "checkpoints")
 
     # ----------------------------------------------------------------------------------------
@@ -186,25 +203,8 @@ class PPOAgent:
         next_values: torch.Tensor,
         dones: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute Generalized Advantage Estimation (GAE) with truncation-aware bootstrapping.
-
-        Args:
-            rewards: Shape (T,), step rewards.
-            values: Shape (T,), critic estimates V(s_t).
-            next_values: Shape (T,), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
-                         and `V(s_timeout)` where `truncated=True`).
-            dones: Shape (T,), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
-        """
-        T = rewards.shape[0]
-        advantages = torch.zeros_like(rewards)
-        last_gae = 0.0
-        for t in reversed(range(T)):
-            not_done = 1.0 - dones[t]
-            delta = rewards[t] + self.discount_factor_g * next_values[t] - values[t]
-            last_gae = delta + self.discount_factor_g * self.gae_lambda * not_done * last_gae
-            advantages[t] = last_gae
-        returns = advantages + values
-        return advantages, returns
+        """Truncation-aware GAE over the rollout (see `compute_gae`)."""
+        return compute_gae(rewards, values, next_values, dones, self.cfg.discount_factor, self.cfg.gae_lambda)
 
     def optimize(
         self,
@@ -231,13 +231,13 @@ class PPOAgent:
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for _epoch in range(self.update_epochs):
+        for _epoch in range(self.cfg.update_epochs):
             perm = torch.randperm(batch_size, device=device)
             epoch_kl_sum = 0.0
             epoch_mb_count = 0
 
-            for start in range(0, batch_size, self.mini_batch_size):
-                idx = perm[start : start + self.mini_batch_size]
+            for start in range(0, batch_size, self.cfg.minibatch_size):
+                idx = perm[start : start + self.cfg.minibatch_size]
                 mb_states = states[idx]
                 mb_actions = actions[idx]
                 mb_old_log_probs = old_log_probs[idx]
@@ -258,17 +258,17 @@ class PPOAgent:
 
                 # Clipped surrogate objective
                 pg_loss1 = -mb_adv * ratio
-                pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.clip_coef, 1.0 + self.clip_coef)
+                pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 v_loss = F.mse_loss(new_values, mb_returns)
                 entropy_loss = entropy.mean()
 
-                loss = pg_loss + self.value_loss_coef * v_loss - self.entropy_coef * entropy_loss
+                loss = pg_loss + self.cfg.value_loss_coef * v_loss - self.cfg.entropy_coef * entropy_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=self.max_grad_norm)
+                nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=self.cfg.max_grad_norm)
                 self.optimizer.step()
 
                 total_loss_sum += float(loss.item())
@@ -278,7 +278,7 @@ class PPOAgent:
 
             # Early stop if average KL divergence across this epoch exceeded target threshold
             mean_epoch_kl = epoch_kl_sum / max(epoch_mb_count, 1)
-            if self.target_kl is not None and mean_epoch_kl > self.target_kl:
+            if self.cfg.target_kl is not None and mean_epoch_kl > self.cfg.target_kl:
                 break
 
         denom = max(num_mb, 1)
@@ -298,11 +298,7 @@ class PPOAgent:
 
     def _greedy_action(self, policy_net: ActorCritic, state: torch.Tensor) -> int | list[int]:
         """Most likely action as an env action: a Discrete index, or [direction, jump, boost] when factored."""
-        with torch.no_grad():
-            logits, _ = policy_net(state.unsqueeze(0))
-        if policy_net.is_factored:
-            return [int(l.squeeze(0).argmax().item()) for l in logits]
-        return int(logits.squeeze(0).argmax().item())
+        return greedy_action(policy_net, state)
 
     def _state_value(self, policy_net: ActorCritic, state: torch.Tensor) -> torch.Tensor:
         """Critic estimate V(s) for a single state."""
@@ -362,7 +358,7 @@ class PPOAgent:
         """
         save_training_dashboard(
             self.GRAPH_FILE,
-            f"PPO Training Dashboard ({self.hyperparameter_set})",
+            f"PPO Training Dashboard ({self.cfg.hyperparameter_set})",
             rewards_per_episode,
             steps_per_episode,
             goals_per_episode,
@@ -388,13 +384,11 @@ class PPOAgent:
     def _resolve_architecture(self, state_dict: dict | None) -> tuple[bool, int, int | list[int] | None]:
         """(factored, hidden_dim, action_dim) from a checkpoint if given, else from `PPOConfig`.
         `action_dim` is None when it should be taken from the env's action space."""
-        factored = getattr(PPOConfig, "factored_action", False)
         if state_dict is None:
-            return factored, self.fcl_nodes, None
-        hidden_dim, action_dim = infer_ppo_arch(state_dict)
-        if action_dim is not None:
-            factored = isinstance(action_dim, list)
-        return factored, hidden_dim, action_dim
+            return self.cfg.factored_action, self.cfg.hidden_size, None
+        spec = infer_spec(state_dict)
+        factored = spec.factored if spec.action_dim is not None else self.cfg.factored_action
+        return factored, spec.hidden_dim, spec.action_dim
 
     def run(
         self,
@@ -413,19 +407,19 @@ class PPOAgent:
 
         # Training only reads a checkpoint when one is given (fine-tuning); evaluation always tries
         # to, defaulting to the checkpoint of the most recent training run
-        ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.hyperparameter_set))
-        state_dict = load_state_dict_if_exists(ckpt_file) if (not is_training or model_path is not None) else None
+        ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.cfg.hyperparameter_set))
+        state_dict = load_state_dict(ckpt_file, device) if (not is_training or model_path is not None) else None
         factored, hidden_dim, action_dim = self._resolve_architecture(state_dict)
 
         env = make_env(
-            bot_type=self.bot_type,
+            bot_type=self.cfg.bot_type,
             discrete_action=not factored,
             control_car="blue" if is_training else control_car,
             render=render,
             save_gif=save_gif,
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
-            env_id=self.env_id,
+            env_id=GymConfig.gym_id,
         )
         try:
             if action_dim is None:
@@ -441,7 +435,7 @@ class PPOAgent:
                     print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
                 else:
                     print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
-                run_dir = make_run_dir(self.hyperparameter_set)
+                run_dir = make_run_dir(self.cfg.hyperparameter_set)
                 self._set_run_dir(run_dir)
                 print(f"[PPO Train] Saving outputs to: {run_dir}")
                 return self._train(env, policy_net, num_episodes, action_dim)
@@ -451,7 +445,7 @@ class PPOAgent:
             else:
                 print(f"[PPO Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
             if save_gif and gif_path is None:
-                gif_path = Path(ckpt_file).parent / f"eval_{self.hyperparameter_set}.gif"
+                gif_path = Path(ckpt_file).parent / f"eval_{self.cfg.hyperparameter_set}.gif"
             return self._evaluate(env, policy_net, num_episodes, control_car, gif_path if save_gif else None)
         finally:
             env.close()
@@ -464,7 +458,7 @@ class PPOAgent:
         action_dim: int | list[int],
     ) -> dict[str, float]:
         """On-policy training loop: collect `rollout_steps` decision steps, then update on them."""
-        self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
+        self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
         logger = TrainingLogger(self.LOG_FILE, self.METRICS_FILE, extra_columns=("entropy", "value_loss"))
         buffer = RolloutBuffer()
@@ -488,8 +482,8 @@ class PPOAgent:
             )
 
         print(
-            f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-            f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
+            f"[PPO Train] Device={device} | Rollout={self.cfg.rollout_steps} | Epochs={self.cfg.update_epochs} | "
+            f"Minibatch={self.cfg.minibatch_size} | Bot={self.cfg.bot_type} | Model={self.MODEL_FILE}"
         )
 
         episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
@@ -513,7 +507,7 @@ class PPOAgent:
 
                     action_for_env = action.cpu().numpy().tolist() if policy_net.is_factored else int(action.item())
                     next_state, reward, terminated, truncated, info = step_with_action_repeat(
-                        env, action_for_env, action_repeat=self.action_repeat
+                        env, action_for_env, action_repeat=self.cfg.action_repeat
                     )
 
                     episode_reward += reward
@@ -526,7 +520,7 @@ class PPOAgent:
                     step_count += 1
 
                     # Perform PPO multi-epoch minibatch update once rollout horizon is reached
-                    if len(buffer) >= self.rollout_steps:
+                    if len(buffer) >= self.cfg.rollout_steps:
                         current_entropy, current_v_loss = self._update_from_rollout(buffer, policy_net, new_state)
 
                     state = new_state
@@ -552,7 +546,7 @@ class PPOAgent:
 
                 # Periodic snapshot of the current model, independent of the best-model file
                 save_periodic_checkpoint(
-                    policy_net, self.CHECKPOINT_DIR, self.hyperparameter_set, episode, self.checkpoint_interval
+                    policy_net, self.CHECKPOINT_DIR, self.cfg.hyperparameter_set, episode, self.cfg.checkpoint_interval
                 )
 
                 if logger.graph_due():
@@ -586,21 +580,28 @@ class PPOAgent:
             env,
             select_blue=select,
             select_orange=select if control_car == "both" else None,
-            action_repeat=self.action_repeat,
+            action_repeat=self.cfg.action_repeat,
             num_episodes=num_episodes,
             gif_path=gif_path,
             gif_tag="PPO",
         )
 
 
+def _resolve_config(config: PPOConfig | None, hyperparameter_set: str | None) -> PPOConfig:
+    """`config` (default `PPOConfig()`) with the run name overridden when one is given."""
+    config = config or PPOConfig()
+    return replace(config, hyperparameter_set=hyperparameter_set) if hyperparameter_set is not None else config
+
+
 def train_ppo(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    hyperparameter_set: str = PPOConfig.hyperparameter_set,
+    hyperparameter_set: str | None = None,
+    config: PPOConfig | None = None,
 ) -> dict[str, float]:
     """Train the PPO agent."""
-    agent = PPOAgent(hyperparameter_set=hyperparameter_set)
+    agent = PPOAgent(_resolve_config(config, hyperparameter_set))
     return agent.run(
         is_training=True,
         render=False,
@@ -615,19 +616,20 @@ def evaluate_ppo(
     render: bool = False,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    hyperparameter_set: str = PPOConfig.hyperparameter_set,
+    hyperparameter_set: str | None = None,
     save_gif: bool = False,
     gif_path: str | Path | None = None,
     control_car: str = "blue",
     random_spawn: bool = True,
+    config: PPOConfig | None = None,
 ) -> dict[str, float]:
     """Evaluate/validate a trained PPO agent."""
-    agent = PPOAgent(hyperparameter_set=hyperparameter_set)
+    agent = PPOAgent(_resolve_config(config, hyperparameter_set))
     return agent.run(
         is_training=False,
         render=render,
         max_episode_steps=max_episode_steps,
-        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, PPOConfig.eval_episodes),
+        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, agent.cfg.eval_episodes),
         model_path=model_path,
         save_gif=save_gif,
         gif_path=gif_path,

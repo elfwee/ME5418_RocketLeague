@@ -7,6 +7,8 @@ import pytest
 import scenarios as sc
 from gymnasium.utils.env_checker import check_env
 
+from src.gym_env import action_codec
+
 
 def test_check_env_passes():
     env = sc.make_env(bot_type="none")
@@ -33,13 +35,15 @@ DIRECTIONS = [(0, 0), (1, 0), (-1, 0), (0, -1), (0, 1), (1, -1), (1, 1), (-1, -1
 
 def test_action_encoding_covers_all_36_indices():
     """Flat index a <-> (direction, jump, boost) = (a // 4, (a % 4) // 2, a % 2), both decode paths agree."""
-    env = sc.make_env(bot_type="none")
+    assert action_codec.NUM_DISCRETE_ACTIONS == 36
+    assert action_codec.FACTORED_DIMS == (9, 2, 2)
     seen = set()
     for a in range(36):
         direction, jump, boost = a // 4, (a % 4) // 2, a % 2
-        assert direction * 4 + jump * 2 + boost == a
-        flat = env._decode_action(a)
-        factored = env._decode_action([direction, jump, boost])
+        assert action_codec.split(a) == (direction, jump, boost)
+        assert action_codec.encode(direction, jump, boost) == a
+        flat = action_codec.decode(a)
+        factored = action_codec.decode([direction, jump, boost])
         assert flat == factored
         dx, dy = DIRECTIONS[direction]
         norm = max(1.0, float(np.hypot(dx, dy)))
@@ -47,26 +51,24 @@ def test_action_encoding_covers_all_36_indices():
         assert flat.jump == bool(jump) and flat.boost == bool(boost)
         seen.add((direction, jump, boost))
     assert len(seen) == 36
-    env.close()
 
 
 def test_mirrored_action_negates_x_only():
-    env = sc.make_env(bot_type="none")
     for a in range(36):
-        plain = env._decode_action(a)
-        mirrored = env._decode_action(a, mirror_x=True)
+        plain = action_codec.decode(a)
+        mirrored = action_codec.decode(a, mirror_x=True)
+        assert mirrored == action_codec.mirror(plain)
         assert mirrored.dir_x == -plain.dir_x
         assert (mirrored.dir_y, mirrored.jump, mirrored.boost) == (plain.dir_y, plain.jump, plain.boost)
-    env.close()
+        assert action_codec.mirror(action_codec.mirror(plain)) == plain
 
 
 def test_clear_jump():
-    from src.learning_agents.agent_common import clear_jump
-
     for direction, jump, boost in itertools.product(range(9), range(2), range(2)):
         a = direction * 4 + jump * 2 + boost
-        assert clear_jump(a) == direction * 4 + boost
-        assert clear_jump([direction, jump, boost]) == [direction, 0, boost]
+        assert action_codec.clear_jump(a) == direction * 4 + boost
+        assert action_codec.clear_jump([direction, jump, boost]) == [direction, 0, boost]
+        assert action_codec.clear_jump(np.array([direction, jump, boost])) == [direction, 0, boost]
 
 
 def test_kickoff_observation_is_mirror_symmetric():

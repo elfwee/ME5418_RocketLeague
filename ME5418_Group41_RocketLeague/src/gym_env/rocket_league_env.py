@@ -18,6 +18,7 @@ import pygame
 
 from src.config.gym_config import GymConfig
 from src.config.sim_config import ARENA_DIAGONAL, ENABLE_ORANGE_CAR, SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
+from src.gym_env import action_codec
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation, _normalize_pos
@@ -35,23 +36,6 @@ BOT_TYPES = ("none", "heuristic_bot")
 CONTROL_CARS = ("blue", "orange", "both")
 CONTROL_CAR_ALIASES = {"bot_vs_bot": "both", "bots": "both"}
 
-# Action encoding: direction (9) x jump (2) x boost (2) = 36 discrete actions
-NUM_DIRECTIONS = len(GymConfig.directions)
-NUM_DISCRETE_ACTIONS = NUM_DIRECTIONS * 2 * 2
-
-# Terminal rewards
-REWARD_GOAL = 20.0  # ego team scores
-REWARD_OPPONENT_OWN_GOAL = 2.0  # ego team scores, but the opponent touched the ball last
-REWARD_CONCEDE = -20.0
-
-# Shaping rewards
-BALL_PROGRESS_DEADBAND = 0.0001  # ignore ball x movement smaller than this (normalised units)
-GROUND_BALL_Y = -0.55  # normalised ball height at or below which the ball counts as rolling
-GROUND_BALL_Y_FACTOR = 0.25
-APPROACH_REWARD_SCALE = 1.5
-DISTANCE_PENALTY_SCALE = 0.005
-TIME_PENALTY = 0.001
-
 
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
@@ -63,6 +47,7 @@ class RocketLeagueEnv(gym.Env):
         discrete_action=True,
         control_car="blue",
         random_spawn: bool = True,
+        config: GymConfig | None = None,
     ):
         if bot_type not in BOT_TYPES:
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
@@ -70,6 +55,7 @@ class RocketLeagueEnv(gym.Env):
         if control_car not in CONTROL_CARS:
             raise ValueError(f"Invalid control_car: {control_car}. Must be 'blue', 'orange', or 'both'.")
 
+        self.cfg = config or GymConfig()
         self.render_mode = render_mode
         self.bot_type = bot_type
         self.control_car = control_car
@@ -89,9 +75,9 @@ class RocketLeagueEnv(gym.Env):
             self.blue_control = CarControl(control_type="human", team="blue", sim=self.sim)
 
         if self.discrete_action:
-            self.action_space = gym.spaces.Discrete(NUM_DISCRETE_ACTIONS)
+            self.action_space = gym.spaces.Discrete(action_codec.NUM_DISCRETE_ACTIONS)
         else:
-            self.action_space = gym.spaces.MultiDiscrete([NUM_DIRECTIONS, 2, 2])
+            self.action_space = gym.spaces.MultiDiscrete(list(action_codec.FACTORED_DIMS))
         obs_dim = len(self.sim.get_state_norm(as_flat_array=True))
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
@@ -138,38 +124,20 @@ class RocketLeagueEnv(gym.Env):
             state = self.sim.get_state_norm(as_flat_array=True)
         return np.asarray(state, dtype=np.float32)
 
-    def _decode_action(self, action, mirror_x: bool = False) -> CarAction:
-        """Convert a flat Discrete(36) index or a factored [direction, jump, boost] into a CarAction.
-
-        Direction indexes `GymConfig.directions` as (dir_x, dir_y):
-        none, right, left, down, up, down-right, up-right, down-left, up-left.
-        """
-        if isinstance(action, (list, tuple, np.ndarray)):
-            direction, jump, boost = int(action[0]), int(action[1]), int(action[2])
-        else:
-            act_int = int(action)
-            direction = act_int // 4
-            jump = (act_int % 4) // 2
-            boost = act_int % 2
-        dir_x, dir_y = GymConfig.directions[direction]
-        if mirror_x:
-            dir_x = -dir_x
-        return CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
-
     def _resolve_car_actions(self, action, action_orange=None):
         """Return the (blue, orange) CarActions for this step given the policy action(s)."""
         if self.control_car == "both":
             if action_orange is None and isinstance(action, tuple) and len(action) == 2:
                 action, action_orange = action
-            blue_action = self._decode_action(action)
+            blue_action = action_codec.decode(action)
             orange_action = (
-                self._decode_action(action_orange, mirror_x=True) if action_orange is not None else CarAction()
+                action_codec.decode(action_orange, mirror_x=True) if action_orange is not None else CarAction()
             )
         elif self.control_car == "orange":
             blue_action = self.blue_control.get_action() if self.blue_control is not None else CarAction()
-            orange_action = self._decode_action(action, mirror_x=True)
+            orange_action = action_codec.decode(action, mirror_x=True)
         else:
-            blue_action = self._decode_action(action)
+            blue_action = action_codec.decode(action)
             bot_active = self.orange_control is not None and self.sim.orange_car is not None
             orange_action = self.orange_control.get_action() if bot_active else CarAction()
         return blue_action, orange_action
@@ -239,8 +207,8 @@ class RocketLeagueEnv(gym.Env):
         if goal is not None:
             self._reset_shaping_state()
             if goal == "ego":
-                return (REWARD_OPPONENT_OWN_GOAL if last_touch == "opponent" else REWARD_GOAL), True
-            return REWARD_CONCEDE, True
+                return (self.cfg.reward_opponent_own_goal if last_touch == "opponent" else self.cfg.reward_goal), True
+            return self.cfg.reward_concede, True
 
         reward = 0.0
         reward += self._ball_progress_reward(last_touch)
@@ -249,10 +217,10 @@ class RocketLeagueEnv(gym.Env):
         dist = self._ego_ball_distance()
         if self.dist_prev is None:
             self.dist_prev = dist
-        reward += (self.dist_prev - dist) * APPROACH_REWARD_SCALE
+        reward += (self.dist_prev - dist) * self.cfg.approach_reward_scale
         self.dist_prev = dist
-        reward -= dist * DISTANCE_PENALTY_SCALE
-        reward -= TIME_PENALTY
+        reward -= dist * self.cfg.distance_penalty_scale
+        reward -= self.cfg.time_penalty
         return reward, False
 
     def _ball_progress_reward(self, last_touch):
@@ -264,13 +232,13 @@ class RocketLeagueEnv(gym.Env):
             self.ball_prev = ball_x
         delta_x = ball_x - self.ball_prev
         self.ball_prev = ball_x
-        if abs(delta_x) <= BALL_PROGRESS_DEADBAND:
+        if abs(delta_x) <= self.cfg.ball_progress_deadband:
             return 0.0
 
         # Non-linear weighting: x_factor exponentially amplifies rewards near the goal mouth (|ball_x| -> 1);
         # y_factor retains a 0.25 baseline for ground-rolling balls (ball_y <= -0.55) while rewarding elevated trajectories.
         x_factor = np.exp(1 / (1.2 - ball_x**2))
-        y_factor = (1 - abs(ball_y)) ** 2 if ball_y > GROUND_BALL_Y else GROUND_BALL_Y_FACTOR
+        y_factor = (1 - abs(ball_y)) ** 2 if ball_y > self.cfg.ground_ball_y else self.cfg.ground_ball_y_factor
         progress = delta_x * x_factor * y_factor
 
         # Only credit what the last toucher caused: no penalty for the ego car when its own touch

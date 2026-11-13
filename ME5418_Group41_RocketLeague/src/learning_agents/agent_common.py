@@ -22,6 +22,7 @@ import torch
 
 from src.config.gym_config import GymConfig
 from src.config.sim_config import GIF_FRAME_SIZE
+from src.gym_env.action_codec import clear_jump
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
 from src.paths import RUNS_DIR
 
@@ -84,14 +85,6 @@ def obs_to_tensor(obs) -> torch.Tensor:
 def scored_goal(info: dict, terminated: bool, reward: float) -> bool:
     """True when the decision step ended with the controlled car scoring."""
     return bool(info.get("is_success", False) or (terminated and reward > 0.0))
-
-
-def clear_jump(action):
-    """Return `action` with its jump bit cleared: a flat Discrete(36) index or factored [dir, jump, boost]."""
-    if isinstance(action, (list, tuple, np.ndarray)):
-        return [int(action[0]), 0, int(action[2])]
-    jump_bit = (action % 4) // 2
-    return (action - 2) if jump_bit == 1 else action
 
 
 def step_with_action_repeat(env: gym.Env, action, action_orange=None, action_repeat: int = 1):
@@ -181,13 +174,6 @@ def latest_model_path(model_name: str) -> Path:
 # --------------------------------------------------------------------------------------------
 
 
-def load_state_dict_if_exists(path: str | Path) -> dict | None:
-    """Load a `.pt` state_dict onto `device`, or return None when the file does not exist."""
-    if not os.path.exists(path):
-        return None
-    return torch.load(path, map_location=device, weights_only=True)
-
-
 def save_periodic_checkpoint(
     model: torch.nn.Module,
     checkpoint_dir: str | Path,
@@ -210,25 +196,6 @@ def save_periodic_checkpoint(
     torch.save(model.state_dict(), path)
     print(f"Saved checkpoint after {episodes_done} episodes to: {path}")
     return path
-
-
-def infer_ppo_arch(state_dict: dict) -> tuple[int, int | list[int] | None]:
-    """(hidden_dim, action_dim) of an `ActorCritic` checkpoint. `action_dim` is a list for factored
-    MultiDiscrete heads, an int for a flat Discrete head, or None if no actor layer is found."""
-    hidden_dim = state_dict["fc1.weight"].shape[0]
-    if "actor_heads.0.weight" in state_dict:
-        n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("actor_heads.")})
-        return hidden_dim, [state_dict[f"actor_heads.{i}.weight"].shape[0] for i in range(n_heads)]
-    if "actor.weight" in state_dict:
-        return hidden_dim, state_dict["actor.weight"].shape[0]
-    return hidden_dim, None
-
-
-def infer_dqn_arch(state_dict: dict) -> tuple[int, int, bool]:
-    """(hidden_dim, action_dim, is_dueling) of a `DQN` checkpoint."""
-    dueling = "advantages.weight" in state_dict
-    out_key = "advantages.weight" if dueling else "fc3.weight"
-    return state_dict["fc1.weight"].shape[0], state_dict[out_key].shape[0], dueling
 
 
 # --------------------------------------------------------------------------------------------

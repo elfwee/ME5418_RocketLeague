@@ -12,6 +12,7 @@ from src.learning_agents.dueling_ddqn_agent import (
     train_dueling_ddqn,
 )
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
+from src.neural_nets.checkpoint import is_ppo_state_dict, load_state_dict
 from src.neural_nets.demos import run_dqn_network, run_ppo_network
 from src.paths import RUNS_DIR
 from src.sim.game import play_headless, play_interactive
@@ -231,11 +232,9 @@ def main():
                     orange_model_path = model_paths[1]
             elif len(model_paths) == 1 and blue_model_path is None and orange_model_path is None:
                 single_path = model_paths[0]
-                if os.path.exists(single_path):
-                    import torch
-
-                    sd = torch.load(single_path, map_location="cpu", weights_only=True)
-                    is_ppo_ckpt = any(k.startswith(("actor", "critic", "fc_actor", "fc_critic")) for k in sd.keys())
+                sd = load_state_dict(single_path)
+                if sd is not None:
+                    is_ppo_ckpt = is_ppo_state_dict(sd)
                     if is_ppo_ckpt and orange_policy == "ppo" and blue_policy != "ppo":
                         orange_model_path = single_path
                     elif (not is_ppo_ckpt) and orange_policy != "ppo" and blue_policy == "ppo":

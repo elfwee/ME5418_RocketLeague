@@ -7,8 +7,6 @@ from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
 
-from src.config.nn_config import PPOConfig
-
 
 class ActorCritic(nn.Module):
     """Actor-Critic network for PPO supporting discrete and factored MultiDiscrete action spaces.
@@ -27,10 +25,8 @@ class ActorCritic(nn.Module):
     def __init__(
         self,
         state_dim: int,
-        action_dim: int | list[int] | tuple[int, ...] = (
-            PPOConfig.action_dims if getattr(PPOConfig, "factored_action", False) else 36
-        ),
-        hidden_dim: int = PPOConfig.hidden_size,
+        action_dim: int | list[int] | tuple[int, ...],
+        hidden_dim: int = 256,
     ):
         super().__init__()
         self.is_factored = isinstance(action_dim, (list, tuple))

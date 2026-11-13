@@ -17,7 +17,6 @@ Mirror transform (normalized coordinates are already centred, so x -> -x):
 Layout must match Simulation.get_state_norm(as_flat_array=True) exactly.
 """
 
-from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
 
 
@@ -26,8 +25,3 @@ def get_orange_perspective_obs(sim: Simulation) -> list[float]:
     if sim.orange_car is None:
         raise ValueError("Orange perspective requires an orange car in the simulation.")
     return sim.get_state_norm_mirror(as_flat_array=True)
-
-
-def mirror_action(action: CarAction) -> CarAction:
-    """Map an action chosen in the mirrored (blue-view) world back to the real orange car."""
-    return CarAction(dir_x=-action.dir_x, dir_y=action.dir_y, jump=action.jump, boost=action.boost)

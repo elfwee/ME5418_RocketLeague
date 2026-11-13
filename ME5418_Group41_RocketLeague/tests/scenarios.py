@@ -382,13 +382,15 @@ def short_training_run(algo: str, runs_dir: Path) -> tuple[str, dict]:
 
     Returns (metrics CSV text, final best-model state_dict).
     """
+    from dataclasses import replace
+
     import src.learning_agents.agent_common as common
     import src.learning_agents.dueling_ddqn_agent as dqn_agent
     import src.learning_agents.ppo_agent as ppo_agent
     from src.config.nn_config import DQNConfig, PPOConfig
 
     agent_module = dqn_agent if algo == "dueling_ddqn" else ppo_agent
-    config_cls = DQNConfig if algo == "dueling_ddqn" else PPOConfig
+    config = replace(DQNConfig() if algo == "dueling_ddqn" else PPOConfig(), **TRAINING_OVERRIDES[algo])
     original_make_env = agent_module.make_env
 
     def seeded_make_env(*args, **kwargs):
@@ -396,14 +398,11 @@ def short_training_run(algo: str, runs_dir: Path) -> tuple[str, dict]:
         env.action_space.seed(0)
         return env
 
-    patches = [(config_cls, k, v) for k, v in TRAINING_OVERRIDES[algo].items()]
-    patches += [(common, "RUNS_DIR", Path(runs_dir)), (agent_module, "make_env", seeded_make_env)]
+    patches = [(common, "RUNS_DIR", Path(runs_dir)), (agent_module, "make_env", seeded_make_env)]
     with _Patch(patches):
         seed_everything(0)
-        if algo == "dueling_ddqn":
-            dqn_agent.train_dueling_ddqn(num_episodes=TRAINING_EPISODES, max_episode_steps=TRAINING_MAX_EPISODE_STEPS)
-        else:
-            ppo_agent.train_ppo(num_episodes=TRAINING_EPISODES, max_episode_steps=TRAINING_MAX_EPISODE_STEPS)
+        train = dqn_agent.train_dueling_ddqn if algo == "dueling_ddqn" else ppo_agent.train_ppo
+        train(num_episodes=TRAINING_EPISODES, max_episode_steps=TRAINING_MAX_EPISODE_STEPS, config=config)
 
     (run_dir,) = [p for p in Path(runs_dir).iterdir() if p.is_dir()]
     metrics = (run_dir / f"metrics_{algo}.csv").read_text()
