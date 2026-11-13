@@ -311,6 +311,7 @@ class DuelingDDQNAgent:
         save_gif: bool = False,
         gif_path: str | Path | None = None,
         control_car: str = "blue",
+        random_spawn: bool = True,
     ) -> dict[str, float]:
         """Run training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         if control_car in ("bot_vs_bot", "bots", "both"):
@@ -333,6 +334,7 @@ class DuelingDDQNAgent:
             bot_type=self.bot_type,
             discrete_action=True,
             control_car="blue" if is_training else control_car,
+            random_spawn=random_spawn,
             **make_kwargs,
         )
 
@@ -609,6 +611,7 @@ def evaluate_dueling_ddqn(
     save_gif: bool = False,
     gif_path: str | Path | None = None,
     control_car: str = "blue",
+    random_spawn: bool = True,
 ) -> dict[str, float]:
     """Evaluate/validate a trained Dueling Double DQN agent."""
     agent = DuelingDDQNAgent(
@@ -616,7 +619,11 @@ def evaluate_dueling_ddqn(
         enable_dueling_dqn=enable_dueling_dqn,
         enable_double_dqn=enable_double_dqn,
     )
-    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
+    episodes = (
+        None
+        if (render and num_episodes is None and not save_gif)
+        else (num_episodes if num_episodes is not None else DQNConfig.eval_episodes)
+    )
     return agent.run(
         is_training=False,
         render=render,
@@ -626,6 +633,7 @@ def evaluate_dueling_ddqn(
         save_gif=save_gif,
         gif_path=gif_path,
         control_car=control_car,
+        random_spawn=random_spawn,
     )
 
 
@@ -639,6 +647,7 @@ def evaluate_mixed_policies(
     max_episode_steps: int | None = None,
     save_gif: bool = False,
     gif_path: str | Path | None = None,
+    random_spawn: bool = True,
 ) -> dict[str, float]:
     """Evaluate two potentially different policies head-to-head (Blue policy vs. mirrored Orange policy).
 
@@ -675,6 +684,7 @@ def evaluate_mixed_policies(
         bot_type=DQNConfig.bot_type,
         discrete_action=True,
         control_car="both",
+        random_spawn=random_spawn,
         **make_kwargs,
     )
     num_states = env.observation_space.shape[0]
@@ -685,14 +695,17 @@ def evaluate_mixed_policies(
             ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
             state_dict = None
             factored = getattr(PPOConfig, "factored_action", True)
+            hidden_dim = PPOConfig.hidden_size
+            action_dim: int | list[int] = list(PPOConfig.action_dims) if factored else 36
             if os.path.exists(ckpt_file):
                 state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                if "actor_dir.weight" in state_dict:
-                    factored = True
-                elif "actor_stream.2.weight" in state_dict:
-                    factored = False
-            action_dim = list(PPOConfig.action_dims) if factored else 36
-            net = ActorCritic(num_states, action_dim, PPOConfig.hidden_size).to(device)
+                hidden_dim = state_dict["fc1.weight"].shape[0]
+                if "actor_heads.0.weight" in state_dict:
+                    n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("actor_heads.")})
+                    action_dim = [state_dict[f"actor_heads.{i}.weight"].shape[0] for i in range(n_heads)]
+                elif "actor.weight" in state_dict:
+                    action_dim = state_dict["actor.weight"].shape[0]
+            net = ActorCritic(num_states, action_dim, hidden_dim).to(device)
             if state_dict is not None:
                 net.load_state_dict(state_dict)
                 print(f"[Mix Eval ({team_label}: PPO)] Loaded trained weights from: {ckpt_file}")
@@ -712,11 +725,16 @@ def evaluate_mixed_policies(
             default_ckpt = os.path.join(ROOT_DIR, DQNConfig.runs_dir, f"model_{pol_type}.pt")
             ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
             enable_dueling = pol_type == "dueling_ddqn"
+            hidden_dim = DQNConfig.hidden_size
+            action_dim = 36
             state_dict = None
             if os.path.exists(ckpt_file):
                 state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                enable_dueling = "fc_value.weight" in state_dict
-            net = DQN(num_states, 36, DQNConfig.hidden_size, enable_dueling_dqn=enable_dueling).to(device)
+                hidden_dim = state_dict["fc1.weight"].shape[0]
+                enable_dueling = "advantages.weight" in state_dict
+                out_key = "advantages.weight" if enable_dueling else "fc3.weight"
+                action_dim = state_dict[out_key].shape[0]
+            net = DQN(num_states, action_dim, hidden_dim, enable_dueling_dqn=enable_dueling).to(device)
             if state_dict is not None:
                 net.load_state_dict(state_dict)
                 print(f"[Mix Eval ({team_label}: {pol_type})] Loaded trained weights from: {ckpt_file}")
@@ -741,7 +759,11 @@ def evaluate_mixed_policies(
     select_blue = _build_policy_selector("Blue", blue_pol, blue_model_path)
     select_orange = _build_policy_selector("Orange", orange_pol, orange_model_path)
 
-    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
+    episodes = (
+        None
+        if (render and num_episodes is None and not save_gif)
+        else (num_episodes if num_episodes is not None else DQNConfig.eval_episodes)
+    )
     episode_iter = range(episodes) if episodes is not None else itertools.count()
     action_repeat = DQNConfig.action_repeat
 

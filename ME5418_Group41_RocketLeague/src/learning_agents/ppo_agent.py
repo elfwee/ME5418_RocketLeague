@@ -376,6 +376,7 @@ class PPOAgent:
         save_gif: bool = False,
         gif_path: str | Path | None = None,
         control_car: str = "blue",
+        random_spawn: bool = True,
     ) -> dict[str, float]:
         """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
         if control_car in ("bot_vs_bot", "bots", "both"):
@@ -392,35 +393,53 @@ class PPOAgent:
         else:
             render_mode = None
 
+        ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
+        preloaded_state_dict = None
         factored = getattr(PPOConfig, "factored_action", False)
+        hidden_dim = self.fcl_nodes
+        if (not is_training or model_path is not None) and os.path.exists(ckpt_file):
+            preloaded_state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+            hidden_dim = preloaded_state_dict["fc1.weight"].shape[0]
+            if "actor_heads.0.weight" in preloaded_state_dict:
+                factored = True
+            elif "actor.weight" in preloaded_state_dict:
+                factored = False
+
         env = gym.make(
             self.env_id,
             render_mode=render_mode,
             bot_type=self.bot_type,
             discrete_action=not factored,
             control_car="blue" if is_training else control_car,
+            random_spawn=random_spawn,
             **make_kwargs,
         )
 
         num_states = env.observation_space.shape[0]
-        action_dim = list(env.action_space.nvec) if factored else env.action_space.n
+        if preloaded_state_dict is not None and "actor_heads.0.weight" in preloaded_state_dict:
+            n_heads = len({k.split(".")[1] for k in preloaded_state_dict if k.startswith("actor_heads.")})
+            action_dim: int | list[int] = [
+                preloaded_state_dict[f"actor_heads.{i}.weight"].shape[0] for i in range(n_heads)
+            ]
+        elif preloaded_state_dict is not None and "actor.weight" in preloaded_state_dict:
+            action_dim = preloaded_state_dict["actor.weight"].shape[0]
+        else:
+            action_dim = list(env.action_space.nvec) if factored else env.action_space.n
 
         rewards_per_episode = []
         goals_per_episode = []
 
-        policy_net = ActorCritic(num_states, action_dim, self.fcl_nodes).to(device)
-        ckpt_file = str(model_path) if model_path is not None else self.MODEL_FILE
+        policy_net = ActorCritic(num_states, action_dim, hidden_dim).to(device)
 
         if is_training:
             if model_path is not None:
-                if os.path.exists(ckpt_file):
-                    state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                    policy_net.load_state_dict(state_dict)
+                if preloaded_state_dict is not None:
+                    policy_net.load_state_dict(preloaded_state_dict)
                     print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
                 else:
                     print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
-            else: 
-                print(f"[PPO Train] Training from scratch; no model checkpoint specified.")
+            else:
+                print("[PPO Train] Training from scratch; no model checkpoint specified.")
             self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
             step_count = 0
             entropy_history = []
@@ -444,9 +463,8 @@ class PPOAgent:
                 f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
             )
         else:
-            if os.path.exists(ckpt_file):
-                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
-                policy_net.load_state_dict(state_dict)
+            if preloaded_state_dict is not None:
+                policy_net.load_state_dict(preloaded_state_dict)
                 print(f"[PPO Eval] Loaded trained model weights from: {ckpt_file}")
             else:
                 print(f"[PPO Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
@@ -709,10 +727,15 @@ def evaluate_ppo(
     save_gif: bool = False,
     gif_path: str | Path | None = None,
     control_car: str = "blue",
+    random_spawn: bool = True,
 ) -> dict[str, float]:
     """Evaluate/validate a trained PPO agent."""
     agent = PPOAgent(hyperparameter_set=hyperparameter_set)
-    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
+    episodes = (
+        None
+        if (render and num_episodes is None and not save_gif)
+        else (num_episodes if num_episodes is not None else PPOConfig.eval_episodes)
+    )
     return agent.run(
         is_training=False,
         render=render,
@@ -722,6 +745,7 @@ def evaluate_ppo(
         save_gif=save_gif,
         gif_path=gif_path,
         control_car=control_car,
+        random_spawn=random_spawn,
     )
 
 

@@ -10,7 +10,7 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 src/
 ├── __init__.py
 ├── __main__.py                  # Enables `python -m src` (delegates to main.py)
-├── main.py                      # Unified CLI entry point (--play, --demo, --train, --eval)
+├── main.py                      # Unified CLI entry point (--play, --head_to_head, --demo, --train, --eval, --plot)
 │
 ├── config/                      # Centralised configuration
 │   ├── sim_config.py            # Physics rates, field geometry, car/ball tunings, display settings
@@ -26,9 +26,13 @@ src/
 │
 ├── learning_agents/             # Complete RL learning agents (training, evaluation, checkpointing)
 │   ├── __init__.py
+│   ├── agent_control.py         # Unified AgentControl wrapper supporting PPO, Dueling DDQN/DQN, and HeuristicBot
+│   ├── orange_perspective.py    # Mirrored Orange observation adapter (delegates to Simulation.get_state_norm_mirror) & OrangePerspectiveBot
+│   ├── head_to_head.py          # Continuous agent-vs-agent scoreboard match runner (--head_to_head)
 │   ├── experience_replay.py     # ReplayMemory FIFO circular transition buffer for off-policy DQN
-│   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent (--train / --eval for Dueling DDQN, DDQN, DQN)
-│   └── ppo_agent.py             # PPOAgent (--train / --eval with RolloutBuffer, GAE, clipped PPO)
+│   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent (--train / --eval / --mix for Dueling DDQN, DDQN, DQN)
+│   ├── ppo_agent.py             # PPOAgent (--train / --eval with RolloutBuffer, GAE, clipped PPO)
+│   └── plot_learning_curves.py  # Multi-run training curve comparison and dashboard plotting (--plot)
 │
 └── sim/                         # 2D simulation (physics, AI opponent, rendering)
     ├── game.py                  # Interactive & headless game loops (play_interactive, play_headless)

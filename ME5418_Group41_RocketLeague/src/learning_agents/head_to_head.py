@@ -13,10 +13,8 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
-from src.config.nn_config import PPOConfig
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
 from src.learning_agents.agent_control import AgentControl
-from src.learning_agents.orange_perspective import OrangePerspectiveBot
 from src.sim.core.simulation import Simulation
 from src.sim.core.control import CarControl
 
@@ -39,10 +37,7 @@ def play_head_to_head(
     if seed is not None:
         random.seed(seed)
 
-    if random_spawn:
-        sim = Simulation(enable_orange=True, random_spawn=random_spawn)
-    else:
-        sim = Simulation(enable_orange=True)
+    sim = Simulation(enable_orange=True, random_spawn=random_spawn)
 
     if orange_model is None:
         # orange = OrangePerspectiveBot(sim)
@@ -76,7 +71,7 @@ def play_head_to_head(
     try:
         while running:
             if render:
-                running = handle_event(sim, renderer)
+                running = handle_event(sim, renderer, blue, orange)
                 if not running:
                     break
 

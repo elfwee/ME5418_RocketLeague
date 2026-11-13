@@ -31,7 +31,14 @@ if GymConfig.gym_id not in gym.envs.registry:
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode=None, bot_type="none", discrete_action=True, control_car="blue"):
+    def __init__(
+        self,
+        render_mode=None,
+        bot_type="none",
+        discrete_action=True,
+        control_car="blue",
+        random_spawn: bool = True,
+    ):
         if bot_type not in ("none", "heuristic_bot"):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
         if control_car in ("bot_vs_bot", "bots", "both"):
@@ -44,7 +51,7 @@ class RocketLeagueEnv(gym.Env):
         self.control_car = control_car
 
         enable_orange = (bot_type == "heuristic_bot") or (self.control_car in ("orange", "both"))
-        self.sim = Simulation(enable_orange=enable_orange, random_spawn=False)
+        self.sim = Simulation(enable_orange=enable_orange, random_spawn=random_spawn)
 
         if self.control_car == "blue":
             self.blue_control = None

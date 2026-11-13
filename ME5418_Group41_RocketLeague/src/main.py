@@ -22,10 +22,18 @@ from src.learning_agents.head_to_head import play_head_to_head
 
 RUNS_DIR = f"{ROOT_DIR}/runs"
 
-DEFAULT_BLUE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
-# DEFAULT_BLUE_MODEL = None # defaults to heuristics bot
-DEFAULT_ORANGE_MODEL = f"{RUNS_DIR}/20261106_0911/model_ppo.pt"
-# DEFAULT_ORANGE_MODEL = None # defaults to heuristics bot
+
+def _resolve_default_h2h_model():
+    """Return the first available trained checkpoint for --head_to_head, or None for HeuristicBot."""
+    candidates = (
+        f"{RUNS_DIR}/model_ppo.pt",
+        f"{RUNS_DIR}/model_dueling_ddqn.pt",
+        f"{RUNS_DIR}/20261106_0911/model_ppo.pt",
+    )
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 def _arg_value(flag: str, default=None):
@@ -36,6 +44,14 @@ def _arg_value(flag: str, default=None):
             return sys.argv[idx + 1]
         raise SystemExit(f"{flag} requires a value")
     return default
+
+
+def _h2h_model_arg(flag: str, default):
+    """Resolve --blue/--orange model path for --head_to_head ('none'/'bot'/'heuristic' -> HeuristicBot)."""
+    val = _arg_value(flag, default)
+    if isinstance(val, str) and val.lower() in ("none", "bot", "heuristic", "heuristic_bot"):
+        return None
+    return val
 
 
 def main():
@@ -54,10 +70,15 @@ def main():
         else:
             play_interactive(enable_orange=enable_orange, control_car=control_car)
     elif "--head_to_head" in sys.argv:
+        default_model = _resolve_default_h2h_model()
+        max_goals_val = _arg_value("--max_goals")
+        max_seconds_val = _arg_value("--max_seconds")
         play_head_to_head(
-            blue_model=_arg_value("--blue", DEFAULT_BLUE_MODEL),
-            orange_model=_arg_value("--orange", DEFAULT_ORANGE_MODEL),
+            blue_model=_h2h_model_arg("--blue", default_model),
+            orange_model=_h2h_model_arg("--orange", default_model),
             render="--headless" not in sys.argv,
+            max_goals=int(max_goals_val) if max_goals_val is not None else None,
+            max_seconds=float(max_seconds_val) if max_seconds_val is not None else 600.0,
             random_spawn="--random_spawn" in sys.argv,
             seed=int(seed) if (seed := _arg_value("--seed")) is not None else None,
         )
@@ -138,6 +159,7 @@ def main():
         else:
             # Default or explicit `--blue`
             control_car = "blue"
+        eval_random_spawn = not ("--no_random_spawn" in sys.argv or "--fixed_spawn" in sys.argv)
 
         if "--mix" in sys.argv:
             # Parse explicit or positional policy flags for Blue and Orange
@@ -205,7 +227,10 @@ def main():
                     import torch
 
                     sd = torch.load(single_path, map_location="cpu", weights_only=True)
-                    is_ppo_ckpt = any(k.startswith("actor_") or k.startswith("critic_") for k in sd.keys())
+                    is_ppo_ckpt = any(
+                        k.startswith(("actor", "critic", "fc_actor", "fc_critic"))
+                        for k in sd.keys()
+                    )
                     if is_ppo_ckpt and orange_policy == "ppo" and blue_policy != "ppo":
                         orange_model_path = single_path
                     elif (not is_ppo_ckpt) and orange_policy != "ppo" and blue_policy == "ppo":
@@ -224,6 +249,7 @@ def main():
                 render=render,
                 save_gif=save_gif,
                 gif_path=gif_path,
+                random_spawn=eval_random_spawn,
             )
             print(f"[Mixed Policy Evaluation ({blue_policy} vs {orange_policy})] {metrics}")
         elif "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
@@ -237,6 +263,7 @@ def main():
                 save_gif=save_gif,
                 gif_path=gif_path,
                 control_car=control_car,
+                random_spawn=eval_random_spawn,
             )
             print(f"[Dueling Double DQN Evaluation] {metrics}")
         elif "--double_dqn" in sys.argv:
@@ -250,6 +277,7 @@ def main():
                 save_gif=save_gif,
                 gif_path=gif_path,
                 control_car=control_car,
+                random_spawn=eval_random_spawn,
             )
             print(f"[Double DQN Evaluation] {metrics}")
         elif "--dqn" in sys.argv:
@@ -263,6 +291,7 @@ def main():
                 save_gif=save_gif,
                 gif_path=gif_path,
                 control_car=control_car,
+                random_spawn=eval_random_spawn,
             )
             print(f"[Vanilla DQN Evaluation] {metrics}")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
@@ -274,16 +303,17 @@ def main():
                 save_gif=save_gif,
                 gif_path=gif_path,
                 control_car=control_car,
+                random_spawn=eval_random_spawn,
             )
             print(f"[PPO Evaluation] {metrics}")
         else:
             print(
                 "Please specify a learning agent to evaluate:\n"
-                "  python -m src --eval --dueling_ddqn [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Dueling Double DQN [alias: --ddqn]\n"
-                "  python -m src --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Double DQN\n"
-                "  python -m src --eval --dqn          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Vanilla DQN\n"
-                "  python -m src --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate PPO [alias: -ppo]\n"
-                "  python -m src --eval --mix [--dueling_ddqn --ppo | --ppo --dueling_ddqn] [--render] # Mixed policy vs policy"
+                "  python -m src --eval --dueling_ddqn [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Dueling Double DQN [alias: --ddqn]\n"
+                "  python -m src --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Double DQN\n"
+                "  python -m src --eval --dqn          [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Vanilla DQN\n"
+                "  python -m src --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate PPO [alias: -ppo]\n"
+                "  python -m src --eval --mix [--dueling_ddqn --ppo | --ppo --dueling_ddqn] [--render] [--no_random_spawn] # Mixed policy vs policy"
             )
     elif "--plot" in sys.argv:
         from src.learning_agents.plot_learning_curves import main as plot_main
@@ -294,13 +324,13 @@ def main():
             "Usage:\n"
             "  python -m src --play [--blue|--orange|--bot-vs-bot] # Play interactively (default: control Blue car)\n"
             "  python -m src --play --headless                     # Run headless physics benchmark\n"
-            "  python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--blue PATH] [--orange PATH]  # Agent vs agent\n"
+            "  python -m src --head_to_head [--headless] [--random_spawn] [--seed N] [--max_goals N] [--max_seconds S] [--blue PATH|none] [--orange PATH|none]  # Continuous agent vs agent\n"
             "  python -m src --demo --gym                          # Demo Gymnasium environment\n"
             "  python -m src --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants\n"
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"
             "  python -m src --train --dueling_ddqn|--ppo          # Train Dueling Double DQN or PPO agent\n"
-            "  python -m src --eval --dueling_ddqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--gif] # Evaluate agent\n"
-            "  python -m src --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...]     # Mixed policy match\n"
+            "  python -m src --eval --dueling_ddqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] [--gif] # Evaluate agent\n"
+            "  python -m src --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...] [--no_random_spawn]     # Mixed policy match\n"
             "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
 

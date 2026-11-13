@@ -16,7 +16,7 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
 - **Physics Engine**: Deterministic $240\text{ Hz}$ physics solver ($60\text{ Hz} \times 4\text{ sub-steps}$) powered by Pymunk (Chipmunk2D).
 - **Vehicle Dynamics**: Raycast spring-damper suspension, Coulomb tire traction, 2D vector steering, two-stage jump-dodge ballistics, rocket boost aerodynamics, and turtle auto-recovery.
 - **Opponent AI**: Rule-based Hierarchical Zone & Intercept State Machine (HZISM) acting as an adversarial baseline.
-- **RL Interface**: Standard Gymnasium environment (`rocket-league-v1`) with normalized continuous observation space and discrete/factored action spaces (`Discrete(36)` / `MultiDiscrete([9, 2, 2])`).
+- **RL Interface**: Standard Gymnasium environment (`rocketleague_v1`) with normalized continuous observation space and discrete/factored action spaces (`Discrete(36)` / `MultiDiscrete([9, 2, 2])`).
 - **Neural Network Architectures (`src/neural_nets/`)**: Matched-capacity PyTorch architectures (`150,949` trainable parameters) with `LayerNorm`-stabilized shared feature trunks for:
   - **Dueling Double DQN (`src/neural_nets/dueling_ddqn_torch.py`)**: Decoupled State-Value $V(s)$ and Action-Advantage $A(s, a)$ streams.
   - **PPO Actor-Critic (`src/neural_nets/ppo_torch.py`)**: Decoupled categorical Policy head $\pi_\theta(a|s)$ and Critic head $V_\phi(s)$.
@@ -79,6 +79,8 @@ python -m src --train --training_architecture --model_path path_to_model.pt
 
 #### Evaluate a Trained Learning Agent
 
+Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed kickoff spawns for reproducible comparisons), `[--gif [out.gif]]`.
+
 ```bash
 # 1. Blue = Policy, Orange = Heuristic Bot (default --blue mode)
 python -m src --eval --dueling_ddqn [--render] [--model_path path_to_model.pt]
@@ -95,6 +97,18 @@ python -m src --eval --ppo          --bot-vs-bot [--render] [--model_path path_t
 # 4. Mixed-Policy Bot-vs-Bot (e.g., Blue = Dueling DDQN vs Orange = PPO, or vice versa)
 python -m src --eval --mix --dueling_ddqn --ppo [--render] [--blue_model path_b.pt] [--orange_model path_o.pt]
 python -m src --eval --mix --ppo --dueling_ddqn [--render] [--blue_model path_b.pt] [--orange_model path_o.pt]
+```
+
+#### Continuous Head-to-Head Match (`--head_to_head`)
+
+Run a continuous scoreboard match (goal kickoffs reset automatically; supports PPO, Dueling DDQN/DQN checkpoints via `--blue`/`--orange`, or `none`/`bot` for `HeuristicBot`).
+
+```bash
+# Default resolved checkpoints in runs/ (or specify checkpoints / 'none' for HeuristicBot)
+python -m src --head_to_head [--blue PATH|none] [--orange PATH|none] [--random_spawn] [--seed N]
+
+# Headless match with score/time limits
+python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/model_dueling_ddqn.pt --orange none
 ```
 
 #### Plot Learning Curves & Dashboards
