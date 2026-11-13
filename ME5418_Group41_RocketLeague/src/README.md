@@ -9,7 +9,7 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 ```text
 src/
 ├── __main__.py                  # Enables `python -m src`
-├── cli.py                       # Command-line interface (--play, --head_to_head, --demo, --train, --eval, --plot)
+├── cli.py                       # Command-line interface (--play, --head_to_head, --demo, --train, --curriculum, --eval, --plot)
 ├── main.py                      # Compatibility shim re-exporting cli.main
 ├── paths.py                     # ROOT_DIR and RUNS_DIR (the only definitions)
 │

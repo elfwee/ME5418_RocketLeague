@@ -17,6 +17,7 @@ opponent / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLea
 under its own gym id.
 
 Usage:
+    python -m src --curriculum --ppo|--dueling_ddqn|--double_dqn|--dqn [--patience N] [--self_play_rounds N]
     python -m src.curriculum_learning.curriculum_learning --agent ppo
     python -m src.curriculum_learning.curriculum_learning --agent dqn --patience 500 --self_play_rounds 3
 """
@@ -109,11 +110,12 @@ class Curriculum:
         self_play_rounds: int = 5,
         max_stage_episodes: int | None = None,
         model_name: str | None = None,
+        config: PPOConfig | DQNConfig | None = None,
     ) -> None:
         self.stages = ["none", "heuristic", "self"]
         self.patience = patience  # number of episodes to train for after last best model
         self.agent = agent  # either DuelingDDQNAgent or PPOAgent (the class)
-        self.config = self.CONFIGS[agent]()
+        self.config = config if config is not None else self.CONFIGS[agent]()  # e.g. a DQN ablation variant
         self.self_play_rounds = self_play_rounds
         self.max_stage_episodes = max_stage_episodes
         self.model_name = model_name or self.config.hyperparameter_set
