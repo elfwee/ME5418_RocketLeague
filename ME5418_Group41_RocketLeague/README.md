@@ -28,8 +28,8 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
-- 🤖 **[Learning Agents (`src/learning_agents/`)](./src/learning_agents/)**: End-to-end training (`--train`) and evaluation (`--eval`) loops for `DuelingDDQNAgent` (`dueling_ddqn_agent.py`), `PPOAgent` (`ppo_agent.py`), and `ReplayMemory` (`experience_replay.py`).
-- 🧠 **[Neural Networks (`src/neural_nets/`)](./src/neural_nets/)**: PyTorch `nn.Module` definitions (`dueling_ddqn_torch.py` and `ppo_torch.py`) and standalone forward/backward pass verification (`--demo`).
+- 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches in `src/eval/`.
+- 🧠 **[Neural Networks (`src/neural_nets/README.md`)](./src/neural_nets/README.md)**: PyTorch `nn.Module` definitions (`dueling_ddqn_torch.py` and `ppo_torch.py`), checkpoint loading, and standalone forward/backward pass verification (`--demo`).
 - 📚 **[System & RL Environment (`src/README.md`)](./src/README.md)**: Package structure, Gymnasium observation/action spaces, reward shaping formulation, and control scheme.
 - ⚙️ **[Physics & Vehicle Kinematics (`src/sim/core/README.md`)](./src/sim/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
 - 🛡️ **[Opponent AI Architecture (`src/sim/ai/README.md`)](./src/sim/ai/README.md)**: Finite state machine structure, kickoff tactics, shadow defense, zone goalie interception, and aerial saves.
@@ -58,7 +58,7 @@ _(Alternatively, install the core dependencies via pip: `pip install torch gymna
 
 ### Step 3: Train & Evaluate Learning Agents
 
-All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
+Every mode lists its options with `--help` (e.g. `python -m src --eval --help`). All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
 
 #### Train a Learning Agent
 
@@ -73,8 +73,11 @@ python -m src --train --ppo
 python -m src --train --double_dqn
 python -m src --train --dqn
 
-# To start from a checkpoint for training
-python -m src --train --training_architecture --model_path path_to_model.pt
+# To start from a checkpoint for training (any of --dueling_ddqn / --double_dqn / --dqn / --ppo)
+python -m src --train --ppo --model_path path_to_model.pt
+
+# Limit the number of episodes
+python -m src --train --ppo --episodes 2000
 ```
 
 #### Evaluate a Trained Learning Agent
@@ -163,6 +166,15 @@ python -m src --demo --dqn
 # PPO Actor-Critic (Policy + Value heads with clipped surrogate + GAE update)
 python -m src --demo --ppo
 ```
+
+### Step 5: Run the Tests
+
+```bash
+python -m pytest -m "not slow"   # fast checks (~10 s)
+python -m pytest                 # everything, including CLI smoke tests and seeded training runs (~1.5 min)
+```
+
+The suite compares observations, rewards, bot behaviour and short training runs against goldens recorded from the original code (see [`src/README.md`](./src/README.md#5-tests)).
 
 ---
 
