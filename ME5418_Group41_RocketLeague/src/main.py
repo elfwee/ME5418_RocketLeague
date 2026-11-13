@@ -18,7 +18,7 @@ from src.learning_agents.dueling_ddqn_agent import (
     train_dueling_ddqn,
 )
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.learning_agents.head_to_head import play_head_to_head
+from src.eval.head_to_head import play_head_to_head
 
 RUNS_DIR = f"{ROOT_DIR}/runs"
 
