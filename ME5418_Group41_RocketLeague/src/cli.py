@@ -19,6 +19,7 @@ USAGE = f"""Usage:
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
   {PROG} --demo --ppo                          # Test PPO Actor-Critic network
   {PROG} --train --dueling_ddqn|--double_dqn|--dqn|--ppo [--episodes N] [--model_path PATH]  # Train an agent
+  {PROG} --curriculum --dueling_ddqn|--double_dqn|--dqn|--ppo [--patience N] [--self_play_rounds N] [--max_stage_episodes N]  # Curriculum: none -> heuristic bot -> self-play
   {PROG} --eval --dueling_ddqn|--double_dqn|--dqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] [--gif] [--gif_path PATH]  # Evaluate agent
   {PROG} --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...] [--no_random_spawn]  # Mixed policy match
   {PROG} --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard
@@ -30,6 +31,7 @@ MODES = {
     "head_to_head": "continuous match between two checkpoints or heuristic bots",
     "demo": "Gymnasium environment or network forward/backward pass demo",
     "train": "train a learning agent",
+    "curriculum": "train a learning agent through a curriculum: no opponent -> heuristic bot -> self-play",
     "eval": "evaluate a trained agent, or two policies against each other (--mix)",
     "plot": "plot learning curves / training dashboards from runs/",
 }
@@ -141,6 +143,33 @@ def train_parser() -> argparse.ArgumentParser:
     _add_algorithm_flags(parser)
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes (default: until stopped)")
     parser.add_argument("--model_path", default=None, help="checkpoint to fine-tune from")
+    return parser
+
+
+def curriculum_parser() -> argparse.ArgumentParser:
+    from src.config.curriculum_learning import CurriculumConfig
+
+    parser = _sub_parser("curriculum", MODES["curriculum"])
+    _add_algorithm_flags(parser)
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=CurriculumConfig.patience,
+        help="episodes without a new best rolling mean return before a stage ends (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--self_play_rounds",
+        type=int,
+        default=CurriculumConfig.self_play_rounds,
+        help="self-play rounds; the opponent is refreshed after each (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max_stage_episodes",
+        type=int,
+        default=CurriculumConfig.max_stage_episodes,
+        help="hard cap on episodes per stage / round (default: until plateau)",
+    )
+    parser.add_argument("--model_name", default=None, help="run / model name (default: the algorithm name)")
     return parser
 
 
@@ -280,6 +309,43 @@ def run_train(args: argparse.Namespace, parser: argparse.ArgumentParser):
         )
 
 
+CURRICULUM_HELP = f"""Please specify a learning agent for the curriculum:
+  {PROG} --curriculum --dueling_ddqn # Dueling Double DQN [alias: --ddqn]
+  {PROG} --curriculum --double_dqn   # Double DQN
+  {PROG} --curriculum --dqn          # Vanilla DQN
+  {PROG} --curriculum --ppo          # PPO"""
+
+
+def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
+    name = _single_algorithm(parser, args.algorithms)
+    if name is None:
+        print(CURRICULUM_HELP)
+        return
+    from dataclasses import replace
+
+    from src.config.nn_config import DQNConfig, PPOConfig
+    from src.curriculum_learning.curriculum_learning import Curriculum
+    from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
+    from src.learning_agents.ppo_agent import PPOAgent
+
+    algo = ALGORITHMS[name]
+    if algo.family == "ppo":
+        agent, config = PPOAgent, replace(PPOConfig(), hyperparameter_set=name)
+    else:
+        agent = DuelingDDQNAgent
+        config = replace(
+            DQNConfig(), hyperparameter_set=name, enable_dueling_dqn=algo.dueling, enable_double_dqn=algo.double
+        )
+    Curriculum(
+        agent,
+        patience=args.patience,
+        self_play_rounds=args.self_play_rounds,
+        max_stage_episodes=args.max_stage_episodes,
+        model_name=args.model_name,
+        config=config,
+    ).learn()
+
+
 EVAL_HELP = f"""Please specify a learning agent to evaluate:
   {PROG} --eval --dueling_ddqn [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Dueling Double DQN [alias: --ddqn]
   {PROG} --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Double DQN
@@ -392,6 +458,7 @@ SUB_PARSERS = {
     "head_to_head": head_to_head_parser,
     "demo": demo_parser,
     "train": train_parser,
+    "curriculum": curriculum_parser,
     "eval": eval_parser,
 }
 
@@ -419,5 +486,7 @@ def main(argv: Sequence[str] | None = None):
         run_demo(args, parser)
     elif known.mode == "train":
         run_train(args, parser)
+    elif known.mode == "curriculum":
+        run_curriculum(args, parser)
     elif known.mode == "eval":
         run_eval(args, parser)

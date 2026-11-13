@@ -80,6 +80,15 @@ python -m src --train --ppo --model_path path_to_model.pt
 python -m src --train --ppo --episodes 2000
 ```
 
+#### Curriculum Learning
+
+Trains one agent through three stages, each starting from the previous stage's best model: no opponent, then the heuristic bot, then self-play rounds against a frozen copy of the last best model (refreshed every round). A stage ends when the 100-episode mean reward has not improved for `--patience` episodes. Each stage / round gets its own run folder (`runs/<ts>_<name>_s1_none/`, ...), and the final model is copied to `runs/<ts>_<name>_curriculum/model_<name>.pt`.
+
+```bash
+python -m src --curriculum --ppo [--patience 1000] [--self_play_rounds 5] [--max_stage_episodes N]
+python -m src --curriculum --dueling_ddqn   # also --double_dqn / --dqn
+```
+
 #### Evaluate a Trained Learning Agent
 
 Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed kickoff spawns for reproducible comparisons), `[--gif]` (record the first episode as a GIF next to the checkpoint), `[--gif_path out.gif]`.

@@ -17,7 +17,6 @@ import gymnasium as gym
 import torch
 from torch import nn
 
-from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
 from src.learning_agents.env_factory import device, make_env, normalize_control_car
 from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
@@ -209,7 +208,7 @@ class DuelingDDQNAgent:
             save_gif=save_gif,
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
-            env_id=GymConfig.gym_id,
+            env_id=self.cfg.env_id,
             action_repeat=self.cfg.action_repeat,
         )
 

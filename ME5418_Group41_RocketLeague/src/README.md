@@ -9,7 +9,7 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 ```text
 src/
 ├── __main__.py                  # Enables `python -m src`
-├── cli.py                       # Command-line interface (--play, --head_to_head, --demo, --train, --eval, --plot)
+├── cli.py                       # Command-line interface (--play, --head_to_head, --demo, --train, --curriculum, --eval, --plot)
 ├── main.py                      # Compatibility shim re-exporting cli.main
 ├── paths.py                     # ROOT_DIR and RUNS_DIR (the only definitions)
 │
@@ -17,7 +17,8 @@ src/
 │   ├── sim_config.py            # Physics rates, field geometry, car/ball tunings, spawn ranges
 │   ├── render_config.py         # Screen size, pixels per metre, colour palette
 │   ├── gym_config.py            # GymConfig: env id, episode length, action directions, reward constants
-│   └── nn_config.py             # DQNConfig & PPOConfig: matched architectures & RL hyperparameters
+│   ├── nn_config.py             # DQNConfig & PPOConfig: matched architectures & RL hyperparameters
+│   └── curriculum_learning.py   # CurriculumConfig: stage order, self-play rounds, plateau patience
 │
 ├── gym_env/                     # Gymnasium RL environment
 │   ├── rocket_league_env.py     # RocketLeagueEnv (spaces, step, reset, rendering); one step = one sim frame
