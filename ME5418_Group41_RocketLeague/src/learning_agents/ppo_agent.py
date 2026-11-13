@@ -22,7 +22,6 @@ from torch.nn import functional as F
 
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
-from src.learning_agents.dashboard import DashboardPanel
 from src.learning_agents.env_factory import device, make_env, normalize_control_car
 from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
 from src.learning_agents.rollout_buffer import RolloutBuffer
@@ -277,24 +276,6 @@ class PPOAgent:
 
     def end_episode(self) -> tuple[float, float]:
         return self.current_entropy, self.current_v_loss
-
-    def dashboard_panels(self, history: tuple[list[float], list[float]]) -> tuple[DashboardPanel, DashboardPanel]:
-        """Exploration Dynamics (policy entropy) and Critic Optimization Health (value loss)."""
-        entropy_history, value_loss_history = history
-        return (
-            DashboardPanel(
-                values=entropy_history,
-                title="Exploration Dynamics (Policy Entropy)",
-                ylabel="Entropy H(pi)",
-                label="Policy Entropy H(pi)",
-            ),
-            DashboardPanel(
-                values=value_loss_history,
-                title="Critic Optimization Health (Value Loss)",
-                ylabel="Value MSE Loss",
-                label="Raw Value Loss",
-            ),
-        )
 
     # ----------------------------------------------------------------------------------------
     # Training / evaluation loops

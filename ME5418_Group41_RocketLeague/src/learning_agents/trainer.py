@@ -16,7 +16,7 @@ import gymnasium as gym
 import torch
 from torch import nn
 
-from src.learning_agents.dashboard import DashboardPanel, save_training_dashboard
+from src.learning_agents.dashboard import metric_panel, save_training_dashboard
 from src.learning_agents.env_factory import obs_to_tensor, scored_goal
 from src.learning_agents.eval_loop import summarize_episodes
 from src.learning_agents.run_dirs import RunPaths, save_periodic_checkpoint
@@ -25,7 +25,7 @@ from src.learning_agents.training_logger import TrainingLogger
 
 class Learner(Protocol):
     model: nn.Module  # weights saved as the best model and periodic checkpoints
-    metric_columns: tuple[str, str]  # names of the two agent-specific CSV columns
+    metric_columns: tuple[str, str]  # exploration and loss CSV columns (keys of `dashboard.METRIC_PANELS`)
     dashboard_title: str
 
     def act(self, state: torch.Tensor): ...
@@ -37,8 +37,6 @@ class Learner(Protocol):
     def progress(self) -> str: ...
 
     def end_episode(self) -> tuple[float, float]: ...
-
-    def dashboard_panels(self, history: tuple[list[float], list[float]]) -> tuple[DashboardPanel, DashboardPanel]: ...
 
 
 def run_training(
@@ -54,7 +52,7 @@ def run_training(
     step_count = 0
 
     def save_graph(dpi: int = 150):
-        exploration, loss = learner.dashboard_panels(history)
+        exploration, loss = (metric_panel(c, v) for c, v in zip(learner.metric_columns, history, strict=True))
         save_training_dashboard(
             paths.graph_file,
             learner.dashboard_title,

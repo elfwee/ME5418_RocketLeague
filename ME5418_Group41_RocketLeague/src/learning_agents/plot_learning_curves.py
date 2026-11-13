@@ -29,6 +29,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.learning_agents.dashboard import (
+    EXPLORATION_COLUMNS,
+    LOSS_COLUMNS,
+    metric_panel,
+    rolling_mean,
+    save_training_dashboard,
+)
 from src.paths import RUNS_DIR
 
 
@@ -90,87 +97,25 @@ def parse_log_file(log_path: str | Path) -> dict[str, np.ndarray]:
 
 
 def plot_single_dashboard(data: dict[str, np.ndarray], title: str, output_path: str | Path):
-    """Generate a publication-ready 4-panel dashboard for a single run."""
+    """Generate a publication-ready 4-panel dashboard for a single run (the same figure training saves)."""
     n = len(data.get("reward", []))
     if n == 0:
         print(f"[Plotting] Warning: No data points found for '{title}'. Skipping.")
         return
 
-    x = data.get("step") if "step" in data and len(data["step"]) == n else np.arange(1, n + 1)
-    x_label = "Environment Steps" if "step" in data else "Episodes"
-
-    # Compute rolling returns if not present
-    if "mean_reward_100" in data:
-        mean_rewards = data["mean_reward_100"]
-    else:
-        rewards = data["reward"]
-        mean_rewards = np.zeros(n)
-        for i in range(n):
-            mean_rewards[i] = np.mean(rewards[max(0, i - 99) : i + 1])
-
-    fig, axs = plt.subplots(2, 2, figsize=(14, 9))
-
-    # 1. Sample Efficiency (Return vs Steps)
-    if "reward" in data:
-        axs[0, 0].plot(x, data["reward"], color="#1f77b4", alpha=0.18, linewidth=0.8, label="Episodic Return")
-    axs[0, 0].plot(x, mean_rewards, color="#1f77b4", linewidth=2.2, label="100-Ep Rolling Return")
-    axs[0, 0].axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    axs[0, 0].set_title("Sample Efficiency (Return vs. Steps)", fontsize=11, fontweight="bold")
-    axs[0, 0].set_xlabel(x_label)
-    axs[0, 0].set_ylabel("Episodic Return")
-    axs[0, 0].grid(True, alpha=0.3, linestyle="--")
-    axs[0, 0].legend(loc="upper left", framealpha=0.8)
-
-    # 2. Objective Goal Rate (%)
-    if "goal_rate_100" in data:
-        axs[0, 1].plot(x, data["goal_rate_100"], color="#2ca02c", linewidth=2.2, label="100-Ep Goal Rate (%)")
-        axs[0, 1].axhline(50.0, color="#9467bd", linestyle=":", linewidth=1.0, alpha=0.7, label="50% Win Parity")
-        axs[0, 1].set_ylim([-2, 105])
-    axs[0, 1].set_title("Objective Competency (Goal Rate %)", fontsize=11, fontweight="bold")
-    axs[0, 1].set_xlabel(x_label)
-    axs[0, 1].set_ylabel("Goal Rate (%)")
-    axs[0, 1].grid(True, alpha=0.3, linestyle="--")
-    axs[0, 1].legend(loc="upper left", framealpha=0.8)
-
-    # 3. Exploration Dynamics (Entropy or Epsilon)
-    if "entropy" in data:
-        axs[1, 0].plot(x, data["entropy"], color="#ff7f0e", linewidth=2.0, label="Policy Entropy H(pi)")
-        axs[1, 0].set_ylabel("Entropy H(pi)")
-        axs[1, 0].set_title("Exploration Dynamics (Policy Entropy)", fontsize=11, fontweight="bold")
-    elif "epsilon" in data:
-        axs[1, 0].plot(x, data["epsilon"], color="#ff7f0e", linewidth=2.0, label="Epsilon (ε)")
-        axs[1, 0].set_ylabel("Epsilon (ε)")
-        axs[1, 0].set_ylim([-0.02, 1.05])
-        axs[1, 0].set_title("Exploration Schedule (Epsilon Decay)", fontsize=11, fontweight="bold")
-    else:
-        axs[1, 0].text(0.5, 0.5, "No Exploration Metric Recorded", ha="center", va="center")
-    axs[1, 0].set_xlabel(x_label)
-    axs[1, 0].grid(True, alpha=0.3, linestyle="--")
-    if "entropy" in data or "epsilon" in data:
-        axs[1, 0].legend(loc="upper right", framealpha=0.8)
-
-    # 4. Optimization Health (Value Loss or TD Loss)
-    loss_key = "value_loss" if "value_loss" in data else ("td_loss" if "td_loss" in data else None)
-    if loss_key and loss_key in data:
-        losses = data[loss_key]
-        axs[1, 1].plot(x, losses, color="#d62728", alpha=0.25, linewidth=0.8, label=f"Raw {loss_key}")
-        smooth_loss = np.zeros(n)
-        for i in range(n):
-            smooth_loss[i] = np.mean(losses[max(0, i - 49) : i + 1])
-        axs[1, 1].plot(x, smooth_loss, color="#d62728", linewidth=2.0, label="50-Ep Smoothed Loss")
-        axs[1, 1].set_title(f"Optimization Health ({loss_key})", fontsize=11, fontweight="bold")
-        axs[1, 1].set_ylabel("Loss")
-        axs[1, 1].legend(loc="upper right", framealpha=0.8)
-    else:
-        axs[1, 1].text(0.5, 0.5, "No Loss Metric Recorded", ha="center", va="center")
-    axs[1, 1].set_xlabel(x_label)
-    axs[1, 1].grid(True, alpha=0.3, linestyle="--")
-
-    fig.suptitle(f"{title} Training Dashboard", fontsize=13, fontweight="bold")
-    plt.tight_layout()
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    plt.savefig(output_path, dpi=150)
-    plt.close()
+    exploration_col = next((c for c in EXPLORATION_COLUMNS if c in data), None)
+    loss_col = next((c for c in LOSS_COLUMNS if c in data), None)
+    save_training_dashboard(
+        output_path,
+        f"{title} Training Dashboard",
+        data["reward"],
+        steps_per_episode=data.get("step"),
+        goals_per_episode=data.get("goal"),
+        exploration=metric_panel(exploration_col, data[exploration_col]) if exploration_col else None,
+        loss=metric_panel(loss_col, data[loss_col]) if loss_col else None,
+        mean_rewards=data.get("mean_reward_100"),
+        goal_rates=data.get("goal_rate_100"),
+    )
     print(f"[Plotting] Saved dashboard to: {output_path}")
 
 
@@ -190,10 +135,7 @@ def plot_comparison(runs_data: dict[str, dict[str, np.ndarray]], output_path: st
         if "mean_reward_100" in data:
             y = data["mean_reward_100"]
         elif "reward" in data:
-            rewards = data["reward"]
-            y = np.zeros(len(rewards))
-            for i in range(len(rewards)):
-                y[i] = np.mean(rewards[max(0, i - 99) : i + 1])
+            y = rolling_mean(data["reward"], 100)
         else:
             continue
 

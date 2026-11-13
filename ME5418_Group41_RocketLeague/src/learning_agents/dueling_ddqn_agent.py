@@ -19,7 +19,6 @@ from torch import nn
 
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
-from src.learning_agents.dashboard import DashboardPanel
 from src.learning_agents.env_factory import device, make_env, normalize_control_car
 from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
 from src.learning_agents.experience_replay import ReplayMemory
@@ -196,25 +195,6 @@ class DuelingDDQNAgent:
     def end_episode(self) -> tuple[float, float]:
         self.epsilon = self._decay_epsilon(self.epsilon)
         return self.epsilon, self.current_loss
-
-    def dashboard_panels(self, history: tuple[list[float], list[float]]) -> tuple[DashboardPanel, DashboardPanel]:
-        """Exploration Schedule (epsilon decay) and Bellman Optimization Health (TD / Huber loss)."""
-        epsilon_history, loss_history = history
-        return (
-            DashboardPanel(
-                values=epsilon_history,
-                title="Exploration Schedule (Epsilon Decay)",
-                ylabel="Epsilon (ε)",
-                label="Epsilon (ε)",
-                ylim=(-0.02, 1.05),
-            ),
-            DashboardPanel(
-                values=loss_history,
-                title="Bellman Optimization Health (TD Loss)",
-                ylabel="Huber Loss",
-                label="Raw TD Loss",
-            ),
-        )
 
     # ----------------------------------------------------------------------------------------
     # Training / evaluation
