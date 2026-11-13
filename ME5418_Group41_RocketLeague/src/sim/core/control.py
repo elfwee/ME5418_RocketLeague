@@ -33,6 +33,10 @@ class CarControl:
             self.action = CarAction(dir_x=0, dir_y=0, jump=False, boost=False)
 
         elif self.control_type == "human":
+            if not pygame.get_init() or not pygame.display.get_init():
+                self.action = CarAction(dir_x=0.0, dir_y=0.0, jump=False, boost=False)
+                return self.action
+
             # gets keyboard input into CarAction
             keys = pygame.key.get_pressed()
 

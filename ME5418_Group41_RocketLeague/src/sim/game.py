@@ -78,6 +78,10 @@ def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
 
         # --- Simulation Step ---
         sim.step(action=blue_action, dt=dt, action_orange=orange_action)
+        if sim.goal_scored_this_step is not None:
+            blue_control.reset()
+            if orange_control is not None:
+                orange_control.reset()
         sim.get_state_norm(as_flat_array=True)
 
         # --- Render ---
@@ -102,6 +106,8 @@ def play_headless(steps: int = 300, enable_orange: bool = True):
     for step in range(steps):
         orange_action = orange_control.get_action() if orange_control is not None else CarAction()
         sim.step(action, 1.0 / SIM_HZ, action_orange=orange_action)
+        if sim.goal_scored_this_step is not None and orange_control is not None:
+            orange_control.reset()
         if step % 60 == 0:
             state = sim.get_state()
             blue_pos = state["blue_car"]["position"]

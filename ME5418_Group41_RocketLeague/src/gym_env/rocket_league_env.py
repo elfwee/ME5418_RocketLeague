@@ -30,21 +30,40 @@ if GymConfig.gym_id not in gym.envs.registry:
 class RocketLeagueEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": SIM_HZ}
 
-    def __init__(self, render_mode=None, bot_type="none", discrete_action=True):
+    def __init__(self, render_mode=None, bot_type="none", discrete_action=True, control_car="blue"):
         if bot_type not in ("none", "heuristic_bot"):
             raise ValueError(f"Invalid bot_type: {bot_type}. Must be 'none' or 'heuristic_bot'.")
+        if control_car in ("bot_vs_bot", "bots", "both"):
+            control_car = "both"
+        if control_car not in ("blue", "orange", "both"):
+            raise ValueError(f"Invalid control_car: {control_car}. Must be 'blue', 'orange', or 'both'.")
 
         self.render_mode = render_mode
         self.bot_type = bot_type
-        self.sim = Simulation(enable_orange=(bot_type == "heuristic_bot"), random_spawn=True)
-        self.orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
-            if bot_type == "heuristic_bot"
-            else None
-        )
+        self.control_car = control_car
+
+        enable_orange = (bot_type == "heuristic_bot") or (self.control_car in ("orange", "both"))
+        self.sim = Simulation(enable_orange=enable_orange, random_spawn=True)
+
+        if self.control_car == "blue":
+            self.blue_control = None
+            self.orange_control = (
+                CarControl(control_type="heuristic_bot", team="orange", sim=self.sim)
+                if bot_type == "heuristic_bot"
+                else None
+            )
+        elif self.control_car == "orange":
+            self.blue_control = CarControl(control_type="human", team="blue", sim=self.sim)
+            self.orange_control = None
+        else:
+            # control_car == "both": both Blue and Orange are controlled by policy
+            self.blue_control = None
+            self.orange_control = None
+
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
+        self._episode_count = 0
         self.isopen = True
         self.discrete_action = discrete_action
 
@@ -68,8 +87,28 @@ class RocketLeagueEnv(gym.Env):
             self.renderer = Renderer(pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)))
             self.clock = pygame.time.Clock()
 
-    def _get_obs(self):
+    def _get_obs(self, team=None):
+        target_team = (
+            ("orange" if self.control_car == "orange" else "blue")
+            if team is None
+            else team
+        )
+        if target_team == "orange":
+            return np.asarray(self.sim.get_state_norm_mirror(as_flat_array=True), dtype=np.float32)
         return np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
+
+    def _decode_action(self, action, mirror_x: bool = False) -> CarAction:
+        if self.discrete_action:
+            act_int = int(action)
+            direction = act_int // 4
+            jump = (act_int % 4) // 2
+            boost = act_int % 2
+        else:
+            direction, jump, boost = int(action[0]), int(action[1]), int(action[2])
+        dir_x, dir_y = GymConfig.directions[direction]
+        if mirror_x:
+            dir_x = -dir_x
+        return CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -78,37 +117,61 @@ class RocketLeagueEnv(gym.Env):
             np.random.seed(seed)
 
         random_spawn = options.get("random_spawn", None) if options else None
-        self.sim.reset(reset_scores=True, random_spawn=random_spawn)
+        reset_scores = (seed is not None) or (options.get("reset_scores", False) if options else False)
+        if reset_scores:
+            self._episode_count = 0
+        self.sim.goal_scored_this_step = None
+        self.sim.last_touch = None
+        self.sim._spawn_index = self._episode_count
+        self._episode_count += 1
+        self.sim.reset(reset_scores=reset_scores, random_spawn=random_spawn)
+        if self.blue_control is not None:
+            self.blue_control.reset()
         if self.orange_control is not None:
             self.orange_control.reset()
         self.ball_prev = None
         self.dist_prev = None
         self.input_prev = None
         self.render()
-        return self._get_obs(), {}
+        info = {}
+        if self.control_car == "both":
+            info["obs_orange"] = self._get_obs("orange")
+        return self._get_obs(), info
 
-    def step(self, action):
-        if self.discrete_action:
-            direction = action // 4
-            jump = (action % 4) // 2
-            boost = action % 2
+    def step(self, action, action_orange=None):
+        if self.control_car == "both":
+            if action_orange is None and isinstance(action, tuple) and len(action) == 2:
+                action, action_orange = action
+            car_action = self._decode_action(action, mirror_x=False)
+            act_orange = (
+                self._decode_action(action_orange, mirror_x=True)
+                if action_orange is not None
+                else CarAction()
+            )
+        elif self.control_car == "orange":
+            car_action = self.blue_control.get_action() if self.blue_control is not None else CarAction()
+            act_orange = self._decode_action(action, mirror_x=True)
         else:
-            direction, jump, boost = action
-        dir_x, dir_y = GymConfig.directions[direction]
-        car_action = CarAction(dir_x=float(dir_x), dir_y=float(dir_y), jump=jump == 1, boost=boost == 1).clamp()
+            car_action = self._decode_action(action, mirror_x=False)
+            act_orange = (
+                self.orange_control.get_action()
+                if (self.orange_control is not None and self.sim.orange_car is not None)
+                else CarAction()
+            )
 
-        action_orange = (
-            self.orange_control.get_action()
-            if (self.orange_control is not None and self.sim.orange_car is not None)
-            else CarAction()
-        )
-        self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=action_orange)
+        self.sim.step(car_action, 1.0 / SIM_HZ, action_orange=act_orange)
         reward, terminated = self._calculate_reward()
         self.render()
-        return self._get_obs(), reward, terminated, not self.isopen, {}
+        info = {
+            "goal_scored": self.sim.goal_scored_this_step,
+            "score": {"blue": self.sim.score_blue, "orange": self.sim.score_orange},
+        }
+        if self.control_car == "both":
+            info["obs_orange"] = self._get_obs("orange")
+        return self._get_obs(), reward, terminated, not self.isopen, info
 
     def _calculate_reward(self):
-        state = self.sim.get_state_norm()
+        state = self.sim.get_state_norm_mirror() if self.control_car == "orange" else self.sim.get_state_norm()
         last_touch = state["last_touch"]
         goal = state["goal_scored_step"]
 

@@ -127,6 +127,9 @@ class HeuristicBot:
         if car is None:
             return CarAction()
 
+        if sim.time_elapsed == 0.0:
+            self.reset()
+
         action = CarAction()
         self.current_state = self.determine_state(sim, car)
 

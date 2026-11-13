@@ -127,6 +127,14 @@ def main():
             if idx + 1 < len(sys.argv):
                 num_episodes = int(sys.argv[idx + 1])
 
+        if "--orange" in sys.argv:
+            control_car = "orange"
+        elif "--bot-vs-bot" in sys.argv or "--bots" in sys.argv or "--both" in sys.argv:
+            control_car = "both"
+        else:
+            # Default or explicit `--blue`
+            control_car = "blue"
+
         if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
             metrics = evaluate_dueling_ddqn(
                 num_episodes=num_episodes,
@@ -137,6 +145,7 @@ def main():
                 model_path=model_path,
                 save_gif=save_gif,
                 gif_path=gif_path,
+                control_car=control_car,
             )
             print(f"[Dueling Double DQN Evaluation] {metrics}")
         elif "--double_dqn" in sys.argv:
@@ -149,6 +158,7 @@ def main():
                 model_path=model_path,
                 save_gif=save_gif,
                 gif_path=gif_path,
+                control_car=control_car,
             )
             print(f"[Double DQN Evaluation] {metrics}")
         elif "--dqn" in sys.argv:
@@ -161,6 +171,7 @@ def main():
                 model_path=model_path,
                 save_gif=save_gif,
                 gif_path=gif_path,
+                control_car=control_car,
             )
             print(f"[Vanilla DQN Evaluation] {metrics}")
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
@@ -171,15 +182,16 @@ def main():
                 model_path=model_path,
                 save_gif=save_gif,
                 gif_path=gif_path,
+                control_car=control_car,
             )
             print(f"[PPO Evaluation] {metrics}")
         else:
             print(
                 "Please specify a learning agent to evaluate:\n"
-                "  python -m src --eval --dueling_ddqn [--render] # Evaluate Dueling Double DQN [alias: --ddqn]\n"
-                "  python -m src --eval --double_dqn   [--render] # Evaluate Double DQN\n"
-                "  python -m src --eval --dqn          [--render] # Evaluate Vanilla DQN\n"
-                "  python -m src --eval --ppo          [--render] # Evaluate PPO [alias: -ppo]"
+                "  python -m src --eval --dueling_ddqn [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Dueling Double DQN [alias: --ddqn]\n"
+                "  python -m src --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Double DQN\n"
+                "  python -m src --eval --dqn          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Vanilla DQN\n"
+                "  python -m src --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate PPO [alias: -ppo]"
             )
     elif "--plot" in sys.argv:
         from src.learning_agents.plot_learning_curves import main as plot_main
@@ -195,7 +207,7 @@ def main():
             "  python -m src --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants\n"
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"
             "  python -m src --train --dueling_ddqn|--ppo          # Train Dueling Double DQN or PPO agent\n"
-            "  python -m src --eval --dueling_ddqn|--ppo [--render] [--gif] # Evaluate agent [optional: --gif]\n"
+            "  python -m src --eval --dueling_ddqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--gif] # Evaluate agent\n"
             "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
 

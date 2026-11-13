@@ -127,7 +127,12 @@ class DuelingDDQNAgent:
         self.optimizer.step()
         return float(loss.item())
 
-    def _step_with_action_repeat(self, env: gym.Env, action_idx: int):
+    def _step_with_action_repeat(
+        self,
+        env: gym.Env,
+        action_idx: int,
+        action_orange_idx: int | None = None,
+    ):
         """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
         edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
         total_reward = 0.0
@@ -140,9 +145,19 @@ class DuelingDDQNAgent:
         jump_bit = (action_idx % 4) // 2
         held_action_idx = (action_idx - 2) if jump_bit == 1 else action_idx
 
+        if action_orange_idx is not None:
+            jump_bit_orange = (action_orange_idx % 4) // 2
+            held_action_orange_idx = (action_orange_idx - 2) if jump_bit_orange == 1 else action_orange_idx
+        else:
+            held_action_orange_idx = None
+
         for sub in range(max(1, self.action_repeat)):
             act = action_idx if sub == 0 else held_action_idx
-            next_state, reward, terminated, truncated, info = env.step(act)
+            if action_orange_idx is not None:
+                act_orange = action_orange_idx if sub == 0 else held_action_orange_idx
+                next_state, reward, terminated, truncated, info = env.step((act, act_orange))
+            else:
+                next_state, reward, terminated, truncated, info = env.step(act)
             total_reward += float(reward)
             if terminated or truncated or not env.unwrapped.isopen:
                 break
@@ -275,8 +290,12 @@ class DuelingDDQNAgent:
         model_path: str | Path | None = None,
         save_gif: bool = False,
         gif_path: str | Path | None = None,
+        control_car: str = "blue",
     ) -> dict[str, float]:
         """Run training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
+        if control_car in ("bot_vs_bot", "bots", "both"):
+            control_car = "both"
+
         make_kwargs = {}
         if max_episode_steps is not None:
             make_kwargs["max_episode_steps"] = max_episode_steps
@@ -293,6 +312,7 @@ class DuelingDDQNAgent:
             render_mode=render_mode,
             bot_type=self.bot_type,
             discrete_action=True,
+            control_car="blue" if is_training else control_car,
             **make_kwargs,
         )
 
@@ -365,8 +385,13 @@ class DuelingDDQNAgent:
 
         try:
             for episode in episode_iter:
-                state, _ = env.reset()
+                state, reset_info = env.reset()
                 state = torch.tensor(state, dtype=torch.float32, device=device)
+                state_orange = (
+                    torch.tensor(reset_info["obs_orange"], dtype=torch.float32, device=device)
+                    if (not is_training and control_car == "both" and "obs_orange" in reset_info)
+                    else None
+                )
 
                 if not env.unwrapped.isopen:
                     break
@@ -385,7 +410,15 @@ class DuelingDDQNAgent:
                             action = policy_dqn(state.unsqueeze(0)).squeeze(0).argmax()
                             action_idx = int(action.item())
 
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_idx)
+                    action_orange_idx = None
+                    if not is_training and control_car == "both" and state_orange is not None:
+                        with torch.no_grad():
+                            action_orange = policy_dqn(state_orange.unsqueeze(0)).squeeze(0).argmax()
+                            action_orange_idx = int(action_orange.item())
+
+                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(
+                        env, action_idx, action_orange_idx
+                    )
 
                     if not is_training and save_gif and not gif_saved and len(gif_frames) < 1200:
                         frame = env.unwrapped.get_frame()
@@ -397,6 +430,8 @@ class DuelingDDQNAgent:
                         scored_goal = 1
 
                     new_state = torch.tensor(next_state, dtype=torch.float32, device=device)
+                    if not is_training and control_car == "both" and "obs_orange" in info:
+                        state_orange = torch.tensor(info["obs_orange"], dtype=torch.float32, device=device)
                     reward_tensor = torch.tensor(reward, dtype=torch.float32, device=device)
 
                     if is_training:
@@ -431,6 +466,8 @@ class DuelingDDQNAgent:
                     gif_saved = True
                 mean_reward_100 = float(np.mean(rewards_per_episode[-100:]))
                 goal_rate_100 = float(np.mean(goals_per_episode[-100:])) * 100.0
+                score_blue = int(env.unwrapped.sim.score_blue)
+                score_orange = int(env.unwrapped.sim.score_orange)
 
                 print(
                     f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
@@ -438,6 +475,7 @@ class DuelingDDQNAgent:
                     f"Eps = {epsilon:.3f} | Steps = {step_count}"
                     if is_training
                     else f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
+                    f"Score(Blue-Orange) = {score_blue}-{score_orange} | "
                     f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
                 )
 
@@ -489,6 +527,8 @@ class DuelingDDQNAgent:
                         print("Exiting environment.")
                         break
         finally:
+            final_score_blue = int(env.unwrapped.sim.score_blue)
+            final_score_orange = int(env.unwrapped.sim.score_orange)
             if is_training and len(rewards_per_episode) > 0:
                 self.save_graph(
                     rewards_per_episode,
@@ -503,6 +543,8 @@ class DuelingDDQNAgent:
             "episodes": len(rewards_per_episode),
             "mean_reward": float(np.mean(rewards_per_episode)) if rewards_per_episode else 0.0,
             "goal_rate": float(np.mean(goals_per_episode)) * 100.0 if goals_per_episode else 0.0,
+            "score_blue": final_score_blue,
+            "score_orange": final_score_orange,
         }
 
 
@@ -543,6 +585,7 @@ def evaluate_dueling_ddqn(
     hyperparameter_set: str = DQNConfig.hyperparameter_set,
     save_gif: bool = False,
     gif_path: str | Path | None = None,
+    control_car: str = "blue",
 ) -> dict[str, float]:
     """Evaluate/validate a trained Dueling Double DQN agent."""
     agent = DuelingDDQNAgent(
@@ -559,6 +602,7 @@ def evaluate_dueling_ddqn(
         model_path=model_path,
         save_gif=save_gif,
         gif_path=gif_path,
+        control_car=control_car,
     )
 
 
@@ -577,6 +621,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
     parser.add_argument("--gif", action="store_true", help="Record and save an animated GIF of the evaluation episode")
     parser.add_argument("--gif_path", type=str, default=None, help="Optional custom output path for the GIF")
+    parser.add_argument("--blue", action="store_true", help="Policy controls Blue car vs HeuristicBot Orange (default)")
+    parser.add_argument("--orange", action="store_true", help="Policy controls Orange car (mirrored) vs Human Blue")
+    parser.add_argument(
+        "--bot-vs-bot",
+        "--bots",
+        "--both",
+        dest="bot_vs_bot",
+        action="store_true",
+        help="Policy controls both Blue and Orange cars",
+    )
     args = parser.parse_args()
 
     if args.train:
@@ -586,6 +640,12 @@ if __name__ == "__main__":
             hyperparameter_set=args.hyperparameter_set,
         )
     else:
+        if args.orange:
+            ctrl_car = "orange"
+        elif args.bot_vs_bot:
+            ctrl_car = "both"
+        else:
+            ctrl_car = "blue"
         eval_eps = args.episodes if args.episodes is not None else (None if args.render else DQNConfig.eval_episodes)
         evaluate_dueling_ddqn(
             num_episodes=eval_eps,
@@ -594,4 +654,5 @@ if __name__ == "__main__":
             hyperparameter_set=args.hyperparameter_set,
             save_gif=args.gif,
             gif_path=args.gif_path,
+            control_car=ctrl_car,
         )

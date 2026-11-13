@@ -256,12 +256,12 @@ class Car:
             return
         self.facing_x = new_facing
         self.chassis_shape.unsafe_set_vertices(self.active_chassis_vertices)
-        self.space.reindex_shapes_for_body(self.body)
         if snap:
             # Reflect orientation across the vertical axis (theta -> pi - theta) and invert spin
             sign = math.copysign(math.pi, self.body.angle if self.body.angle != 0.0 else 1.0)
             self.body.angle = _wrap_angle(sign - self.body.angle)
             self.body.angular_velocity = -self.body.angular_velocity
+        self.space.reindex_shapes_for_body(self.body)
 
     # ------------------------------------------------------------------ #
     # Ground sensing

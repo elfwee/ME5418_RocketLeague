@@ -87,6 +87,7 @@ class Simulation:
         self.goal_scored_this_step: Optional[str] = None
         self.last_touch: Optional[str] = None
         self._spawn_index: int = 0
+        self._orange_solver_first: bool = False
         self.time_elapsed: float = 0.0
         self.match_time: float = 0.0
         self.random_spawn: bool = random_spawn
@@ -133,6 +134,7 @@ class Simulation:
                 self.orange_car.reset(ox, oy, angle=oang, facing_x=ofac)
         else:
             if self.orange_car is not None:
+                self._set_orange_solver_first(False)
                 self.space.remove(self.orange_car.chassis_shape, self.orange_car.body)
                 self.orange_car = None
 
@@ -187,7 +189,10 @@ class Simulation:
         if self.enable_orange:
             ox_car = random.uniform(18.2, 27.2)
             if ox_car - bx_car < 2.0:
-                ox_car = min(27.2, bx_car + 2.0)
+                mid_x = 0.5 * (bx_car + ox_car)
+                bx_car = max(7.8, mid_x - 1.0)
+                ox_car = min(27.2, mid_x + 1.0)
+                blue_spawn = (bx_car, by_car, 0.0, 1)
             oy_car = self.spawn_y
             orange_spawn = (ox_car, oy_car, math.pi, -1)
 
@@ -318,9 +323,13 @@ class Simulation:
 
         sub_dt = dt / PHYSICS_SUBSTEPS
         for _ in range(PHYSICS_SUBSTEPS):
-            self.blue_car.update(action, sub_dt)
-            if self.orange_car is not None:
+            if self._orange_solver_first and self.orange_car is not None:
                 self.orange_car.update(action_orange, sub_dt)
+                self.blue_car.update(action, sub_dt)
+            else:
+                self.blue_car.update(action, sub_dt)
+                if self.orange_car is not None:
+                    self.orange_car.update(action_orange, sub_dt)
             self.ball.apply_aerodynamics(sub_dt)
             self.space.step(sub_dt)
 
@@ -345,6 +354,22 @@ class Simulation:
             # Reset kickoff after goal
             self.reset(reset_scores=False)
 
+    def _set_orange_solver_first(self, orange_first: bool):
+        """Set whether orange_car or blue_car holds the primary Pymunk solver/update order."""
+        self._orange_solver_first = orange_first
+        if self.orange_car is None:
+            return
+        currently_orange_first = self.orange_car._filter_group < self.blue_car._filter_group
+        if currently_orange_first != orange_first:
+            c1, c2 = self.blue_car, self.orange_car
+            c1.body, c2.body = c2.body, c1.body
+            c1.chassis_shape, c2.chassis_shape = c2.chassis_shape, c1.chassis_shape
+            c1._filter_group, c2._filter_group = c2._filter_group, c1._filter_group
+            c1._query_filter, c2._query_filter = c2._query_filter, c1._query_filter
+            c1.facing_x, c2.facing_x = c2.facing_x, c1.facing_x
+            c1.chassis_shape.car = c1
+            c2.chassis_shape.car = c2
+
     def reset(
         self,
         reset_scores: bool = False,
@@ -368,6 +393,10 @@ class Simulation:
         use_random = self.random_spawn if random_spawn is None else random_spawn
         if spawn_pos is not None or spawn_index is not None:
             use_random = False
+
+        # Rotate Pymunk solver priority over a 4-kickoff cycle so both teams share
+        # equal solver priority across both defensive and attacking kickoff spawns
+        self._set_orange_solver_first(((self._spawn_index // 2) % 2) == 1)
 
         if use_random:
             blue_spawn, orange_spawn, ball_pos = self.sample_random_spawns()
@@ -603,11 +632,16 @@ class Simulation:
         if not as_flat_array:
             return state_norm
 
+        return self._flatten_state_norm(state_norm)
+
+    def _flatten_state_norm(self, state_norm: Dict[str, Any]) -> list[float]:
+        """Flatten a normalized state dictionary into the fixed 52-float observation vector."""
         car = state_norm["blue_car"]
         ball = state_norm["ball"]
         rel = state_norm["relations"]
+        has_opp = bool(state_norm["opponent_present"] > 0.5)
 
-        # 1. Ego agent blue_car features (20 floats)
+        # 1. Ego agent car features (21 floats)
         vec = [
             car["position"][0],
             car["position"][1],
@@ -639,11 +673,11 @@ class Simulation:
             rel["ball_to_blue_goal"]["magnitude"],
             rel["ball_to_blue_goal"]["direction"][0],
             rel["ball_to_blue_goal"]["direction"][1],
-            # 4. Opponent present flag (1 float, placed immediately before car_orange)
+            # 4. Opponent present flag (1 float, placed immediately before opponent car)
             state_norm["opponent_present"],
         ]
 
-        # 5. Opponent-dependent features (23 floats: 20 blue_car features + 3 orange_car_to_ball features)
+        # 5. Opponent-dependent features (16 floats: 13 opponent car features + 3 opponent_car_to_ball features)
         if has_opp and state_norm.get("car_orange") is not None:
             co = state_norm["car_orange"]
             vec.extend(
@@ -673,3 +707,108 @@ class Simulation:
             vec.extend([0.0] * 16)
 
         return vec
+
+    def get_state_norm_mirror(self, as_flat_array: bool = False) -> Any:
+        """Query horizontally mirrored normalized state from the Orange car's ego perspective.
+
+        Allows a policy trained exclusively as the Blue car (left-to-right) to control the
+        Orange car (right-to-left) with zero extra raycast queries by reusing the cached
+        per-frame boundary raycasts and reversing the 8-ray cyclic ordering `(8 - i) % 8`.
+        """
+        base = self.get_state_norm(as_flat_array=False)
+        if self.orange_car is None or base.get("car_orange") is None:
+            return self._flatten_state_norm(base) if as_flat_array else base
+
+        def _mirror_car_dict(c: Dict[str, Any]) -> Dict[str, Any]:
+            d = c["boundary_distances"]
+            r = c["boundary_raycasts"]
+            mirrored_distances = [d[0], d[7], d[6], d[5], d[4], d[3], d[2], d[1]]
+            mirrored_raycasts = []
+            for idx, orig_idx in enumerate((0, 7, 6, 5, 4, 3, 2, 1)):
+                ray = r[orig_idx]
+                mirrored_raycasts.append(
+                    {
+                        "angle_relative_deg": idx * 45.0,
+                        "angle_world_rad": math.pi - ray["angle_world_rad"],
+                        "direction": (-ray["direction"][0], ray["direction"][1]),
+                        "distance": ray["distance"],
+                        "hit_point": (-ray["hit_point"][0], ray["hit_point"][1]),
+                        "hit_normal": (-ray["hit_normal"][0], ray["hit_normal"][1]),
+                    }
+                )
+            return {
+                "position": (-c["position"][0], c["position"][1]),
+                "nose_position": (-c["nose_position"][0], c["nose_position"][1]),
+                "velocity": (-c["velocity"][0], c["velocity"][1]),
+                "orientation": (c["orientation"][0], -c["orientation"][1]),
+                "angular_velocity": -c["angular_velocity"],
+                "is_grounded": c["is_grounded"],
+                "ground_normal": (-c["ground_normal"][0], c["ground_normal"][1]),
+                "wheel_contacts": c["wheel_contacts"],
+                "both_wheels_grounded": c["both_wheels_grounded"],
+                "has_jump2": c["has_jump2"],
+                "is_flipping": c["is_flipping"],
+                "is_turtling": c["is_turtling"],
+                "is_turtling_recovery": c["is_turtling_recovery"],
+                "boost": c["boost"],
+                "is_boosting": c["is_boosting"],
+                "is_boost_recovery": c["is_boost_recovery"],
+                "input_vector": (-c["input_vector"][0], c["input_vector"][1]),
+                "facing_x": -c["facing_x"],
+                "boundary_raycasts": mirrored_raycasts,
+                "boundary_distances": mirrored_distances,
+            }
+
+        def _mirror_rel(rel_entry: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            if rel_entry is None:
+                return None
+            return {
+                "magnitude": rel_entry["magnitude"],
+                "direction": (-rel_entry["direction"][0], rel_entry["direction"][1]),
+            }
+
+        def _swap_team(team_name: Optional[str]) -> Optional[str]:
+            if team_name == "blue":
+                return "orange"
+            if team_name == "orange":
+                return "blue"
+            return team_name
+
+        ball = base["ball"]
+        rel = base["relations"]
+        c2c = rel.get("car_to_car")
+
+        mirrored_state = {
+            "time": base["time"],
+            "match_time": base["match_time"],
+            "goal_scored_step": _swap_team(base["goal_scored_step"]),
+            "ball": {
+                "position": (-ball["position"][0], ball["position"][1]),
+                "velocity": (-ball["velocity"][0], ball["velocity"][1]),
+                "orientation": (ball["orientation"][0], -ball["orientation"][1]),
+                "angular_velocity": -ball["angular_velocity"],
+            },
+            "blue_car": _mirror_car_dict(base["car_orange"]),
+            "car_orange": _mirror_car_dict(base["blue_car"]),
+            "relations": {
+                "blue_car_to_ball": _mirror_rel(rel.get("orange_car_to_ball")),
+                "orange_car_to_ball": _mirror_rel(rel.get("blue_car_to_ball")),
+                "ball_to_orange_goal": _mirror_rel(rel.get("ball_to_blue_goal")),
+                "ball_to_blue_goal": _mirror_rel(rel.get("ball_to_orange_goal")),
+                "car_to_car": (
+                    {"magnitude": c2c["magnitude"], "direction": (c2c["direction"][0], -c2c["direction"][1])}
+                    if c2c is not None
+                    else None
+                ),
+            },
+            "score": {"blue": self.score_orange, "orange": self.score_blue},
+            "last_goal": _swap_team(base["last_goal"]),
+            "last_touch": _swap_team(base["last_touch"]),
+            "orange_enabled": True,
+            "opponent_present": 1.0,
+        }
+
+        if not as_flat_array:
+            return mirrored_state
+
+        return self._flatten_state_norm(mirrored_state)
