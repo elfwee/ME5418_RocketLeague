@@ -535,9 +535,7 @@ class PPOAgent:
                     buffer.backfill_next_value(value)
 
                     action_for_env = action.cpu().numpy().tolist() if policy_net.is_factored else int(action.item())
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(
-                        env, action_for_env
-                    )
+                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_for_env)
 
                     episode_reward += reward
                     if scored_goal(info, terminated, reward):

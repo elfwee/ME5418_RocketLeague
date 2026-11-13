@@ -99,12 +99,8 @@ class DuelingDDQNAgent:
         self.fcl_nodes = DQNConfig.hidden_size
         self.max_grad_norm = DQNConfig.max_grad_norm
 
-        self.enable_double_dqn = (
-            enable_double_dqn if enable_double_dqn is not None else DQNConfig.enable_double_dqn
-        )
-        self.enable_dueling_dqn = (
-            enable_dueling_dqn if enable_dueling_dqn is not None else DQNConfig.enable_dueling_dqn
-        )
+        self.enable_double_dqn = enable_double_dqn if enable_double_dqn is not None else DQNConfig.enable_double_dqn
+        self.enable_dueling_dqn = enable_dueling_dqn if enable_dueling_dqn is not None else DQNConfig.enable_dueling_dqn
 
         # SmoothL1Loss (Huber loss) prevents exploding gradients from large +/-20 goal rewards
         self.loss_fn = nn.SmoothL1Loss()

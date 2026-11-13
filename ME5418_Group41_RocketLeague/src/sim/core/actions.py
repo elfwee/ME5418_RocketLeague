@@ -1,4 +1,5 @@
 """Action definitions for 2D direction vector and car control."""
+
 import math
 from dataclasses import dataclass
 
@@ -13,12 +14,13 @@ class CarAction:
         jump: Boolean trigger to initiate jump from surface or flip.
         boost: Boolean hold to fire directional rocket boosters.
     """
+
     dir_x: float = 0.0
     dir_y: float = 0.0
     jump: bool = False
     boost: bool = False
 
-    def clamp(self) -> 'CarAction':
+    def clamp(self) -> "CarAction":
         """Clamp direction vector to unit magnitude if greater than 1."""
         mag = math.hypot(self.dir_x, self.dir_y)
         if mag > 1.0:

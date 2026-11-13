@@ -1,6 +1,7 @@
 """
 Dueling Deep Q-Network (DQN) Architecture & Forward/Backward Pass Demo.
 """
+
 import sys
 from pathlib import Path
 import gymnasium as gym
@@ -17,6 +18,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
+
 
 class DQN(nn.Module):
     """Deep Q-Network supporting both Standard and Dueling DQN architectures.
@@ -95,7 +97,8 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     gamma = DQNConfig.discount_factor
 
     arch_label = (
-        "DUELING DOUBLE DQN" if (enable_dueling_dqn and enable_double_dqn)
+        "DUELING DOUBLE DQN"
+        if (enable_dueling_dqn and enable_double_dqn)
         else ("DOUBLE DQN" if enable_double_dqn else "VANILLA DQN")
     )
     total_params = sum(p.numel() for p in policy_dqn.parameters() if p.requires_grad)
@@ -126,7 +129,9 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     print(f"Input State (first 8 features): {state_tensor[0, :8].detach().cpu().numpy().round(4)}")
     print(f"Output Q(s, .) Shape: {q_values.shape}")
     print(f"Output Q(s, .) Sample (first 6 actions): {q_values[0, :6].detach().cpu().numpy().round(4)}")
-    print(f"Selected Action   : {action_idx} -> dir={GymConfig.directions[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}")
+    print(
+        f"Selected Action   : {action_idx} -> dir={GymConfig.directions[dir_idx]}, jump={bool(jump_bit)}, boost={bool(boost_bit)}"
+    )
 
     # Step environment once with the selected action to observe transition (s, a, r, s', done)
     next_state, reward, terminated, truncated, _ = env.step(action_idx)
@@ -143,7 +148,10 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
             # Vanilla DQN target: target network both selects and evaluates max_a' Q_target(s', a')
             next_q_value = target_dqn(next_state_tensor).max(dim=-1)[0]
         # Bootstrap on time-limit truncation; only zero out future value on true goal termination
-        q_target = torch.tensor([reward], dtype=torch.float32, device=device) + gamma * (1.0 - float(terminated)) * next_q_value
+        q_target = (
+            torch.tensor([reward], dtype=torch.float32, device=device)
+            + gamma * (1.0 - float(terminated)) * next_q_value
+        )
 
     # Predicted Q(s, a) for the executed action
     q_pred = q_values.gather(1, torch.tensor([[action_idx]], dtype=torch.long, device=device)).squeeze(1)

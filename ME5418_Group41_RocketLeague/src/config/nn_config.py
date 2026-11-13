@@ -4,6 +4,7 @@
 Read defaults straight off the class (`DQNConfig.hidden_size`), or build a variant for an
 experiment with `dataclasses.replace(DQNConfig(), hidden_size=128)`.
 """
+
 from dataclasses import dataclass
 
 
@@ -53,7 +54,7 @@ class DQNConfig(AgentConfig):
 @dataclass(frozen=True)
 class PPOConfig(AgentConfig):
     # Architecture
-    factored_action: bool = True                 # Use MultiDiscrete([9, 2, 2])
+    factored_action: bool = True  # Use MultiDiscrete([9, 2, 2])
     action_dims: tuple[int, int, int] = (9, 2, 2)  # (direction: 9, jump: 2, boost: 2)
 
     # Optimization & Returns

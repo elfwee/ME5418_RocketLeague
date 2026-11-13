@@ -41,27 +41,15 @@ def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
     # Configure controllers based on control_car preference
     if control_car == "blue":
         blue_control = CarControl(control_type="human", team="blue")
-        orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-            if enable_orange
-            else None
-        )
+        orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim) if enable_orange else None
         print("Player control: BLUE car (WASD/Arrows/Space/Shift) | Opponent: ORANGE Heuristic Bot")
     elif control_car == "orange":
         blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
-        orange_control = (
-            CarControl(control_type="human", team="orange")
-            if enable_orange
-            else None
-        )
+        orange_control = CarControl(control_type="human", team="orange") if enable_orange else None
         print("Player control: ORANGE car (WASD/Arrows/Space/Shift) | Opponent: BLUE Heuristic Bot")
     else:
         blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
-        orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-            if enable_orange
-            else None
-        )
+        orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim) if enable_orange else None
         print("Bot vs Bot match: BLUE Heuristic Bot vs ORANGE Heuristic Bot")
 
     renderer = Renderer(screen)
@@ -96,11 +84,7 @@ def play_headless(steps: int = 300, enable_orange: bool = True):
     """Run headless simulation loop for automated benchmark or verification."""
     print(f"Running headless simulation for {steps} steps (Orange car: {enable_orange})...")
     sim = Simulation(enable_orange=enable_orange)
-    orange_control = (
-        CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-        if enable_orange
-        else None
-    )
+    orange_control = CarControl(control_type="heuristic_bot", team="orange", sim=sim) if enable_orange else None
     action = CarAction(dir_x=1.0, dir_y=0.2, boost=True)
 
     for step in range(steps):

@@ -1,12 +1,21 @@
 """Arena geometry generation with elevated goals and curved corner fillets."""
+
 import math
 from typing import List, Tuple
 import pymunk
 from src.config.sim_config import (
-    FIELD_WIDTH, FIELD_HEIGHT, CORNER_RADIUS,
-    GOAL_DEPTH, GOAL_CORNER_RADIUS, GOAL_BOTTOM_Y, GOAL_TOP_Y,
-    MARGIN_X, MARGIN_Y, ARENA_SEGMENT_RADIUS,
-    COLLISION_ARENA, COLLISION_GOAL_SENSOR
+    FIELD_WIDTH,
+    FIELD_HEIGHT,
+    CORNER_RADIUS,
+    GOAL_DEPTH,
+    GOAL_CORNER_RADIUS,
+    GOAL_BOTTOM_Y,
+    GOAL_TOP_Y,
+    MARGIN_X,
+    MARGIN_Y,
+    ARENA_SEGMENT_RADIUS,
+    COLLISION_ARENA,
+    COLLISION_GOAL_SENSOR,
 )
 
 
@@ -44,9 +53,14 @@ class Arena:
         """(x, y) coordinates of the center of the Right Goal (Orange net) opening."""
         return (self.x_right, self.goal_y_center)
 
-    def _add_segment(self, p1: Tuple[float, float], p2: Tuple[float, float],
-                     elasticity: float = 0.8, friction: float = 0.6,
-                     radius: float = ARENA_SEGMENT_RADIUS) -> pymunk.Segment:
+    def _add_segment(
+        self,
+        p1: Tuple[float, float],
+        p2: Tuple[float, float],
+        elasticity: float = 0.8,
+        friction: float = 0.6,
+        radius: float = ARENA_SEGMENT_RADIUS,
+    ) -> pymunk.Segment:
         """Helper to create and register a static collision segment."""
         seg = pymunk.Segment(self.space.static_body, p1, p2, radius)
         seg.elasticity = elasticity
@@ -56,9 +70,16 @@ class Arena:
         self.segments.append(seg)
         return seg
 
-    def _add_arc(self, center: Tuple[float, float], radius: float,
-                 start_angle: float, end_angle: float, steps: int = 5,
-                 elasticity: float = 0.8, friction: float = 0.6):
+    def _add_arc(
+        self,
+        center: Tuple[float, float],
+        radius: float,
+        start_angle: float,
+        end_angle: float,
+        steps: int = 5,
+        elasticity: float = 0.8,
+        friction: float = 0.6,
+    ):
         """Create a rounded corner arc using a series of linear segments."""
         cx, cy = center
         angles = [start_angle + (end_angle - start_angle) * (i / steps) for i in range(steps + 1)]
@@ -141,10 +162,9 @@ class Arena:
     def _add_goal_sensor(self, p_min: Tuple[float, float], p_max: Tuple[float, float], team: str):
         """Invisible sensor box inside the goal pocket."""
         bb = pymunk.BB(p_min[0], p_min[1], p_max[0], p_max[1])
-        sensor = pymunk.Poly(self.space.static_body, [
-            (bb.left, bb.bottom), (bb.right, bb.bottom),
-            (bb.right, bb.top), (bb.left, bb.top)
-        ])
+        sensor = pymunk.Poly(
+            self.space.static_body, [(bb.left, bb.bottom), (bb.right, bb.bottom), (bb.right, bb.top), (bb.left, bb.top)]
+        )
         sensor.sensor = True
         sensor.collision_type = COLLISION_GOAL_SENSOR
         sensor.team = team

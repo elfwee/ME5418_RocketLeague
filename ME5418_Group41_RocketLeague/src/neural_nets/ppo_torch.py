@@ -1,6 +1,7 @@
 """
 Proximal Policy Optimization (PPO) Actor-Critic Architecture & Forward/Backward Pass Demo.
 """
+
 import math
 import sys
 from pathlib import Path
@@ -61,9 +62,9 @@ class ActorCritic(nn.Module):
         # Actor stream (hidden: gain = sqrt(2), policy output: gain = 0.01 for near-uniform exploration)
         self.fc_actor = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
         if self.is_factored:
-            self.actor_heads = nn.ModuleList([
-                layer_init(nn.Linear(hidden_dim // 2, d), std=0.01) for d in self.action_dims
-            ])
+            self.actor_heads = nn.ModuleList(
+                [layer_init(nn.Linear(hidden_dim // 2, d), std=0.01) for d in self.action_dims]
+            )
         else:
             self.actor = layer_init(nn.Linear(hidden_dim // 2, self.action_dims[0]), std=0.01)
 
@@ -150,9 +151,9 @@ def run_ppo_network():
     optimizer = torch.optim.Adam(agent.parameters(), lr=PPOConfig.learning_rate, eps=1e-5)
     gamma = PPOConfig.discount_factor
     gae_lambda = PPOConfig.gae_lambda
-    clip_coef = PPOConfig.clip_coef     # PPO surrogate clipping range epsilon
+    clip_coef = PPOConfig.clip_coef  # PPO surrogate clipping range epsilon
     vf_coef = PPOConfig.value_loss_coef  # Value loss weight
-    ent_coef = PPOConfig.entropy_coef    # Entropy bonus weight
+    ent_coef = PPOConfig.entropy_coef  # Entropy bonus weight
     rollout_steps = PPOConfig.demo_rollout_steps
 
     print("=" * 65)
@@ -224,12 +225,12 @@ def run_ppo_network():
 
         _, next_value = agent(state_tensor)
 
-    states = torch.stack(states)                                                # Shape: (T, 52)
-    actions = torch.stack(actions)                                              # Shape: (T,)
-    old_log_probs = torch.stack(log_probs)                                      # Shape: (T,)
-    values = torch.stack(values)                                                # Shape: (T,)
-    rewards = torch.tensor(rewards, dtype=torch.float32, device=device)         # Shape: (T,)
-    dones = torch.tensor(dones, dtype=torch.float32, device=device)             # Shape: (T,)
+    states = torch.stack(states)  # Shape: (T, 52)
+    actions = torch.stack(actions)  # Shape: (T,)
+    old_log_probs = torch.stack(log_probs)  # Shape: (T,)
+    values = torch.stack(values)  # Shape: (T,)
+    rewards = torch.tensor(rewards, dtype=torch.float32, device=device)  # Shape: (T,)
+    dones = torch.tensor(dones, dtype=torch.float32, device=device)  # Shape: (T,)
 
     # 3. Backward Pass (GAE, Clipped Surrogate Loss & Gradient Backpropagation)
     advantages, returns = compute_gae(rewards, values, dones, next_value.squeeze(0), gamma, gae_lambda)
@@ -255,7 +256,9 @@ def run_ppo_network():
     print("\n" + "=" * 65)
     print("3. BACKWARD PASS (LOSS & GRADIENTS)")
     print("=" * 65)
-    print(f"Rollout Steps       : {rollout_steps} | Total Reward: {rewards.sum().item():.4f} | Episodes Done: {int(dones.sum().item())}")
+    print(
+        f"Rollout Steps       : {rollout_steps} | Total Reward: {rewards.sum().item():.4f} | Episodes Done: {int(dones.sum().item())}"
+    )
     print(f"Mean Advantage (raw): {advantages.mean().item():.6f}")
     print(f"Mean Return         : {returns.mean().item():.6f}")
     print(f"Mean Ratio          : {ratio.mean().item():.6f} (should be ~1.0 before update)")

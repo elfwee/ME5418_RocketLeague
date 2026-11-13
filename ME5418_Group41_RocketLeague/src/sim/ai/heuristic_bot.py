@@ -385,7 +385,11 @@ class HeuristicBot:
         pred_d = self._to_team_d(sim, pred_bx)
         # Target just behind ball center, and aim toward goal elevation if ball is above crossbar
         target_d = pred_d - 0.55
-        target_y = (sim.arena.goal_y_bot + sim.arena.goal_y_top) * 0.5 if pred_by > sim.arena.goal_y_top - 0.4 else pred_by - 0.1
+        target_y = (
+            (sim.arena.goal_y_bot + sim.arena.goal_y_top) * 0.5
+            if pred_by > sim.arena.goal_y_top - 0.4
+            else pred_by - 0.1
+        )
 
         dx = target_d - car_d
         dy = target_y - cy
@@ -458,7 +462,13 @@ class HeuristicBot:
             if car.can_ground_jump and self._jump_cooldown <= 0.0:
                 if self._request_jump(action, car, 1.0, 0.0):
                     self._jump_cooldown = 0.35
-            elif not car.can_ground_jump and car.has_jump2 and gap_fwd > -0.2 and dist_to_ball < 2.5 and not self._prev_jump_sent:
+            elif (
+                not car.can_ground_jump
+                and car.has_jump2
+                and gap_fwd > -0.2
+                and dist_to_ball < 2.5
+                and not self._prev_jump_sent
+            ):
                 action.dir_x = 1.0 * self._attack_dir
                 action.dir_y = 0.35
                 action.jump = True

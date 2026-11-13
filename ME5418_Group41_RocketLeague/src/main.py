@@ -107,7 +107,7 @@ def main():
         num_episodes = None
         if "--episodes" in sys.argv:
             idx = sys.argv.index("--episodes")
-            if idx +1 < len(sys.argv):
+            if idx + 1 < len(sys.argv):
                 num_episodes = int(sys.argv[idx + 1])
 
         model_path = None
@@ -117,11 +117,29 @@ def main():
                 model_path = sys.argv[idx + 1]
 
         if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
-            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=True, enable_double_dqn=True, hyperparameter_set="dueling_ddqn")
+            train_dueling_ddqn(
+                num_episodes=num_episodes,
+                model_path=model_path,
+                enable_dueling_dqn=True,
+                enable_double_dqn=True,
+                hyperparameter_set="dueling_ddqn",
+            )
         elif "--double_dqn" in sys.argv:
-            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=False, enable_double_dqn=True, hyperparameter_set="double_dqn")
+            train_dueling_ddqn(
+                num_episodes=num_episodes,
+                model_path=model_path,
+                enable_dueling_dqn=False,
+                enable_double_dqn=True,
+                hyperparameter_set="double_dqn",
+            )
         elif "--dqn" in sys.argv:
-            train_dueling_ddqn(num_episodes=num_episodes, model_path=model_path, enable_dueling_dqn=False, enable_double_dqn=False, hyperparameter_set="dqn")
+            train_dueling_ddqn(
+                num_episodes=num_episodes,
+                model_path=model_path,
+                enable_dueling_dqn=False,
+                enable_double_dqn=False,
+                hyperparameter_set="dqn",
+            )
         elif "--ppo" in sys.argv or "-ppo" in sys.argv:
             train_ppo(num_episodes=num_episodes, model_path=model_path, hyperparameter_set="ppo")
         else:
@@ -212,11 +230,7 @@ def main():
                         orange_model_path = sys.argv[idx + 1]
 
             # If `--model_path` was passed without `--blue_model`/`--orange_model`, assign intelligently
-            model_paths = [
-                sys.argv[i + 1]
-                for i, arg in enumerate(sys.argv[:-1])
-                if arg == "--model_path"
-            ]
+            model_paths = [sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--model_path"]
             if len(model_paths) >= 2:
                 if blue_model_path is None:
                     blue_model_path = model_paths[0]
@@ -228,10 +242,7 @@ def main():
                     import torch
 
                     sd = torch.load(single_path, map_location="cpu", weights_only=True)
-                    is_ppo_ckpt = any(
-                        k.startswith(("actor", "critic", "fc_actor", "fc_critic"))
-                        for k in sd.keys()
-                    )
+                    is_ppo_ckpt = any(k.startswith(("actor", "critic", "fc_actor", "fc_critic")) for k in sd.keys())
                     if is_ppo_ckpt and orange_policy == "ppo" and blue_policy != "ppo":
                         orange_model_path = single_path
                     elif (not is_ppo_ckpt) and orange_policy != "ppo" and blue_policy == "ppo":
@@ -318,6 +329,7 @@ def main():
             )
     elif "--plot" in sys.argv:
         from src.learning_agents.plot_learning_curves import main as plot_main
+
         plot_args = [arg for arg in sys.argv[1:] if arg != "--plot"]
         plot_main(plot_args)
     else:
