@@ -3,25 +3,19 @@
 import os
 import sys
 
-# Ensure repository root is on sys.path when invoked directly (e.g., `python src/main.py`)
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
-from src.sim.game import play_headless, play_interactive
+from src.eval.head_to_head import play_head_to_head
+from src.eval.mixed_eval import evaluate_mixed_policies
 from src.gym_env.rocket_league_env import demo_gym
-from src.neural_nets.dueling_ddqn_torch import run_dqn_network
-from src.neural_nets.ppo_torch import run_ppo_network
+from src.learning_agents.agent_common import latest_model_path
 from src.learning_agents.dueling_ddqn_agent import (
     evaluate_dueling_ddqn,
     train_dueling_ddqn,
 )
-from src.learning_agents.agent_common import latest_model_path
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
-from src.eval.head_to_head import play_head_to_head
-from src.eval.mixed_eval import evaluate_mixed_policies
-
-RUNS_DIR = f"{ROOT_DIR}/runs"
+from src.neural_nets.dueling_ddqn_torch import run_dqn_network
+from src.neural_nets.ppo_torch import run_ppo_network
+from src.paths import RUNS_DIR
+from src.sim.game import play_headless, play_interactive
 
 
 def _resolve_default_h2h_model():
@@ -346,7 +340,3 @@ def main():
             "  python -m src --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...] [--no_random_spawn]     # Mixed policy match\n"
             "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
-
-
-if __name__ == "__main__":
-    main()

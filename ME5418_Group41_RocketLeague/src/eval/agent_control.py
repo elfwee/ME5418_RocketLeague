@@ -1,12 +1,12 @@
 from pathlib import Path
 
 import numpy as np
+
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
+from src.eval.orange_perspective import get_orange_perspective_obs, mirror_action
 from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
-from src.eval.orange_perspective import get_orange_perspective_obs, mirror_action
-from typing import Optional
 
 
 class AgentControl:
@@ -23,8 +23,8 @@ class AgentControl:
     def __init__(
         self,
         team: str = "blue",
-        sim: Optional[Simulation] = None,
-        model_path: Optional[str | Path] = None,
+        sim: Simulation | None = None,
+        model_path: str | Path | None = None,
         action_repeat: int = PPOConfig.action_repeat,
     ):
         self.sim = sim

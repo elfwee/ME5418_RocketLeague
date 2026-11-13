@@ -3,21 +3,13 @@ Proximal Policy Optimization (PPO) Actor-Critic Architecture & Forward/Backward 
 """
 
 import math
-import sys
-from pathlib import Path
+
 import gymnasium as gym
 import torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-
-from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 
@@ -44,7 +36,7 @@ class ActorCritic(nn.Module):
         ),
         hidden_dim: int = PPOConfig.hidden_size,
     ):
-        super(ActorCritic, self).__init__()
+        super().__init__()
         self.is_factored = isinstance(action_dim, (list, tuple))
         self.action_dims = list(action_dim) if self.is_factored else [action_dim]
 
@@ -286,12 +278,3 @@ def run_ppo_network():
     print("=" * 65)
 
     env.close()
-
-
-# Aliases for backward compatibility
-run_network = run_ppo_network
-test_ppo_torch = run_ppo_network
-
-
-if __name__ == "__main__":
-    run_ppo_network()

@@ -3,18 +3,17 @@ Shared plumbing for the learning agents (`dueling_ddqn_agent.py`, `ppo_agent.py`
 
 Everything here is algorithm-agnostic: environment creation, action repeat, checkpoint loading,
 per-run output folders, the evaluation episode loop, training bookkeeping (CSV / log / best-model tracking), the 2x2
-training dashboard, GIF export and the command-line parser. The learning rules themselves
+training dashboard and GIF export. The learning rules themselves
 (replay + TD targets, GAE + clipped surrogate) stay in the agent files.
 """
 
-import argparse
-from dataclasses import dataclass
-from datetime import datetime, timedelta
 import itertools
 import os
-from pathlib import Path
 import re
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import gymnasium as gym
 import matplotlib
@@ -22,11 +21,10 @@ import numpy as np
 import torch
 
 from src.config.gym_config import GymConfig
-from src.config.nn_config import AgentConfig
+from src.config.sim_config import GIF_FRAME_SIZE
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
+from src.paths import RUNS_DIR
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-RUNS_DIR = ROOT_DIR / AgentConfig.runs_dir
 RUN_DIR_TIME_FORMAT = "%Y%m%d_%H%M"
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 MAX_GIF_FRAMES = 1200
@@ -340,8 +338,8 @@ def save_gif(frames: list[np.ndarray], path: str | Path, fps: int = 15, tag: str
     if not frames:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    # Downscale by 50% (700x360) for smooth playback and lightweight GIF file size
-    pil_images = [Image.fromarray(f).resize((700, 360), Image.Resampling.BILINEAR) for f in frames]
+    # Downscale by 50% (GIF_FRAME_SIZE) for smooth playback and lightweight GIF file size
+    pil_images = [Image.fromarray(f).resize(GIF_FRAME_SIZE, Image.Resampling.BILINEAR) for f in frames]
     pil_images[0].save(
         str(path),
         save_all=True,
@@ -558,45 +556,3 @@ def save_training_dashboard(
     plt.tight_layout()
     plt.savefig(path, dpi=dpi)
     plt.close()
-
-
-# --------------------------------------------------------------------------------------------
-# Command line
-# --------------------------------------------------------------------------------------------
-
-
-def build_arg_parser(description: str, default_hyperparameter_set: str) -> argparse.ArgumentParser:
-    """Command-line options shared by the agent scripts (`python -m src.learning_agents.<agent>`)."""
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--hyperparameter_set",
-        type=str,
-        default=default_hyperparameter_set,
-        help="Specify the hyperparameter set / run name",
-    )
-    parser.add_argument("--train", action="store_true", help="Run the agent in training mode")
-    parser.add_argument("--eval", action="store_true", help="Run the agent in evaluation/validation mode")
-    parser.add_argument("--render", action="store_true", help="Render the environment in a Pygame window")
-    parser.add_argument("--episodes", type=int, default=None, help="Maximum number of episodes to run")
-    parser.add_argument("--model_path", type=str, default=None, help="Optional path to model .pt checkpoint")
-    parser.add_argument("--gif", action="store_true", help="Record and save an animated GIF of the evaluation episode")
-    parser.add_argument("--gif_path", type=str, default=None, help="Optional custom output path for the GIF")
-    parser.add_argument("--blue", action="store_true", help="Policy controls Blue car vs HeuristicBot Orange (default)")
-    parser.add_argument("--orange", action="store_true", help="Policy controls Orange car (mirrored) vs Human Blue")
-    parser.add_argument(
-        "--bot-vs-bot",
-        "--bots",
-        "--both",
-        dest="bot_vs_bot",
-        action="store_true",
-        help="Policy controls both Blue and Orange cars",
-    )
-    return parser
-
-
-def control_car_from_args(args: argparse.Namespace) -> str:
-    if args.orange:
-        return "orange"
-    if args.bot_vs_bot:
-        return "both"
-    return "blue"

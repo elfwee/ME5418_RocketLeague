@@ -11,23 +11,22 @@ window (render=True) or headlessly as fast as possible for a quick score tally.
 import random
 import time
 from pathlib import Path
-from typing import Dict, Optional
 
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
+from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
 from src.eval.agent_control import AgentControl
-from src.sim.core.simulation import Simulation
 from src.sim.core.control import CarControl
+from src.sim.core.simulation import Simulation
 
 
 def play_head_to_head(
-    blue_model: Optional[str | Path] = None,
-    orange_model: Optional[str | Path] = None,
+    blue_model: str | Path | None = None,
+    orange_model: str | Path | None = None,
     render: bool = True,
-    max_goals: Optional[int] = None,
-    max_seconds: Optional[float] = 600.0,
+    max_goals: int | None = None,
+    max_seconds: float | None = 600.0,
     random_spawn: bool = False,
-    seed: Optional[int] = None,
-) -> Dict[str, float]:
+    seed: int | None = None,
+) -> dict[str, float]:
     """Play blue agent vs orange agent until `max_goals` total goals or `max_seconds` of sim time
     (either may be None; headless needs at least one limit). `orange_model=None` plays the heuristic
     bot on orange. `random_spawn` randomises every kickoff;
@@ -41,7 +40,6 @@ def play_head_to_head(
     sim = Simulation(enable_orange=True, random_spawn=random_spawn)
 
     if orange_model is None:
-        # orange = OrangePerspectiveBot(sim)
         orange = CarControl(control_type="heuristic_bot", team="orange", sim=sim)
     else:
         orange = AgentControl(team="orange", sim=sim, model_path=orange_model)
@@ -56,8 +54,9 @@ def play_head_to_head(
 
     if render:
         import pygame
-        from src.sim.visualization.renderer import Renderer
+
         from src.sim.visualization.event_handling import handle_event
+        from src.sim.visualization.renderer import Renderer
 
         pygame.init()
         pygame.display.set_caption("Rocket League Sideswipe 2D - Agent Head-to-Head")

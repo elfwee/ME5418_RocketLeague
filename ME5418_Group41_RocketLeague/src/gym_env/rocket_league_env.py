@@ -11,24 +11,17 @@ observation and the x component of the action are mirrored, so one policy can pl
 
 import math
 import random
-import sys
-from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 import pygame
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
+from src.config.gym_config import GymConfig
+from src.config.sim_config import ARENA_DIAGONAL, ENABLE_ORANGE_CAR, SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation, _normalize_pos
 from src.sim.visualization.renderer import Renderer
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR, ARENA_DIAGONAL
-from src.config.gym_config import GymConfig
 
 # register env as gym environment
 if GymConfig.gym_id not in gym.envs.registry:
@@ -321,7 +314,7 @@ class RocketLeagueEnv(gym.Env):
                 if event.key == pygame.K_r:
                     self.reset()
                 elif event.key == pygame.K_b:
-                    self.sim.set_orange_enabled(not self.sim.enable_orange, is_bot=True)
+                    self.sim.set_orange_enabled(not self.sim.enable_orange)
                 elif event.key == pygame.K_l:
                     self.renderer.show_raycasts = not self.renderer.show_raycasts
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:

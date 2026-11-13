@@ -6,15 +6,13 @@ provides in `control_car="both"` mode. Any combination of Dueling DDQN / Double 
 checkpoints works, since each network's architecture is inferred from its checkpoint.
 """
 
-import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import torch
 
 from src.config.nn_config import DQNConfig, PPOConfig
 from src.learning_agents.agent_common import (
-    ROOT_DIR,
     device,
     infer_dqn_arch,
     infer_ppo_arch,
@@ -26,6 +24,7 @@ from src.learning_agents.agent_common import (
 )
 from src.neural_nets.dueling_ddqn_torch import DQN
 from src.neural_nets.ppo_torch import ActorCritic
+from src.paths import RUNS_DIR
 
 NUM_FLAT_ACTIONS = 36  # Discrete(36) = 9 directions x jump x boost
 
@@ -144,7 +143,7 @@ def evaluate_mixed_policies(
         select_orange = _build_policy_selector("Orange", orange_pol, orange_model_path, num_states)
 
         if save_gif and gif_path is None:
-            gif_path = os.path.join(ROOT_DIR, DQNConfig.runs_dir, f"eval_mix_{blue_pol}_vs_{orange_pol}.gif")
+            gif_path = RUNS_DIR / f"eval_mix_{blue_pol}_vs_{orange_pol}.gif"
 
         metrics = run_eval_episodes(
             env,

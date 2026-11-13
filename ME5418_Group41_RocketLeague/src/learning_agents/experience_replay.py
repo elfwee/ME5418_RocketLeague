@@ -1,7 +1,7 @@
 """Experience Replay Buffer for Off-Policy Deep Q-Network (DQN) Agents."""
 
-from collections import deque
 import random
+from collections import deque
 
 
 class ReplayMemory:

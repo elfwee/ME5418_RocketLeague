@@ -1,9 +1,9 @@
-import pygame
 import numpy as np
-from src.sim.core.actions import CarAction
+import pygame
+
 from src.sim.ai.heuristic_bot import HeuristicBot
+from src.sim.core.actions import CarAction
 from src.sim.core.simulation import Simulation
-from typing import Optional
 
 
 class CarControl:
@@ -20,7 +20,7 @@ class CarControl:
     - sim: Simulation needed for HeuristicBot
     """
 
-    def __init__(self, control_type: str = "none", team: str = "blue", sim: Optional[Simulation] = None):
+    def __init__(self, control_type: str = "none", team: str = "blue", sim: Simulation | None = None):
         self.control_type = control_type
         self.sim = sim
         self.team = team

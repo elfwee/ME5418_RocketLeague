@@ -8,21 +8,20 @@ Supports:
 
 Usage:
     # Auto-discover all metrics in runs/ and its per-run folders and generate comparison plot:
-    python -m src.learning_agents.plot_learning_curves
+    python -m src --plot
 
     # Plot comparison between specific runs (each training run has its own runs/YYYYMMDD_hhmm_<model>/ folder):
-    python -m src.learning_agents.plot_learning_curves --runs runs/20261113_1655_ppo/metrics_ppo.csv runs/20261113_1702_dueling_ddqn/metrics_dueling_ddqn.csv
+    python -m src --plot --runs runs/20261113_1655_ppo/metrics_ppo.csv runs/20261113_1702_dueling_ddqn/metrics_dueling_ddqn.csv
 
     # Generate single 4-panel dashboard for a specific CSV (saved next to it unless --output is given):
-    python -m src.learning_agents.plot_learning_curves --dashboard runs/20261113_1655_ppo/metrics_ppo.csv
+    python -m src --plot --dashboard runs/20261113_1655_ppo/metrics_ppo.csv
 """
 
 import argparse
 import csv
 import os
-from pathlib import Path
 import re
-import sys
+from pathlib import Path
 
 import matplotlib
 
@@ -30,12 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Ensure repository root is on sys.path
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-RUNS_DIR = ROOT_DIR / "runs"
+from src.paths import RUNS_DIR
 
 
 def run_label(path: Path, prefix: str) -> str:
@@ -49,7 +43,7 @@ def run_label(path: Path, prefix: str) -> str:
 def load_metrics_csv(csv_path: str | Path) -> dict[str, np.ndarray]:
     """Load a metrics CSV file and return a dictionary of numpy arrays."""
     data: dict[str, list[float]] = {}
-    with open(csv_path, mode="r", encoding="utf-8") as f:
+    with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             for k, v in row.items():
@@ -75,7 +69,7 @@ def parse_log_file(log_path: str | Path) -> dict[str, np.ndarray]:
         r"New best 100-ep mean reward:\s*([-\d.]+)\s*\(Goal rate:\s*([-\d.]+)%,\s*Ep reward:\s*([-\d.]+)\)\s*at episode\s*(\d+)\s*\(step\s*(\d+)\)"
     )
 
-    with open(log_path, mode="r", encoding="utf-8") as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             match = pattern.search(line)
             if match:

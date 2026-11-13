@@ -11,27 +11,18 @@ the evaluation loop, logging and plotting are shared with PPO in `agent_common.p
 
 import itertools
 import os
-from pathlib import Path
 import random
-import sys
+from pathlib import Path
 
 import gymnasium as gym
-import numpy as np
 import torch
 from torch import nn
-
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
 from src.learning_agents.agent_common import (
     DashboardPanel,
     TrainingLogger,
-    build_arg_parser,
-    control_car_from_args,
     device,
     latest_model_path,
     load_state_dict_if_exists,
@@ -40,9 +31,7 @@ from src.learning_agents.agent_common import (
     normalize_control_car,
     obs_to_tensor,
     resolve_eval_episodes,
-    rolling_mean,
     run_eval_episodes,
-    save_gif,
     save_periodic_checkpoint,
     save_training_dashboard,
     scored_goal,
@@ -63,7 +52,7 @@ class DuelingDDQNAgent:
            network evaluates them to mitigate maximization bias.
         2. Experience Replay (`ReplayMemory`):
            Stores `(state, action, next_state, reward, terminated, truncated)` transitions.
-        3. Action Repeat with Edge-Triggered Jump Release (`_step_with_action_repeat`):
+        3. Action Repeat with Edge-Triggered Jump Release (`step_with_action_repeat`):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         4. Truncation-Aware Value Bootstrapping (`optimize`):
@@ -71,7 +60,7 @@ class DuelingDDQNAgent:
            on true goal `terminated` states (`target_q = r + (1 - terminated) * gamma * next_q`).
 
     One training decision step (`_train`):
-        `_select_action` -> `_step_with_action_repeat` -> `_store_transition` -> `_maybe_optimize`
+        `_select_action` -> `step_with_action_repeat` -> `_store_transition` -> `_maybe_optimize`
         -> `_sync_target_network` (every `network_sync_rate` steps); `_decay_epsilon` once per episode.
     """
 
@@ -122,7 +111,7 @@ class DuelingDDQNAgent:
 
     def optimize(self, mini_batch, policy_dqn: DQN, target_dqn: DQN) -> float:
         """Perform a single Double/Dueling DQN gradient step on a sampled minibatch."""
-        state, action, next_state, reward, terminated, truncated = zip(*mini_batch)
+        state, action, next_state, reward, terminated, truncated = zip(*mini_batch, strict=True)
 
         state = torch.stack(state)
         action = torch.stack(action)
@@ -176,11 +165,6 @@ class DuelingDDQNAgent:
             return torch.tensor(env.action_space.sample(), dtype=torch.int64, device=device)
         return self._greedy_action(policy_dqn, state)
 
-    def _step_with_action_repeat(self, env: gym.Env, action_idx: int, action_orange_idx: int | None = None):
-        """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
-        edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
-        return step_with_action_repeat(env, action_idx, action_orange_idx, self.action_repeat)
-
     def _store_transition(
         self,
         memory: ReplayMemory,
@@ -212,16 +196,8 @@ class DuelingDDQNAgent:
         return max(epsilon * self.epsilon_decay, self.epsilon_min)
 
     # ----------------------------------------------------------------------------------------
-    # Plotting / GIF helpers
+    # Plotting
     # ----------------------------------------------------------------------------------------
-
-    def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
-        """Compile and save a list of RGB frames as an optimized animated GIF."""
-        save_gif(frames, path, fps=fps, tag="DQN")
-
-    @staticmethod
-    def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
-        return rolling_mean(values, window)
 
     def save_graph(
         self,
@@ -373,8 +349,8 @@ class DuelingDDQNAgent:
 
                 while not (terminated or truncated):
                     action = self._select_action(env, policy_dqn, state, epsilon)
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(
-                        env, int(action.item())
+                    next_state, reward, terminated, truncated, info = step_with_action_repeat(
+                        env, int(action.item()), action_repeat=self.action_repeat
                     )
 
                     episode_reward += reward
@@ -465,10 +441,6 @@ class DuelingDDQNAgent:
         )
 
 
-# Backwards-compatible alias
-Agent = DuelingDDQNAgent
-
-
 def train_dueling_ddqn(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
@@ -522,25 +494,3 @@ def evaluate_dueling_ddqn(
         control_car=control_car,
         random_spawn=random_spawn,
     )
-
-
-if __name__ == "__main__":
-    args = build_arg_parser("Dueling Double DQN Agent for Rocket League", DQNConfig.hyperparameter_set).parse_args()
-
-    if args.train:
-        train_dueling_ddqn(
-            num_episodes=args.episodes,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-        )
-    else:
-        eval_eps = args.episodes if args.episodes is not None else (None if args.render else DQNConfig.eval_episodes)
-        evaluate_dueling_ddqn(
-            num_episodes=eval_eps,
-            render=args.render,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-            save_gif=args.gif,
-            gif_path=args.gif_path,
-            control_car=control_car_from_args(args),
-        )

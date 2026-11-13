@@ -8,71 +8,71 @@ scripted downforce / pitch-cutoff hacks the physical model now makes unnecessary
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Any
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import pymunk
 
 from src.config.sim_config import (
-    CAR_SCALE,
-    CAR_WIDTH,
-    CAR_HEIGHT,
-    CAR_MASS,
-    CHASSIS_FRICTION,
-    CHASSIS_ELASTICITY,
-    WHEEL_AXLE_Y,
-    WHEEL_REAR_X,
-    WHEEL_FRONT_X,
-    SUSPENSION_STIFFNESS,
-    SUSPENSION_DAMPER,
-    SUSPENSION_REST_LEN,
-    SUSPENSION_RAY_LEN,
-    SUSPENSION_RAY_OFFSET,
-    SUSPENSION_MAX_ACCEL,
-    TIRE_GRIP,
-    CAR_STICKY_ACCEL,
-    CAR_DRIVE_ACCEL,
-    CAR_COAST_DECEL,
-    CAR_MAX_GROUND_SPEED,
-    CAR_WHEELIE_SPEED_FACTOR,
-    CAR_WHEELIE_PITCH_THRESHOLD,
-    WHEEL_MIN_NORMAL_DOT,
-    CAR_STEER_RATE_GAIN,
-    CAR_GROUND_ANGULAR_SPEED,
-    CAR_GROUND_ANGULAR_ACCEL,
-    CAR_AIR_ANGULAR_SPEED,
-    CAR_AIR_ANGULAR_ACCEL,
-    CAR_AIR_SPIN_DECAY_TAU,
-    CAR_PITCH_INPUT_THRESHOLD,
-    INPUT_DEADZONE,
-    THROTTLE_DEADZONE,
-    FACING_FLIP_THRESHOLD,
     BOUNDARY_ALIGN_DIST,
     BOUNDARY_PITCH_THRESHOLD,
-    CAR_ALIGN_ANGULAR_SPEED,
+    CAR_AIR_ANGULAR_ACCEL,
+    CAR_AIR_ANGULAR_SPEED,
+    CAR_AIR_SPIN_DECAY_TAU,
     CAR_ALIGN_ANGULAR_ACCEL,
-    CENTER_X,
-    CENTER_Y,
-    CAR_JUMP_SPEED,
-    CAR_DOUBLE_JUMP_SPEED,
-    CAR_DODGE_SPEED,
-    CAR_DODGE_DURATION,
+    CAR_ALIGN_ANGULAR_SPEED,
     CAR_BOOST_ACCEL,
-    CAR_MAX_AIR_SPEED,
-    CAR_BOOST_SPEED_FADE,
-    CAR_MAX_BOOST,
     CAR_BOOST_DRAIN,
     CAR_BOOST_REFILL,
-    TURTLE_UP_THRESHOLD,
+    CAR_BOOST_SPEED_FADE,
+    CAR_COAST_DECEL,
+    CAR_DODGE_DURATION,
+    CAR_DODGE_SPEED,
+    CAR_DOUBLE_JUMP_SPEED,
+    CAR_DRIVE_ACCEL,
+    CAR_FLIP_ANGULAR_ACCEL,
+    CAR_FLIP_ANGULAR_SPEED,
+    CAR_GROUND_ANGULAR_ACCEL,
+    CAR_GROUND_ANGULAR_SPEED,
+    CAR_HEIGHT,
+    CAR_JUMP_SPEED,
+    CAR_MASS,
+    CAR_MAX_AIR_SPEED,
+    CAR_MAX_BOOST,
+    CAR_MAX_GROUND_SPEED,
+    CAR_PITCH_INPUT_THRESHOLD,
+    CAR_SCALE,
+    CAR_STEER_RATE_GAIN,
+    CAR_STICKY_ACCEL,
+    CAR_WHEELIE_PITCH_THRESHOLD,
+    CAR_WHEELIE_SPEED_FACTOR,
+    CAR_WIDTH,
+    CENTER_X,
+    CENTER_Y,
+    CHASSIS_ELASTICITY,
+    CHASSIS_FRICTION,
+    COLLISION_ARENA,
+    COLLISION_CAR_BODY,
+    FACING_FLIP_THRESHOLD,
+    GRAVITY_MAG,
+    INPUT_DEADZONE,
+    SUSPENSION_DAMPER,
+    SUSPENSION_MAX_ACCEL,
+    SUSPENSION_RAY_LEN,
+    SUSPENSION_RAY_OFFSET,
+    SUSPENSION_REST_LEN,
+    SUSPENSION_STIFFNESS,
+    THROTTLE_DEADZONE,
+    TIRE_GRIP,
+    TURTLE_FLIP_DURATION,
+    TURTLE_HOP_SPEED,
     TURTLE_PROBE_LEN,
     TURTLE_TRIGGER_DELAY,
-    TURTLE_HOP_SPEED,
-    TURTLE_FLIP_DURATION,
-    CAR_FLIP_ANGULAR_SPEED,
-    CAR_FLIP_ANGULAR_ACCEL,
-    COLLISION_CAR_BODY,
-    COLLISION_ARENA,
-    GRAVITY_MAG,
+    TURTLE_UP_THRESHOLD,
+    WHEEL_AXLE_Y,
+    WHEEL_FRONT_X,
+    WHEEL_MIN_NORMAL_DOT,
+    WHEEL_REAR_X,
 )
 from src.sim.core.actions import CarAction
 
@@ -92,13 +92,13 @@ class WheelContact:
     """Ground probe result for a single axle."""
 
     hit: bool = False
-    point: Tuple[float, float] = (0.0, 0.0)
-    normal: Tuple[float, float] = (0.0, 1.0)
+    point: tuple[float, float] = (0.0, 0.0)
+    normal: tuple[float, float] = (0.0, 1.0)
     distance: float = SUSPENSION_RAY_LEN
     compression: float = 0.0
     normal_force: float = 0.0
-    other_body: Optional[pymunk.Body] = None
-    anchor: Tuple[float, float] = field(default=(0.0, 0.0))
+    other_body: pymunk.Body | None = None
+    anchor: tuple[float, float] = field(default=(0.0, 0.0))
 
 
 class Car:
@@ -118,7 +118,7 @@ class Car:
 
         # Base convex polygon vertices with blunt vertical front bumper (facing Right, CCW)
         # Scaled by CAR_SCALE (25% smaller)
-        self.base_chassis_vertices: List[Tuple[float, float]] = [
+        self.base_chassis_vertices: list[tuple[float, float]] = [
             (-1.00 * CAR_SCALE, -0.32 * CAR_SCALE),  # Rear bottom
             (0.95 * CAR_SCALE, -0.32 * CAR_SCALE),  # Front bottom
             (1.05 * CAR_SCALE, -0.24 * CAR_SCALE),  # Front bumper lower
@@ -130,7 +130,7 @@ class Car:
 
         # Flipped vertices for facing Left: inverting Y and reversing order combined with
         # 180-deg body rotation mirrors horizontally while preserving CCW polygon winding.
-        self.flipped_chassis_vertices: List[Tuple[float, float]] = [
+        self.flipped_chassis_vertices: list[tuple[float, float]] = [
             (vx, -vy) for vx, vy in reversed(self.base_chassis_vertices)
         ]
 
@@ -168,20 +168,20 @@ class Car:
         self._flip_total_spin: float = 0.0
 
         # [rear, front] suspension probes, refreshed every physics sub-step
-        self.wheels: List[WheelContact] = [WheelContact(), WheelContact()]
-        self._ground_normal: Tuple[float, float] = (0.0, 1.0)
+        self.wheels: list[WheelContact] = [WheelContact(), WheelContact()]
+        self._ground_normal: tuple[float, float] = (0.0, 1.0)
         self._grounded: bool = False
         self._wheels_grounded: bool = False
 
         # 2D direction input vector for purple arrow visualization
-        self.last_input_vector: Tuple[float, float] = (0.0, 0.0)
+        self.last_input_vector: tuple[float, float] = (0.0, 0.0)
 
         # Upside-down auto-righting state
         self.turtled_time: float = 0.0
         self._recovery_time: float = 0.0
 
         # Boundary raycast cache for 45-degree field awareness sensors
-        self._boundary_raycasts: Optional[List[Dict[str, Any]]] = None
+        self._boundary_raycasts: list[dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------ #
     # Geometry / state queries
@@ -244,46 +244,46 @@ class Car:
         return self.both_wheels_grounded or (self.wheel_contact_count >= 1 and not self.is_upright)
 
     @property
-    def ground_normal(self) -> Tuple[float, float]:
+    def ground_normal(self) -> tuple[float, float]:
         """Averaged surface normal under the car (world up when airborne)."""
         return self._ground_normal
 
     @property
-    def rear_wheel_local(self) -> Tuple[float, float]:
+    def rear_wheel_local(self) -> tuple[float, float]:
         """Local coordinate of the rear wheel axle based on facing direction."""
         return (WHEEL_REAR_X, WHEEL_AXLE_Y * self.facing_x)
 
     @property
-    def front_wheel_local(self) -> Tuple[float, float]:
+    def front_wheel_local(self) -> tuple[float, float]:
         """Local coordinate of the front wheel axle based on facing direction."""
         return (WHEEL_FRONT_X, WHEEL_AXLE_Y * self.facing_x)
 
     @property
-    def forward_vector(self) -> Tuple[float, float]:
+    def forward_vector(self) -> tuple[float, float]:
         """Unit vector pointing along the car's nose in world space."""
         theta = self.body.angle
         return (math.cos(theta), math.sin(theta))
 
     @property
-    def up_vector(self) -> Tuple[float, float]:
+    def up_vector(self) -> tuple[float, float]:
         """Unit vector pointing toward car's roof in world space."""
         theta = self.body.angle
         return (-self.facing_x * math.sin(theta), self.facing_x * math.cos(theta))
 
     @property
-    def nose_position(self) -> Tuple[float, float]:
+    def nose_position(self) -> tuple[float, float]:
         """World position of the front bumper face."""
         p = self.body.local_to_world((1.05 * CAR_SCALE, -0.03 * CAR_SCALE * self.facing_x))
         return (p.x, p.y)
 
     @property
-    def tail_position(self) -> Tuple[float, float]:
+    def tail_position(self) -> tuple[float, float]:
         """World position of the rear spoiler/tail."""
         p = self.body.local_to_world((-1.00 * CAR_SCALE, 0.22 * CAR_SCALE * self.facing_x))
         return (p.x, p.y)
 
     @property
-    def active_chassis_vertices(self) -> List[Tuple[float, float]]:
+    def active_chassis_vertices(self) -> list[tuple[float, float]]:
         """Current polygon vertices in local space based on facing direction."""
         return self.base_chassis_vertices if self.facing_x == 1 else self.flipped_chassis_vertices
 
@@ -406,7 +406,7 @@ class Car:
         alpha = _clamp((omega_target - self.body.angular_velocity) / dt, -alpha_max, alpha_max)
         self.body.torque += self.body.moment * alpha
 
-    def _detect_nearby_boundary(self) -> Optional[Tuple[float, Tuple[float, float]]]:
+    def _detect_nearby_boundary(self) -> tuple[float, tuple[float, float]] | None:
         """Detect the closest arena boundary within BOUNDARY_ALIGN_DIST of the car's body geometry.
 
         Returns:
@@ -423,7 +423,7 @@ class Car:
         ]
 
         min_dist = float("inf")
-        best_normal: Optional[Tuple[float, float]] = None
+        best_normal: tuple[float, float] | None = None
 
         for pt in probe_points:
             queries = self.space.point_query(pt, BOUNDARY_ALIGN_DIST, pymunk.ShapeFilter())
@@ -454,13 +454,13 @@ class Car:
             return min_dist, best_normal
         return None
 
-    def _surface_align_angle(self, normal: Optional[Tuple[float, float]] = None) -> float:
+    def _surface_align_angle(self, normal: tuple[float, float] | None = None) -> float:
         """Body angle that puts the car's wheels along the surface normal (roof along +normal)."""
         nx, ny = normal if normal is not None else self._ground_normal
         # Maps surface normal (nx, ny) to target yaw theta so the local roof vector aligns with the normal
         return math.atan2(-self.facing_x * nx, self.facing_x * ny)
 
-    def _target_angle(self, action: CarAction) -> Optional[float]:
+    def _target_angle(self, action: CarAction) -> float | None:
         """Resolve the commanded body angle from the 2D input vector and boundary surface orientation."""
         # 0. If turtled on the ground or actively recovering, do not apply boundary alignment targets
         if self._is_turtled() or self._recovery_time > 0.0:
@@ -789,8 +789,8 @@ class Car:
     # ------------------------------------------------------------------ #
 
     def update(self, action: CarAction, dt: float):
-        """Advance the car controller by one physics sub-step."""
-        action.clamp()
+        """Advance the car controller by one physics sub-step (`action` itself is left unchanged)."""
+        action = replace(action).clamp()
         self.is_boosting = False
         self.last_input_vector = (action.dir_x, action.dir_y)
 
@@ -819,7 +819,7 @@ class Car:
         self._apply_boost(action, dt)
         self._apply_boost_recovery(action, dt)
 
-    def reset(self, x: float, y: float, angle: float = 0.0, facing_x: Optional[int] = None):
+    def reset(self, x: float, y: float, angle: float = 0.0, facing_x: int | None = None):
         """Reset car state to starting position and orientation."""
         self.body.position = (x, y)
         if facing_x is None:
@@ -853,11 +853,11 @@ class Car:
         self._boundary_raycasts = None
 
     @property
-    def position(self) -> Tuple[float, float]:
+    def position(self) -> tuple[float, float]:
         return (self.body.position.x, self.body.position.y)
 
     @property
-    def velocity(self) -> Tuple[float, float]:
+    def velocity(self) -> tuple[float, float]:
         return (self.body.velocity.x, self.body.velocity.y)
 
     @property
@@ -866,7 +866,7 @@ class Car:
 
     def compute_boundary_raycasts(
         self, max_distance: float = 60.0, force_refresh: bool = False
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Compute 8 raycasts at 45-degree intervals from car center to field boundaries.
 
         Provides awareness of distance from the center of the car to the arena field surfaces

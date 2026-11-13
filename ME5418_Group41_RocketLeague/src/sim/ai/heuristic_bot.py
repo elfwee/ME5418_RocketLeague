@@ -1,17 +1,16 @@
 """Hierarchical Zone & Intercept State Machine (HZISM) Heuristic Bot for 2D Rocket League."""
 
 import math
-from typing import Tuple
+
+from src.config.sim_config import BOT_AERIAL_MIN_BOOST, CAR_MAX_GROUND_SPEED, GRAVITY_MAG, SIM_HZ
 from src.sim.core.actions import CarAction
-from src.config.sim_config import CAR_MAX_GROUND_SPEED, GRAVITY_MAG, BOT_AERIAL_MIN_BOOST
 
 
 class HeuristicBot:
     """Rule-based AI bot with trajectory lookahead, shadow defense, and dynamic aerial/ground mechanics."""
 
-    def __init__(self, team: str = "orange", difficulty: str = "pro"):
+    def __init__(self, team: str = "orange"):
         self.team = team
-        self.difficulty = difficulty
         self.current_state = "KICKOFF"
         self._is_kickoff = True
         self._jump_cooldown = 0.0
@@ -60,7 +59,7 @@ class HeuristicBot:
         action.jump = True
         return True
 
-    def predict_ball_position(self, sim, dt_ahead: float) -> Tuple[float, float]:
+    def predict_ball_position(self, sim, dt_ahead: float) -> tuple[float, float]:
         """Predict ball position dt_ahead seconds into the future assuming ballistic trajectory and floor bounce."""
         bx, by = sim.ball.position
         vx, vy = sim.ball.velocity
@@ -493,7 +492,7 @@ class HeuristicBot:
         cx, _ = car.position
         bx, by = sim.ball.position
         b_vx, _ = sim.ball.velocity
-        self._jump_cooldown = max(0.0, self._jump_cooldown - (1.0 / 60.0))
+        self._jump_cooldown = max(0.0, self._jump_cooldown - (1.0 / SIM_HZ))
 
         car_d = self._to_team_d(sim, cx)
         ball_d = self._to_team_d(sim, bx)
@@ -503,16 +502,16 @@ class HeuristicBot:
 
         # Obstacle stagnation detector
         if self._unstick_active > 0.0:
-            self._unstick_active = max(0.0, self._unstick_active - (1.0 / 60.0))
+            self._unstick_active = max(0.0, self._unstick_active - (1.0 / SIM_HZ))
             return self._compute_unstick(sim, car, car_d, ball_d, field_w)
         if (car.is_grounded or car.can_ground_jump or car.wheel_contact_count >= 1) and abs(car.velocity[0]) < 0.20:
-            self._stuck_timer += 1.0 / 60.0
+            self._stuck_timer += 1.0 / SIM_HZ
             if self._stuck_timer > 0.5:
                 self._stuck_timer = 0.0
                 self._unstick_active = 0.35
                 return self._compute_unstick(sim, car, car_d, ball_d, field_w)
         else:
-            self._stuck_timer = max(0.0, self._stuck_timer - (2.0 / 60.0))
+            self._stuck_timer = max(0.0, self._stuck_timer - (2.0 / SIM_HZ))
 
         if self.current_state == "KICKOFF":
             return self._compute_kickoff(sim, car, car_d, ball_d)

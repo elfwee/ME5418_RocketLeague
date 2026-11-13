@@ -31,6 +31,7 @@ ARENA_DIAGONAL = math.hypot(TOTAL_WIDTH, TOTAL_HEIGHT)  # ~39.357 m
 PPM = 40.0  # 40 pixels per meter
 SCREEN_WIDTH = int(TOTAL_WIDTH * PPM)  # 1400 px
 SCREEN_HEIGHT = int(TOTAL_HEIGHT * PPM)  # 720 px
+GIF_FRAME_SIZE = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # 700 x 360 px evaluation GIF frames
 
 # --- Physics Timing ---
 SIM_HZ = 60  # Frame rate
@@ -84,6 +85,13 @@ CAR_RIDE_HEIGHT = SUSPENSION_REST_LEN - SUSPENSION_LOADED_SAG - WHEEL_AXLE_Y
 # --- Kickoff Spawn Positions (meters along X on Blue side) ---
 CAR_SPAWN_X_DEFENSIVE = 8.5  # Rear defensive kickoff position on Blue side
 CAR_SPAWN_X_ATTACK = 13.5  # Forward attacking kickoff position on Blue side
+
+# --- Random Spawn Sampling (meters, world x) ---
+RANDOM_SPAWN_BLUE_X = (7.8, 16.8)  # Blue car range: left half, clear of the goal and the corner fillet
+RANDOM_SPAWN_ORANGE_X = (18.2, 27.2)  # Orange car range: right half (mirror of Blue's range)
+RANDOM_SPAWN_MIN_CAR_GAP = 2.0  # Cars closer than this are pushed apart to this gap around their midpoint
+RANDOM_SPAWN_BALL_CLEARANCE = 2.2  # Minimum ball-to-car centre distance (no physical overlap)
+RANDOM_SPAWN_BALL_ATTEMPTS = 300  # Rejection-sampling attempts before falling back to a ball above centre
 
 # --- Attitude Control (rate + acceleration limited, so it cannot overshoot or ring) ---
 # omega_target = clamp(angle_error * RATE_GAIN, +-omega_max); alpha = clamp(d omega, +-alpha_max).
@@ -140,6 +148,7 @@ BALL_SPIN_DRAG = 0.35  # Angular air resistance coefficient (1/s)
 BALL_MAX_SPEED = 38.0  # Hard cap on ball velocity (m/s)
 BALL_MAX_SPIN = 30.0  # Hard cap on ball angular velocity (rad/s)
 CAR_BALL_RESTITUTION = 0.60  # Effective bounciness of a car-on-ball strike
+CAR_CAR_RESTITUTION = 0.70  # Effective bounciness of a car-on-car bump
 
 # --- Collision Types (Pymunk categories) ---
 COLLISION_ARENA = 1
@@ -181,5 +190,4 @@ COLOR_RAYCAST_HIT = (255, 255, 255)  # White hit point marker
 
 # --- Opponent Car & Bot Settings ---
 ENABLE_ORANGE_CAR = True  # Default flag: whether Orange car is present (enabled by default in main.py)
-ORANGE_IS_BOT = True  # Default flag: whether Orange car is AI-controlled
 BOT_AERIAL_MIN_BOOST = 15.0  # Minimum boost required to commit to aerial launch

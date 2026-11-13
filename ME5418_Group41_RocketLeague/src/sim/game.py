@@ -1,15 +1,13 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
 
-import sys
-import os
-
 import pygame
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+
+from src.config.sim_config import SCREEN_HEIGHT, SCREEN_WIDTH, SIM_HZ
 from src.sim.core.actions import CarAction
 from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
-from src.sim.visualization.renderer import Renderer
 from src.sim.visualization.event_handling import handle_event
+from src.sim.visualization.renderer import Renderer
 
 
 def play_interactive(enable_orange: bool = True, control_car: str = "blue"):

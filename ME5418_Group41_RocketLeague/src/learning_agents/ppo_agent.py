@@ -4,7 +4,7 @@ Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Eval
 Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
 comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
-- Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
+- Identical `action_repeat = 4` with edge-triggered jump release (`step_with_action_repeat`).
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
   and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
@@ -18,7 +18,6 @@ the evaluation loop, logging and plotting are shared with DQN in `agent_common.p
 import itertools
 import os
 from pathlib import Path
-import sys
 
 import gymnasium as gym
 import numpy as np
@@ -26,18 +25,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
 from src.learning_agents.agent_common import (
     DashboardPanel,
     TrainingLogger,
-    build_arg_parser,
-    control_car_from_args,
     device,
     infer_ppo_arch,
     latest_model_path,
@@ -47,9 +39,7 @@ from src.learning_agents.agent_common import (
     normalize_control_car,
     obs_to_tensor,
     resolve_eval_episodes,
-    rolling_mean,
     run_eval_episodes,
-    save_gif,
     save_periodic_checkpoint,
     save_training_dashboard,
     scored_goal,
@@ -138,7 +128,7 @@ class PPOAgent:
         1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
            Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
            Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
-        2. Action Repeat with Edge-Triggered Jump Release (`_step_with_action_repeat`):
+        2. Action Repeat with Edge-Triggered Jump Release (`step_with_action_repeat`):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         3. Truncation-Aware Generalized Advantage Estimation (`_compute_gae`):
@@ -150,7 +140,7 @@ class PPOAgent:
            entropy bonus, and global gradient norm clipping.
 
     One training decision step (`_train`):
-        `_sample_action` -> `_step_with_action_repeat` -> `_bootstrap_value` -> `RolloutBuffer.add`
+        `_sample_action` -> `step_with_action_repeat` -> `_bootstrap_value` -> `RolloutBuffer.add`
         -> `_update_from_rollout` (every `rollout_steps` steps: `_compute_gae` then `optimize`).
     """
 
@@ -241,7 +231,7 @@ class PPOAgent:
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for epoch in range(self.update_epochs):
+        for _epoch in range(self.update_epochs):
             perm = torch.randperm(batch_size, device=device)
             epoch_kl_sum = 0.0
             epoch_mb_count = 0
@@ -349,22 +339,9 @@ class PPOAgent:
         buffer.clear()
         return entropy, value_loss
 
-    def _step_with_action_repeat(self, env: gym.Env, action, action_orange=None):
-        """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
-        edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
-        return step_with_action_repeat(env, action, action_orange, self.action_repeat)
-
     # ----------------------------------------------------------------------------------------
-    # Plotting / GIF helpers
+    # Plotting
     # ----------------------------------------------------------------------------------------
-
-    def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
-        """Compile and save a list of RGB frames as an optimized animated GIF."""
-        save_gif(frames, path, fps=fps, tag="PPO")
-
-    @staticmethod
-    def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
-        return rolling_mean(values, window)
 
     def save_graph(
         self,
@@ -535,7 +512,9 @@ class PPOAgent:
                     buffer.backfill_next_value(value)
 
                     action_for_env = action.cpu().numpy().tolist() if policy_net.is_factored else int(action.item())
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(env, action_for_env)
+                    next_state, reward, terminated, truncated, info = step_with_action_repeat(
+                        env, action_for_env, action_repeat=self.action_repeat
+                    )
 
                     episode_reward += reward
                     if scored_goal(info, terminated, reward):
@@ -655,25 +634,3 @@ def evaluate_ppo(
         control_car=control_car,
         random_spawn=random_spawn,
     )
-
-
-if __name__ == "__main__":
-    args = build_arg_parser("PPO Agent for Rocket League", PPOConfig.hyperparameter_set).parse_args()
-
-    if args.train:
-        train_ppo(
-            num_episodes=args.episodes,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-        )
-    else:
-        eval_eps = args.episodes if args.episodes is not None else (None if args.render else PPOConfig.eval_episodes)
-        evaluate_ppo(
-            num_episodes=eval_eps,
-            render=args.render,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-            save_gif=args.gif,
-            gif_path=args.gif_path,
-            control_car=control_car_from_args(args),
-        )

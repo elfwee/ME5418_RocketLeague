@@ -18,7 +18,7 @@ def handle_event(sim, renderer, blue_control=None, orange_control=None):
                     orange_control.reset()
             elif event.key == pygame.K_b:
                 # Toggle Orange bot on/off
-                sim.set_orange_enabled(not sim.enable_orange, is_bot=True)
+                sim.set_orange_enabled(not sim.enable_orange)
             elif event.key == pygame.K_l:
                 # Toggle 45-degree boundary raycasts on/off
                 renderer.show_raycasts = not renderer.show_raycasts

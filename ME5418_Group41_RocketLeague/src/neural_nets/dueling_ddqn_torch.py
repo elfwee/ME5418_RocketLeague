@@ -2,20 +2,11 @@
 Dueling Deep Q-Network (DQN) Architecture & Forward/Backward Pass Demo.
 """
 
-import sys
-from pathlib import Path
 import gymnasium as gym
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-
-from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.config.gym_config import GymConfig
 from src.config.nn_config import DQNConfig
 
@@ -34,7 +25,7 @@ class DQN(nn.Module):
     """
 
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256, enable_dueling_dqn: bool = True):
-        super(DQN, self).__init__()
+        super().__init__()
         self.enable_dueling_dqn = enable_dueling_dqn
 
         # Shared feature backbone with LayerNorm to stabilize hidden activations across varying scales
@@ -182,11 +173,3 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     print("=" * 65)
 
     env.close()
-
-
-# Alias for backward compatibility
-run_network = run_dqn_network
-
-
-if __name__ == "__main__":
-    run_dqn_network()

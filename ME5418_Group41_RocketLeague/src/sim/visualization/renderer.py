@@ -1,42 +1,43 @@
 """Pygame renderer providing 2D graphics, vector indicators, and Octane car visuals."""
 
 import math
-from typing import Tuple
+
 import pygame
+
 from src.config.sim_config import (
-    TOTAL_HEIGHT,
-    PPM,
-    SCREEN_WIDTH,
-    SCREEN_HEIGHT,
-    WHEEL_RADIUS,
-    GOAL_CORNER_RADIUS,
     CAR_SCALE,
-    COLOR_BG,
-    COLOR_WALL,
-    COLOR_GOAL_ORANGE,
-    COLOR_GOAL_BLUE,
-    COLOR_CAR_BLUE,
-    COLOR_CAR_DARK,
-    COLOR_CAR_ACCENT,
-    COLOR_CAR_ORANGE,
-    COLOR_CAR_ORANGE_DARK,
-    COLOR_CAR_ORANGE_ACCENT,
-    COLOR_WHEELS,
-    COLOR_RIM,
-    COLOR_SPOILER,
-    COLOR_HEADLIGHT,
-    COLOR_TAILLIGHT,
-    COLOR_BOOST_FLAME,
     COLOR_BALL,
     COLOR_BALL_ACCENT,
+    COLOR_BG,
+    COLOR_BOOST_BAR,
+    COLOR_BOOST_FLAME,
+    COLOR_CAR_ACCENT,
+    COLOR_CAR_BLUE,
+    COLOR_CAR_DARK,
+    COLOR_CAR_ORANGE,
+    COLOR_CAR_ORANGE_ACCENT,
+    COLOR_CAR_ORANGE_DARK,
+    COLOR_GOAL_BLUE,
+    COLOR_GOAL_ORANGE,
+    COLOR_HEADLIGHT,
     COLOR_INPUT_VECTOR,
-    COLOR_VELOCITY_VECTOR,
     COLOR_RAYCAST_BLUE,
-    COLOR_RAYCAST_ORANGE,
     COLOR_RAYCAST_HIT,
+    COLOR_RAYCAST_ORANGE,
+    COLOR_RIM,
+    COLOR_SPOILER,
+    COLOR_TAILLIGHT,
     COLOR_TEXT,
     COLOR_UI_BAR_BG,
-    COLOR_BOOST_BAR,
+    COLOR_VELOCITY_VECTOR,
+    COLOR_WALL,
+    COLOR_WHEELS,
+    GOAL_CORNER_RADIUS,
+    PPM,
+    SCREEN_HEIGHT,
+    SCREEN_WIDTH,
+    TOTAL_HEIGHT,
+    WHEEL_RADIUS,
 )
 from src.sim.core.car import Car
 from src.sim.core.simulation import Simulation
@@ -56,7 +57,7 @@ class Renderer:
         self.show_raycasts: bool = False
         self.raycast_button_rect = pygame.Rect(0, 0, 0, 0)
 
-    def world_to_screen(self, x: float, y: float) -> Tuple[int, int]:
+    def world_to_screen(self, x: float, y: float) -> tuple[int, int]:
         """Convert SI coordinates (meters, +Y up) to screen pixels (+Y down)."""
         sx = int(x * PPM)
         sy = int((TOTAL_HEIGHT - y) * PPM)
@@ -281,12 +282,10 @@ class Renderer:
 
         # 6. Rocket Boost Exhaust Flame
         if car.is_boosting:
-            tail_w = body.local_to_world((-1.02 * cs, 0.0))
             flame_tip_w = body.local_to_world(((-1.02 - 1.25) * cs, 0.0))
             flame_top_w = body.local_to_world((-1.02 * cs, 0.22 * cs * facing))
             flame_bot_w = body.local_to_world((-1.02 * cs, -0.22 * cs * facing))
 
-            s_tail = self.world_to_screen(tail_w.x, tail_w.y)
             s_tip = self.world_to_screen(flame_tip_w.x, flame_tip_w.y)
             s_top = self.world_to_screen(flame_top_w.x, flame_top_w.y)
             s_bot = self.world_to_screen(flame_bot_w.x, flame_bot_w.y)
@@ -341,7 +340,7 @@ class Renderer:
             pygame.draw.line(self.screen, vel_col, center_screen, (tip_x, tip_y), 3)
             self._draw_arrowhead((tip_x, tip_y), arrow_angle_screen, vel_col, size=10)
 
-    def _draw_arrowhead(self, tip: Tuple[int, int], angle: float, color: Tuple[int, int, int], size: int = 9):
+    def _draw_arrowhead(self, tip: tuple[int, int], angle: float, color: tuple[int, int, int], size: int = 9):
         """Helper to draw a filled equilateral arrowhead polygon."""
         wing_angle = math.pi * 0.82
         p1 = (int(tip[0] + size * math.cos(angle + wing_angle)), int(tip[1] + size * math.sin(angle + wing_angle)))
@@ -374,13 +373,6 @@ class Renderer:
         self.screen.blit(blue_lbl, b_rect)
         self.screen.blit(score_surf, s_rect)
         self.screen.blit(orange_lbl, o_rect)
-
-        # Orange Bot Status Pill (Top Center, below scoreboard)
-        if sim.enable_orange and sim.orange_car is not None:
-            bot_col = COLOR_CAR_ORANGE
-        else:
-            bot_text = "ORANGE BOT: OFF"
-            bot_col = (156, 163, 175)
 
         # --- Top-Left Controls & Legend ---
         help_lines = [
@@ -508,7 +500,7 @@ class Renderer:
         )
         self.screen.blit(boost_txt, (bar_x + 10, bar_y + 3))
 
-    def handle_click(self, pos: Tuple[int, int]) -> bool:
+    def handle_click(self, pos: tuple[int, int]) -> bool:
         """Handle mouse click events on UI elements. Returns True if a button was clicked."""
         if hasattr(self, "raycast_button_rect") and self.raycast_button_rect.collidepoint(pos):
             self.show_raycasts = not self.show_raycasts
