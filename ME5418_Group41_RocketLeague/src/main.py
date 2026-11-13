@@ -14,11 +14,11 @@ from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 from src.neural_nets.ppo_torch import run_ppo_network
 from src.learning_agents.dueling_ddqn_agent import (
     evaluate_dueling_ddqn,
-    evaluate_mixed_policies,
     train_dueling_ddqn,
 )
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.eval.head_to_head import play_head_to_head
+from src.eval.mixed_eval import evaluate_mixed_policies
 
 RUNS_DIR = f"{ROOT_DIR}/runs"
 

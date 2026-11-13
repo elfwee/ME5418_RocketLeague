@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ
-from src.learning_agents.agent_control import AgentControl
+from src.eval.agent_control import AgentControl
 from src.sim.core.simulation import Simulation
 from src.sim.core.control import CarControl
 

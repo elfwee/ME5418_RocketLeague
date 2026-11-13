@@ -47,7 +47,6 @@ from src.learning_agents.agent_common import (
     summarize_episodes,
 )
 from src.learning_agents.experience_replay import ReplayMemory
-from src.learning_agents.mixed_eval import evaluate_mixed_policies  # noqa: F401  (re-exported for src/main.py)
 from src.neural_nets.dueling_ddqn_torch import DQN
 
 RUNS_DIR = ROOT_DIR / DQNConfig.runs_dir
