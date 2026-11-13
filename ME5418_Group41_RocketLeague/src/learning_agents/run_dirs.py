@@ -2,6 +2,7 @@
 
 import itertools
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +27,41 @@ def make_run_dir(model_name: str) -> Path:
             return run_dir
         except FileExistsError:
             continue
+
+
+@dataclass(frozen=True)
+class RunPaths:
+    """Where one training run writes its outputs (all inside `run_dir`)."""
+
+    run_dir: Path
+    model_name: str
+
+    @classmethod
+    def new(cls, model_name: str) -> "RunPaths":
+        """A fresh `runs/YYYYMMDD_hhmm_<model_name>/` folder for a new training run."""
+        return cls(make_run_dir(model_name), model_name)
+
+    @property
+    def log_file(self) -> Path:
+        return self.run_dir / f"run_{self.model_name}.log"
+
+    @property
+    def model_file(self) -> Path:
+        """Best model so far (by 100-episode mean return)."""
+        return self.run_dir / f"model_{self.model_name}.pt"
+
+    @property
+    def graph_file(self) -> Path:
+        return self.run_dir / f"graph_{self.model_name}.png"
+
+    @property
+    def metrics_file(self) -> Path:
+        return self.run_dir / f"metrics_{self.model_name}.csv"
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        """Periodic snapshots of the current model."""
+        return self.run_dir / "checkpoints"
 
 
 def latest_model_path(model_name: str) -> Path:
