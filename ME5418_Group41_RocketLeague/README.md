@@ -79,7 +79,7 @@ python -m src --train --training_architecture --model_path path_to_model.pt
 
 #### Evaluate a Trained Learning Agent
 
-Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed kickoff spawns for reproducible comparisons), `[--gif [out.gif]]`.
+Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed kickoff spawns for reproducible comparisons), `[--gif]` (record the first episode as a GIF next to the checkpoint), `[--gif_path out.gif]`.
 
 ```bash
 # 1. Blue = Policy, Orange = Heuristic Bot (default --blue mode)

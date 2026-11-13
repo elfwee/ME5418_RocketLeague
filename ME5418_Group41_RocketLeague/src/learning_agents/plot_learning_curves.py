@@ -230,7 +230,9 @@ def plot_comparison(runs_data: dict[str, dict[str, np.ndarray]], output_path: st
 
 
 def main(args_list: list[str] | None = None):
-    parser = argparse.ArgumentParser(description="Learning Curve Plotter for ME5418 Rocket League Agents")
+    parser = argparse.ArgumentParser(
+        prog="python -m src --plot", description="Learning Curve Plotter for ME5418 Rocket League Agents"
+    )
     parser.add_argument(
         "--runs",
         nargs="+",
