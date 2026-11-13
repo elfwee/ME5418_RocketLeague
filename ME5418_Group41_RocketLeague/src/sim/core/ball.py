@@ -1,13 +1,21 @@
 """Ball entity with physical bounciness, mass, and trajectory tracking."""
+
 import math
 from collections import deque
-from typing import Deque, Tuple
+
 import pymunk
+
 from src.config.sim_config import (
-    BALL_RADIUS, BALL_MASS, BALL_RESTITUTION,
-    BALL_FRICTION, BALL_AIR_DRAG, BALL_SPIN_DRAG,
-    BALL_MAX_SPEED, BALL_MAX_SPIN,
-    COLLISION_BALL
+    BALL_AIR_DRAG,
+    BALL_FRICTION,
+    BALL_MASS,
+    BALL_MAX_SPEED,
+    BALL_MAX_SPIN,
+    BALL_RADIUS,
+    BALL_RESTITUTION,
+    BALL_SPIN_DRAG,
+    CATEGORY_DYNAMIC,
+    COLLISION_BALL,
 )
 
 
@@ -27,11 +35,12 @@ class Ball:
         self.shape.elasticity = BALL_RESTITUTION
         self.shape.friction = BALL_FRICTION
         self.shape.collision_type = COLLISION_BALL
+        self.shape.filter = pymunk.ShapeFilter(categories=CATEGORY_DYNAMIC)
 
         self.space.add(self.body, self.shape)
 
         # Trail history for visualization (stores recent (x, y) positions)
-        self.trail: Deque[Tuple[float, float]] = deque(maxlen=25)
+        self.trail: deque[tuple[float, float]] = deque(maxlen=25)
 
     def apply_aerodynamics(self, dt: float):
         """Apply exponential linear/angular drag and clamp terminal speed.
@@ -56,11 +65,6 @@ class Ball:
         """Append the current position to the visualization trail (once per rendered frame)."""
         self.trail.append((self.body.position.x, self.body.position.y))
 
-    def update(self, dt: float):
-        """Convenience wrapper applying aerodynamics and recording one trail sample."""
-        self.apply_aerodynamics(dt)
-        self.record_trail()
-
     def reset(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0, angular_velocity: float = 0.0):
         """Reset ball to specified coordinates with optional initial velocity and spin."""
         self.body.position = (x, y)
@@ -72,11 +76,11 @@ class Ball:
         self.trail.clear()
 
     @property
-    def position(self) -> Tuple[float, float]:
+    def position(self) -> tuple[float, float]:
         return (self.body.position.x, self.body.position.y)
 
     @property
-    def velocity(self) -> Tuple[float, float]:
+    def velocity(self) -> tuple[float, float]:
         return (self.body.velocity.x, self.body.velocity.y)
 
     @property

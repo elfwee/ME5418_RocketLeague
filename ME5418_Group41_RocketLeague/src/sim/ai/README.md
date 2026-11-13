@@ -77,7 +77,7 @@ The automated Orange car operates on an asynchronous finite state machine struct
 
 * **Dynamic Toggle**: The bot can be enabled or disabled at any time during simulation via:
   ```python
-  sim.set_orange_enabled(enabled=True, is_bot=True)
+  sim.set_orange_enabled(enabled=True)
   ```
   or by pressing the `B` key in interactive mode.
 * **Symmetrical Telemetry**: The bot uses identical input capabilities (`CarAction`: directional vector, jump, boost) and physical parameters as the human / RL player, ensuring a fair, physically grounded adversarial baseline.

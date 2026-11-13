@@ -12,8 +12,11 @@ This directory contains the rigid-body dynamical simulation, vehicle kinematics,
 | [`arena.py`](arena.py) | Enclosed boundary geometry, corner fillets, and elevated goal mouths with vertical deflection walls. |
 | [`ball.py`](ball.py) | Rigid-body ball with restitution, mass scaling, aerodynamic drag, spin decay, and velocity capping. |
 | [`car.py`](car.py) | Vehicle chassis dynamics, independent raycast suspension, AWD Coulomb traction, attitude control, two-stage jump-dodge ballistics, rocket boost, and turtle recovery. |
-| [`control.py`](control.py) | `CarControl` dispatcher supporting `"none"`, `"human"`, `"random"`, and `"heuristic_bot"` control modes. |
-| [`simulation.py`](simulation.py) | Pymunk space coordinator, $240\text{ Hz}$ sub-stepping loop, collision arbiters, goal detection, and state dictionary generation. |
+| [`simulation.py`](simulation.py) | Pymunk space coordinator, $240\text{ Hz}$ sub-stepping loop, collision arbiters, goal detection, kickoff resets, and the raw state dictionary (`get_state()`). |
+| [`observation.py`](observation.py) | `build_observation(sim, ego)`: the 52-float normalised observation for Blue, or for Orange mirrored through the centre line (`mirror_observation`), with named index constants for the layout. |
+| [`spawns.py`](spawns.py) | Kickoff spawn rotation and random spawn sampling; random spawns draw only from the sim's own `random.Random` (`Simulation(seed=...)`). |
+
+Car input sources (keyboard, heuristic bot, trained policy) live in [`../control/`](../control/), outside the physics core.
 
 ---
 
@@ -24,7 +27,7 @@ The physics engine is powered by [Pymunk](http://www.pymunk.org/) (Chipmunk2D bi
 * **Base Frame Rate ($f_{sim}$)**: $60\text{ Hz}$ ($\Delta t_{frame} = 16.67\text{ ms}$)
 * **Sub-step Multiplier ($N_{sub}$)**: 4 sub-steps per frame
 * **Effective Physics Rate**: $240\text{ Hz}$ ($\Delta t_{sub} = \frac{1}{240}\text{ s} \approx 4.167\text{ ms}$)
-* **Solver Iterations**: 14 constraint iterations per sub-step
+* **Solver Iterations**: 60 constraint iterations per sub-step (`SOLVER_ITERATIONS`)
 * **Global Damping**: 1.0 (zero global damping; aerodynamic drag is applied per entity)
 * **World Gravity ($\vec{g}$)**: $(0.0, -28.0)\text{ m/s}^2$ (downward arcade-tuned gravity for responsive aerial play)
 

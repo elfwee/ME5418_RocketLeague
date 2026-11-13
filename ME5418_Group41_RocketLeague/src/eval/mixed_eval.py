@@ -6,28 +6,21 @@ provides in `control_car="both"` mode. Any combination of Dueling DDQN / Double 
 checkpoints works, since each network's architecture is inferred from its checkpoint.
 """
 
-import os
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from typing import Callable
 
 import torch
+from torch import nn
 
 from src.config.nn_config import DQNConfig, PPOConfig
-from src.learning_agents.agent_common import (
-    ROOT_DIR,
-    device,
-    infer_dqn_arch,
-    infer_ppo_arch,
-    latest_model_path,
-    load_state_dict_if_exists,
-    make_env,
-    resolve_eval_episodes,
-    run_eval_episodes,
-)
-from src.neural_nets.dueling_ddqn_torch import DQN
-from src.neural_nets.ppo_torch import ActorCritic
-
-NUM_FLAT_ACTIONS = 36  # Discrete(36) = 9 directions x jump x boost
+from src.gym_env.action_codec import NUM_DISCRETE_ACTIONS
+from src.learning_agents.env_factory import device, make_env
+from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
+from src.learning_agents.run_dirs import latest_model_path
+from src.neural_nets.checkpoint import DQN_KIND, PPO, PolicySpec, build_network, infer_spec, load_state_dict
+from src.neural_nets.policy import greedy_action
+from src.paths import RUNS_DIR
 
 
 def _normalize_policy_name(name: str) -> str:
@@ -39,35 +32,26 @@ def _normalize_policy_name(name: str) -> str:
     raise ValueError(f"Unsupported policy type '{name}'. Choose from: dueling_ddqn, double_dqn, dqn, ppo.")
 
 
-def _load_ppo_net(num_states: int, ckpt_file: str) -> tuple[ActorCritic, bool]:
-    """Build an `ActorCritic` matching the checkpoint (or the config defaults); returns (net, loaded)."""
-    hidden_dim = PPOConfig.hidden_size
-    factored = getattr(PPOConfig, "factored_action", True)
-    action_dim: int | list[int] = list(PPOConfig.action_dims) if factored else NUM_FLAT_ACTIONS
+def _default_spec(policy_type: str, num_states: int) -> PolicySpec:
+    """The architecture `policy_type` trains with, used when its checkpoint does not exist."""
+    if policy_type == "ppo":
+        action_dim = list(PPOConfig.action_dims) if PPOConfig.factored_action else NUM_DISCRETE_ACTIONS
+        return PolicySpec(PPO, num_states, PPOConfig.hidden_size, action_dim)
+    return PolicySpec(
+        DQN_KIND, num_states, DQNConfig.hidden_size, NUM_DISCRETE_ACTIONS, dueling=policy_type == "dueling_ddqn"
+    )
 
-    state_dict = load_state_dict_if_exists(ckpt_file)
+
+def _load_net(policy_type: str, num_states: int, ckpt_file: str) -> tuple[nn.Module, bool]:
+    """Network matching the checkpoint (or the config defaults when it is missing); returns (net, loaded)."""
+    spec = _default_spec(policy_type, num_states)
+    state_dict = load_state_dict(ckpt_file, device)
     if state_dict is not None:
-        hidden_dim, ckpt_action_dim = infer_ppo_arch(state_dict)
-        if ckpt_action_dim is not None:
-            action_dim = ckpt_action_dim
-
-    net = ActorCritic(num_states, action_dim, hidden_dim).to(device)
-    if state_dict is not None:
-        net.load_state_dict(state_dict)
-    return net, state_dict is not None
-
-
-def _load_dqn_net(num_states: int, ckpt_file: str, policy_type: str) -> tuple[DQN, bool]:
-    """Build a `DQN` matching the checkpoint (or the config defaults); returns (net, loaded)."""
-    hidden_dim = DQNConfig.hidden_size
-    action_dim = NUM_FLAT_ACTIONS
-    dueling = policy_type == "dueling_ddqn"
-
-    state_dict = load_state_dict_if_exists(ckpt_file)
-    if state_dict is not None:
-        hidden_dim, action_dim, dueling = infer_dqn_arch(state_dict)
-
-    net = DQN(num_states, action_dim, hidden_dim, enable_dueling_dqn=dueling).to(device)
+        ckpt_spec = infer_spec(state_dict)
+        spec = replace(
+            ckpt_spec, action_dim=ckpt_spec.action_dim if ckpt_spec.action_dim is not None else spec.action_dim
+        )
+    net = build_network(spec).to(device)
     if state_dict is not None:
         net.load_state_dict(state_dict)
     return net, state_dict is not None
@@ -80,34 +64,21 @@ def _build_policy_selector(
     num_states: int,
 ) -> Callable[[torch.Tensor], int | list[int]]:
     """Load `policy_type`'s network and return a greedy `observation -> env action` function."""
-    is_ppo = policy_type == "ppo"
     # Default to the checkpoint of this policy's most recent training run
     ckpt_file = str(ckpt_override) if ckpt_override is not None else str(latest_model_path(policy_type))
-
-    if is_ppo:
-        net, loaded = _load_ppo_net(num_states, ckpt_file)
-    else:
-        net, loaded = _load_dqn_net(num_states, ckpt_file, policy_type)
+    net, loaded = _load_net(policy_type, num_states, ckpt_file)
     net.eval()
 
-    tag = f"[Mix Eval ({team_label}: {'PPO' if is_ppo else policy_type})]"
+    tag = f"[Mix Eval ({team_label}: {'PPO' if policy_type == 'ppo' else policy_type})]"
     if loaded:
         print(f"{tag} Loaded trained weights from: {ckpt_file}")
     else:
         print(f"{tag} Warning: Checkpoint '{ckpt_file}' not found; using initial weights.")
 
-    def select_ppo(obs: torch.Tensor):
-        with torch.no_grad():
-            logits, _ = net(obs.unsqueeze(0))
-            if net.is_factored:
-                return [int(l.squeeze(0).argmax().item()) for l in logits]
-            return int(logits.squeeze(0).argmax().item())
+    def select(obs: torch.Tensor) -> int | list[int]:
+        return greedy_action(net, obs)
 
-    def select_dqn(obs: torch.Tensor):
-        with torch.no_grad():
-            return int(net(obs.unsqueeze(0)).squeeze(0).argmax().item())
-
-    return select_ppo if is_ppo else select_dqn
+    return select
 
 
 def evaluate_mixed_policies(
@@ -137,6 +108,7 @@ def evaluate_mixed_policies(
         save_gif=save_gif,
         random_spawn=random_spawn,
         max_episode_steps=max_episode_steps,
+        action_repeat=DQNConfig.action_repeat,
     )
     try:
         num_states = env.observation_space.shape[0]
@@ -144,13 +116,12 @@ def evaluate_mixed_policies(
         select_orange = _build_policy_selector("Orange", orange_pol, orange_model_path, num_states)
 
         if save_gif and gif_path is None:
-            gif_path = os.path.join(ROOT_DIR, DQNConfig.runs_dir, f"eval_mix_{blue_pol}_vs_{orange_pol}.gif")
+            gif_path = RUNS_DIR / f"eval_mix_{blue_pol}_vs_{orange_pol}.gif"
 
         metrics = run_eval_episodes(
             env,
             select_blue,
             select_orange,
-            action_repeat=DQNConfig.action_repeat,
             num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, DQNConfig.eval_episodes),
             gif_path=gif_path if save_gif else None,
             gif_tag="DQN",

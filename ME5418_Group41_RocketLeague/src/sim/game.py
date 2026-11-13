@@ -1,15 +1,14 @@
 """Main entry point for interactive 2D Rocket League / Sideswipe simulation."""
 
-import sys
-import os
-
 import pygame
-from src.config.sim_config import SCREEN_WIDTH, SCREEN_HEIGHT, SIM_HZ, ENABLE_ORANGE_CAR
+
+from src.config.render_config import SCREEN_HEIGHT, SCREEN_WIDTH
+from src.config.sim_config import SIM_HZ
+from src.sim.control import HeuristicController, HumanController
 from src.sim.core.actions import CarAction
-from src.sim.core.control import CarControl
 from src.sim.core.simulation import Simulation
-from src.sim.visualization.renderer import Renderer
 from src.sim.visualization.event_handling import handle_event
+from src.sim.visualization.renderer import Renderer
 
 
 def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
@@ -40,28 +39,16 @@ def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
 
     # Configure controllers based on control_car preference
     if control_car == "blue":
-        blue_control = CarControl(control_type="human", team="blue")
-        orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-            if enable_orange
-            else None
-        )
+        blue_control = HumanController()
+        orange_control = HeuristicController("orange", sim) if enable_orange else None
         print("Player control: BLUE car (WASD/Arrows/Space/Shift) | Opponent: ORANGE Heuristic Bot")
     elif control_car == "orange":
-        blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
-        orange_control = (
-            CarControl(control_type="human", team="orange")
-            if enable_orange
-            else None
-        )
+        blue_control = HeuristicController("blue", sim)
+        orange_control = HumanController() if enable_orange else None
         print("Player control: ORANGE car (WASD/Arrows/Space/Shift) | Opponent: BLUE Heuristic Bot")
     else:
-        blue_control = CarControl(control_type="heuristic_bot", team="blue", sim=sim)
-        orange_control = (
-            CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-            if enable_orange
-            else None
-        )
+        blue_control = HeuristicController("blue", sim)
+        orange_control = HeuristicController("orange", sim) if enable_orange else None
         print("Bot vs Bot match: BLUE Heuristic Bot vs ORANGE Heuristic Bot")
 
     renderer = Renderer(screen)
@@ -82,7 +69,6 @@ def play_interactive(enable_orange: bool = True, control_car: str = "blue"):
             blue_control.reset()
             if orange_control is not None:
                 orange_control.reset()
-        sim.get_state_norm(as_flat_array=True)
 
         # --- Render ---
         renderer.render(sim)
@@ -96,11 +82,7 @@ def play_headless(steps: int = 300, enable_orange: bool = True):
     """Run headless simulation loop for automated benchmark or verification."""
     print(f"Running headless simulation for {steps} steps (Orange car: {enable_orange})...")
     sim = Simulation(enable_orange=enable_orange)
-    orange_control = (
-        CarControl(control_type="heuristic_bot", team="orange", sim=sim)
-        if enable_orange
-        else None
-    )
+    orange_control = HeuristicController("orange", sim) if enable_orange else None
     action = CarAction(dir_x=1.0, dir_y=0.2, boost=True)
 
     for step in range(steps):

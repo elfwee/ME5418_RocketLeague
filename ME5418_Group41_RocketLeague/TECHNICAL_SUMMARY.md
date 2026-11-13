@@ -11,8 +11,8 @@ The project represents a generational evolution from **V1** (a top-down planar s
 |                                    ME5418 Sandbox                                     |
 |                                                                                       |
 |     +-------------------+       +---------------------+       +-----------------+     |
-|     |  User / Gamepad   | ----> |      CarAction      | <---- |   HeuristicBot  |     |
-|     |     (WASD/Pad)    |       | (dir_x,dir_y,j,bst) |       |     (HZISM)     |     |
+|     |  User Keyboard    | ----> |      CarAction      | <---- |   HeuristicBot  |     |
+|     |  (WASD / Arrows)  |       | (dir_x,dir_y,j,bst) |       |     (HZISM)     |     |
 |     +-------------------+       +---------------------+       +-----------------+     |
 |                                            |                                          |
 |                                            v                                          |
@@ -49,40 +49,26 @@ ME5418_Group41_RocketLeague/
 ├── README.md                     # High-level project overview & quickstart
 ├── environment.yml               # Conda environment configuration
 └── src/
-    ├── __main__.py               # Package CLI entry point (`python -m src`)
-    ├── README.md                 # System architecture & Gymnasium RL documentation
-    ├── main.py                   # Branching into play, gym demo, and neural net demos
-    ├── config/
-    │   ├── sim_config.py         # Global physical constants, geometry, and simulation tunings
-    │   ├── gym_config.py         # Global gym config
-    │   └── nn_config.py          # Global neural network config
-    ├── gym_env/
-    │   └── rocket_league_env.py  # Gymnasium Environment wrapper
-    ├── neural_nets/
-    │   └── dueling_ddqn_torch.py # DQN, Double DQN & Dueling Double DQN (PyTorch)
+    ├── __main__.py / cli.py      # `python -m src` command-line interface
+    ├── README.md                 # Full module tree and Gymnasium RL documentation
+    ├── config/                   # sim_config (physics, geometry), render_config, gym_config, nn_config
+    ├── gym_env/                  # RocketLeagueEnv, action codec, rewards, ActionRepeat wrapper
+    ├── neural_nets/              # DQN / ActorCritic networks, checkpoint loading, demos
+    ├── learning_agents/          # Dueling DDQN and PPO agents, shared training loop, plotting
+    ├── eval/                     # --eval --mix and --head_to_head matches
     └── sim/
         ├── game.py               # Interactive Pygame sandbox and headless benchmark runner
-        ├── core/
-        │   ├── README.md         # Subsystem technical summary: Physics & mechanics
-        │   ├── actions.py        # Unified 2D directional input & action dataclass
-        │   ├── control.py        # Switching controllers for game (interactive, heuristic, random)
-        │   ├── arena.py          # Bounded arena geometry, corner fillets, and elevated goals
-        │   ├── ball.py           # Rigid-body ball with aerodynamic drag and spin decay
-        │   ├── car.py            # Chassis dynamics, raycast suspension, AWD, attitude control
-        │   └── simulation.py     # Physics manager, contact callbacks, scoring, sub-stepping
-        ├── ai/
-        │   ├── README.md         # Subsystem technical summary: HZISM state machine
-        │   └── heuristic_bot.py  # Hierarchical Zone & Intercept State Machine (HZISM) AI
-        └── visualization/
-            ├── README.md         # Subsystem technical summary: Pygame renderer & HUD
-            └── renderer.py       # Pygame 2D renderer, vector visualizer, HUD, and effects
+        ├── core/                 # actions, arena, ball, car, simulation, observation, spawns
+        ├── control/              # Keyboard, heuristic bot, idle, random and policy controllers
+        ├── ai/                   # Hierarchical Zone & Intercept State Machine (HZISM) AI
+        └── visualization/        # Pygame renderer, car sprite, HUD, event handling
 ```
 
 ---
 
 ## 3. Core Physics & Mathematical Formulation
 
-The simulation is powered by [Pymunk](http://www.pymunk.org/) (Python bindings for Chipmunk2D) configured with 14 solver iterations, deterministic step sizing, and zero global damping (drag is modeled explicitly at the entity level to prevent spurious energy dissipation).
+The simulation is powered by [Pymunk](http://www.pymunk.org/) (Python bindings for Chipmunk2D) configured with 60 solver iterations, deterministic step sizing, and zero global damping (drag is modeled explicitly at the entity level to prevent spurious energy dissipation).
 
 ### 3.1. Temporal Discretization & Solver Timing
 * **Base Frame Rate ($f_{sim}$)**: $60\text{ Hz}$ ($\Delta t_{frame} = 16.67\text{ ms}$)
@@ -92,7 +78,7 @@ The simulation is powered by [Pymunk](http://www.pymunk.org/) (Python bindings f
 
 ---
 
-### 3.2. Vehicle Dynamics (`src/core/car.py`)
+### 3.2. Vehicle Dynamics (`src/sim/core/car.py`)
 
 The car is modeled not as a sliding bounding box, but as an active physical chassis supported by independent raycast suspension and ground traction.
 
@@ -157,7 +143,7 @@ To guarantee authentic vehicle-ball collision mechanics and prevent the car from
 
 ---
 
-### 3.3. Ball Dynamics (`src/core/ball.py`)
+### 3.3. Ball Dynamics (`src/sim/core/ball.py`)
 
 * Radius ($R_{ball}$): $0.9375\text{ m}$
 * Mass ($m_{ball}$): $22.5\text{ kg}$ (yielding a stable 6:1 car-to-ball mass ratio)
@@ -169,7 +155,7 @@ To guarantee authentic vehicle-ball collision mechanics and prevent the car from
 
 ---
 
-## 4. Arena Geometry & Elevated Goal Design (`src/core/arena.py`)
+## 4. Arena Geometry & Elevated Goal Design (`src/sim/core/arena.py`)
 
 The playing field measures $26.0\text{ m} \times 15.0\text{ m}$ bounded by rounded corner fillets with radius $R = 2.5\text{ m}$.
 
@@ -210,7 +196,7 @@ Y (meters)
 
 ---
 
-## 5. Hierarchical Zone & Intercept State Machine (HZISM) AI (`src/ai/heuristic_bot.py`)
+## 5. Hierarchical Zone & Intercept State Machine (HZISM) AI (`src/sim/ai/heuristic_bot.py`)
 
 The automated Orange opponent operates on an asynchronous finite state machine structured around match geometry, ball trajectory prediction, and zone partitioning:
 
@@ -248,7 +234,7 @@ The automated Orange opponent operates on an asynchronous finite state machine s
 
 ---
 
-## 6. Visualization & Telemetry Interface (`src/visualization/renderer.py`)
+## 6. Visualization & Telemetry Interface (`src/sim/visualization/renderer.py`)
 
 The Pygame rendering pipeline runs at 40 pixels per meter ($\text{PPM} = 40.0$), displaying a $1400 \times 720$ canvas.
 
@@ -293,15 +279,17 @@ The Pygame rendering pipeline runs at 40 pixels per meter ($\text{PPM} = 40.0$),
 
 ## 7. Control Scheme
 
-| Action | Keyboard Mapping | Gamepad (Xbox / DualShock / DirectInput) | Description |
-| :--- | :--- | :--- | :--- |
-| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys` | Left Analog Thumbstick | Analog / cardinal orientation command |
-| **Jump / Flip** | `Spacebar` | Button A (Button 0) | Jump 1 from ground; Jump 2 (Double jump / 360° flip) in air |
-| **Rocket Boost** | `Left/Right Shift`, `O`, `J` | Button B (Button 1) or Right Trigger (Button 5) | High-thrust directional aerial acceleration |
-| **Reset Field** | `R` | — | Resets car, ball, and kickoff positions |
-| **Toggle AI Bot** | `B` | — | Dynamically adds or removes Orange AI opponent |
-| **Toggle Boundary Raycasts** | `L` or Click HUD button | — | Shows/hides 8 egocentric 45° field raycasts |
-| **Exit** | `Escape` | — | Closes simulation window |
+Input is keyboard only (a connected gamepad is detected and named at startup, but its buttons are not read).
+
+| Action | Keyboard Mapping | Description |
+| :--- | :--- | :--- |
+| **2D Direction Vector** | `W`/`S`/`A`/`D` or `Arrow Keys` | Cardinal / diagonal orientation command |
+| **Jump / Flip** | `Spacebar` | Jump 1 from ground; Jump 2 (Double jump / 360° flip) in air |
+| **Rocket Boost** | `Left/Right Shift`, `O`, `J` | High-thrust directional aerial acceleration |
+| **Reset Field** | `R` | Resets car, ball, and kickoff positions |
+| **Toggle AI Bot** | `B` | Dynamically adds or removes Orange AI opponent |
+| **Toggle Boundary Raycasts** | `L` or Click HUD button | Shows/hides 8 egocentric 45° field raycasts |
+| **Exit** | `Escape` | Closes simulation window |
 
 ---
 
@@ -320,7 +308,7 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
         "angle": 0.34,                     # Rotation in radians
         "angular_velocity": 0.0
     },
-    "car": {
+    "blue_car": {
         "position": (9.2, 1.84),
         "nose_position": (10.2, 1.81),
         "velocity": (12.4, 0.0),
@@ -352,19 +340,22 @@ Calling `sim.get_state()` exposes complete numerical state representations suita
     "relations": {
         "blue_car_to_ball": {"magnitude": 4.12, "direction": (0.92, 0.39)},
         "orange_car_to_ball": {"magnitude": 5.84, "direction": (-0.85, 0.52)},
-        "ball_to_opponent_goal": {"magnitude": 19.38, "direction": (1.0, 0.0)},
-        "ball_to_own_goal": {"magnitude": 10.38, "direction": (-1.0, 0.0)}
+        "ball_to_orange_goal": {"magnitude": 19.38, "direction": (1.0, 0.0)},
+        "ball_to_blue_goal": {"magnitude": 10.38, "direction": (-1.0, 0.0)}
     },
     "score": {"blue": 1, "orange": 0},
     "last_goal": "blue",
+    "last_touch": "blue",                  # Team that touched the ball last this kickoff round
     "orange_enabled": True,
     "car_orange": { ... }                  # Full symmetrical telemetry for opponent
 }
 ```
 
-### Normalized State API (`sim.get_state_norm()`)
+### Observation (`src/sim/core/observation.py`)
 
-Calling `sim.get_state_norm()` provides fully scaled observations optimized for Reinforcement Learning (Gymnasium wrappers) and neural network policies:
+`build_observation(sim, ego)` returns the 52 floats the agents see (`env.get_observation(team)` in the
+Gymnasium env; `sim.get_state_norm()` / `sim.get_state_norm_mirror()` are thin delegates). Every feature is
+normalised:
 
 | Observation | Normalization Method | Bounded Range |
 | :--- | :--- | :--- |
@@ -382,76 +373,38 @@ Calling `sim.get_state_norm()` provides fully scaled observations optimized for 
 | **Boost recovery (`is_boost_recovery`)** | $1.0$ if grounded and not boosting else $0.0$ | $\{0.0, 1.0\}$ |
 | **Opponent present (`opponent_present`)** | $1.0$ if opponent exists else $0.0$ | $\{0.0, 1.0\}$ |
 
-#### Invariant Flat Observation Vector (`as_flat_array=True`):
-Calling `sim.get_state_norm(as_flat_array=True)` returns a fixed-length 1D list of **52 floats** suitable for standard `gym.spaces.Box(low=-1.0, high=1.0, shape=(52,), dtype=np.float32)`:
-1. **Ego Car (20 floats)**: `[pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts, has_jump2, is_flipping, is_boost_recovery, 8x raycast_distances]`
+The fixed layout (named index constants in `observation.py`):
+1. **Ego Car (21 floats)**: `[pos_x, pos_y, vel_x, vel_y, sin, cos, ang_vel, boost, wheel_contacts, has_jump2, is_flipping, is_turtling, is_boost_recovery, 8x raycast_distances]`
 2. **Ball (5 floats)**: `[pos_x, pos_y, vel_x, vel_y, ang_vel]`
-3. **Ego Relations (9 floats)**:
-   - `blue_car_to_ball`: `[mag, dir_x, dir_y]` (3)
-   - `ball_to_opponent_goal`: `[mag, dir_x, dir_y]` (3)
-   - `ball_to_own_goal`: `[mag, dir_x, dir_y]` (3)
-4. **Opponent Present Flag (1 float)**: `[1.0 if opponent exists else 0.0]`
-5. **Opponent-Dependent Features (23 floats)**:
-   - If opponent present: `car_orange` features (20 floats, identical format to ego car) + `orange_car_to_ball` relation (`[mag, dir_x, dir_y]`, 3 floats).
-   - If no opponent: strictly zero-filled with 23 zeros (`[0.0] * 23`).
+3. **Ego Relations (9 floats)**: ego car to ball, ball to opponent goal, ball to own goal, each `[distance, dir_x, dir_y]`
+4. **Opponent Present Flag (1 float)**: `1.0` if the opponent exists else `0.0`
+5. **Opponent (16 floats)**: the opponent's 13 car features (as the ego car, with `is_boosting` in place of `is_boost_recovery`, no raycasts) + opponent to ball `[distance, dir_x, dir_y]`; zero-filled when there is no opponent.
+
+Orange's observation is built with Orange as the ego car and then mirrored through the arena's vertical centre
+line (`mirror_observation`: x-like features change sign, rays take the order `[0, 7, 6, 5, 4, 3, 2, 1]`), so a
+policy trained on Blue sees the same kind of situation when it drives Orange.
 
 ```python
-obs_vector = sim.get_state_norm(as_flat_array=True)  # Strictly fixed 52 floats in all modes
+from src.sim.core.observation import build_observation
+obs_blue = build_observation(sim, "blue")      # 52 floats
+obs_orange = build_observation(sim, "orange")  # 52 floats, mirrored
 ```
 
 ---
 
-## 9. Verification & Automated Test Suite
-
-The simulation is validated through a 61-test automated suite executed via Python's `unittest` framework:
-
-```bash
-python3 -m unittest discover tests
-```
-
-### Test Categorization:
-* **`tests/test_vector_physics.py`**:
-  * Analytical invariance checks: Drive acceleration matches $24.0\text{ m/s}^2$; top speed matches $14.5\text{ m/s}$.
-  * Jump 1 delivery delivers exact vertical impulse without horizontal bias.
-  * Neutral Jump 2 reaches exact $2.0\times$ single jump height ratio.
-  * Directional Jump 2 achieves exact $-360^\circ$ (front flip) and $+360^\circ$ (back flip) angular rotations.
-  * Momentum conservation on car-ball collision ($v_{ball} \le \frac{(1+e)m_{car}}{m_{car} + m_{ball}} v_{car}$).
-  * Determinism check: Identical chaotic input sequences produce bit-exact identical trajectories.
-  * Sub-step invariance: Trajectory distance variation is $< 0.25\text{ m}$ across 2, 4, and 8 sub-steps.
-* **`tests/test_physics_headless.py`**:
-  * Heavy gravity ($28\text{ m/s}^2$) freefall and elastic floor rebound.
-  * Ground wheelie pitch stability: Rear wheel holding at $70^\circ-85^\circ$ without takeoff or glitching.
-  * Turtle auto-recovery inverted hop-and-flip preserving facing orientation.
-  * Vector addition of horizontal boost and downward gravity.
-* **`tests/test_car_ball_collision.py`**:
-  * Elevated goal lower wall vertical bounce.
-  * Pinch stability: Wedging ball against arena perimeter maintains finite numbers with zero NaNs.
-  * 100% goal volume entry requirement.
-  * Alternating defensive ($8.5\text{ m}$) and offensive ($13.5\text{ m}$) kickoff spawn points.
-* **`tests/test_heuristic_bot.py`**:
-  * Real-time dynamic toggle of Orange opponent.
-  * Kickoff charge behavior and anti-own-goal defensive rotations.
-  * Car-to-car elastic collisions.
-  * Non-jerking, oscillation-free attack state maintenance.
-
----
-
-## 10. Quickstart Commands
+## 9. Quickstart Commands
 
 ### Interactive Simulation
 ```bash
 # Launch interactive mode with Blue player vs. Orange Heuristic Bot
-python3 src/main.py
+python -m src --play
 
 # Launch single-player practice sandbox (Orange car disabled)
-python3 src/main.py --no-orange
+python -m src --play --no-orange
 ```
 
-### Headless Benchmark / Continuous Integration
+### Headless Benchmark
 ```bash
 # Run 300 headless simulation steps with telemetry logging
-python3 src/main.py --headless
-
-# Execute the complete physics validation test suite
-python3 -m unittest discover tests -v
+python -m src --play --headless
 ```
