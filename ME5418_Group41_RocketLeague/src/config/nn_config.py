@@ -21,7 +21,7 @@ class AgentConfig:
     action_repeat: int = 4  # Simulation steps per agent decision
 
     # Environment & Checkpointing
-    bot_type: str = "heuristic_bot"  # "none" or "heuristic_bot"
+    bot_type: str = "none"  # "none" or "heuristic_bot"
     eval_episodes: int = 5
     runs_dir: str = "runs"
     checkpoint_interval: int = 500  # Episodes between periodic checkpoints of the current model (0 disables)
