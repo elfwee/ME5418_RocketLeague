@@ -36,7 +36,7 @@ SIM_HZ = 60                # Frame rate
 PHYSICS_SUBSTEPS = 4       # Physics solver sub-steps per frame (240 Hz effective)
 GRAVITY = (0.0, -28.0)     # Heavier downward gravity in m/s^2 for responsive falling
 GRAVITY_MAG = abs(GRAVITY[1])
-SOLVER_ITERATIONS = 14     # Pymunk constraint solver iterations (contact accuracy)
+SOLVER_ITERATIONS = 60     # Pymunk constraint solver iterations (ensures multi-contact mirror convergence)
 
 # --- Car Chassis (25% smaller, scale factor 0.75) ---
 CAR_SCALE = 0.75           # Global scale factor for car & visual accessories

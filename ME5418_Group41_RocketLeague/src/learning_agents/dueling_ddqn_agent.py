@@ -606,6 +606,207 @@ def evaluate_dueling_ddqn(
     )
 
 
+def evaluate_mixed_policies(
+    blue_policy: str = "dueling_ddqn",
+    orange_policy: str = "ppo",
+    blue_model_path: str | Path | None = None,
+    orange_model_path: str | Path | None = None,
+    num_episodes: int | None = DQNConfig.eval_episodes,
+    render: bool = False,
+    max_episode_steps: int | None = None,
+    save_gif: bool = False,
+    gif_path: str | Path | None = None,
+) -> dict[str, float]:
+    """Evaluate two potentially different policies head-to-head (Blue policy vs. mirrored Orange policy).
+
+    Supports any combination of ('dueling_ddqn', 'double_dqn', 'dqn', 'ppo') for Blue and Orange.
+    """
+    from src.config.nn_config import PPOConfig
+    from src.neural_nets.ppo_torch import ActorCritic
+
+    def _norm_policy_name(name: str) -> str:
+        n = name.strip().lstrip("-").lower()
+        if n in ("ddqn", "dueling_ddqn"):
+            return "dueling_ddqn"
+        if n in ("double_dqn", "dqn", "ppo"):
+            return n
+        raise ValueError(f"Unsupported policy type '{name}'. Choose from: dueling_ddqn, double_dqn, dqn, ppo.")
+
+    blue_pol = _norm_policy_name(blue_policy)
+    orange_pol = _norm_policy_name(orange_policy)
+
+    make_kwargs = {}
+    if max_episode_steps is not None:
+        make_kwargs["max_episode_steps"] = max_episode_steps
+
+    if render:
+        render_mode = "human"
+    elif save_gif:
+        render_mode = "rgb_array"
+    else:
+        render_mode = None
+
+    env = gym.make(
+        GymConfig.gym_id,
+        render_mode=render_mode,
+        bot_type=DQNConfig.bot_type,
+        discrete_action=True,
+        control_car="both",
+        **make_kwargs,
+    )
+    num_states = env.observation_space.shape[0]
+
+    def _build_policy_selector(team_label: str, pol_type: str, ckpt_override: str | Path | None):
+        if pol_type == "ppo":
+            default_ckpt = os.path.join(ROOT_DIR, PPOConfig.runs_dir, "model_ppo.pt")
+            ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
+            state_dict = None
+            factored = getattr(PPOConfig, "factored_action", True)
+            if os.path.exists(ckpt_file):
+                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+                if "actor_dir.weight" in state_dict:
+                    factored = True
+                elif "actor_stream.2.weight" in state_dict:
+                    factored = False
+            action_dim = list(PPOConfig.action_dims) if factored else 36
+            net = ActorCritic(num_states, action_dim, PPOConfig.hidden_size).to(device)
+            if state_dict is not None:
+                net.load_state_dict(state_dict)
+                print(f"[Mix Eval ({team_label}: PPO)] Loaded trained weights from: {ckpt_file}")
+            else:
+                print(f"[Mix Eval ({team_label}: PPO)] Warning: Checkpoint '{ckpt_file}' not found; using initial weights.")
+            net.eval()
+
+            def _select(obs_t: torch.Tensor):
+                with torch.no_grad():
+                    logits, _ = net(obs_t.unsqueeze(0))
+                    if net.is_factored:
+                        return [int(l.squeeze(0).argmax().item()) for l in logits]
+                    return int(logits.squeeze(0).argmax().item())
+
+            return _select
+        else:
+            default_ckpt = os.path.join(ROOT_DIR, DQNConfig.runs_dir, f"model_{pol_type}.pt")
+            ckpt_file = str(ckpt_override) if ckpt_override is not None else default_ckpt
+            enable_dueling = pol_type == "dueling_ddqn"
+            state_dict = None
+            if os.path.exists(ckpt_file):
+                state_dict = torch.load(ckpt_file, map_location=device, weights_only=True)
+                enable_dueling = "fc_value.weight" in state_dict
+            net = DQN(num_states, 36, DQNConfig.hidden_size, enable_dueling_dqn=enable_dueling).to(device)
+            if state_dict is not None:
+                net.load_state_dict(state_dict)
+                print(f"[Mix Eval ({team_label}: {pol_type})] Loaded trained weights from: {ckpt_file}")
+            else:
+                print(
+                    f"[Mix Eval ({team_label}: {pol_type})] Warning: Checkpoint '{ckpt_file}' not found; using initial weights."
+                )
+            net.eval()
+
+            def _select(obs_t: torch.Tensor):
+                with torch.no_grad():
+                    return int(net(obs_t.unsqueeze(0)).squeeze(0).argmax().item())
+
+            return _select
+
+    def _clear_jump(act):
+        if isinstance(act, (list, tuple, np.ndarray)):
+            return [int(act[0]), 0, int(act[2])]
+        jump_bit = (int(act) % 4) // 2
+        return (int(act) - 2) if jump_bit == 1 else int(act)
+
+    select_blue = _build_policy_selector("Blue", blue_pol, blue_model_path)
+    select_orange = _build_policy_selector("Orange", orange_pol, orange_model_path)
+
+    episodes = None if (render and num_episodes is None and not save_gif) else num_episodes
+    episode_iter = range(episodes) if episodes is not None else itertools.count()
+    action_repeat = DQNConfig.action_repeat
+
+    rewards_per_episode = []
+    goals_per_episode = []
+    gif_frames = []
+    gif_saved = False
+    helper_agent = DuelingDDQNAgent()
+
+    try:
+        for episode in episode_iter:
+            state, reset_info = env.reset()
+            state_b = torch.tensor(state, dtype=torch.float32, device=device)
+            state_o = torch.tensor(reset_info["obs_orange"], dtype=torch.float32, device=device)
+
+            if not env.unwrapped.isopen:
+                break
+
+            terminated = False
+            truncated = False
+            episode_reward = 0.0
+            scored_goal = 0
+
+            while not (terminated or truncated):
+                act_b = select_blue(state_b)
+                act_o = select_orange(state_o)
+                held_b = _clear_jump(act_b)
+                held_o = _clear_jump(act_o)
+
+                reward_sum = 0.0
+                for sub in range(max(1, action_repeat)):
+                    ab = act_b if sub == 0 else held_b
+                    ao = act_o if sub == 0 else held_o
+                    next_state, r, terminated, truncated, info = env.step((ab, ao))
+                    reward_sum += float(r)
+                    if terminated or truncated or not env.unwrapped.isopen:
+                        break
+
+                if save_gif and not gif_saved and len(gif_frames) < 1200:
+                    frame = env.unwrapped.get_frame()
+                    if frame is not None:
+                        gif_frames.append(frame)
+
+                episode_reward += reward_sum
+                if info.get("is_success", False) or (terminated and reward_sum > 0.0):
+                    scored_goal = 1
+
+                state_b = torch.tensor(next_state, dtype=torch.float32, device=device)
+                state_o = torch.tensor(info["obs_orange"], dtype=torch.float32, device=device)
+
+                if not env.unwrapped.isopen:
+                    break
+
+            rewards_per_episode.append(episode_reward)
+            goals_per_episode.append(scored_goal)
+
+            if save_gif and not gif_saved and len(gif_frames) > 0:
+                out_gif = (
+                    gif_path
+                    if gif_path is not None
+                    else os.path.join(RUNS_DIR, f"eval_mix_{blue_pol}_vs_{orange_pol}.gif")
+                )
+                helper_agent._save_gif(gif_frames, out_gif)
+                gif_saved = True
+
+            score_blue = int(env.unwrapped.sim.score_blue)
+            score_orange = int(env.unwrapped.sim.score_orange)
+            print(
+                f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
+                f"Score(Blue-Orange) = {score_blue}-{score_orange} | "
+                f"Goal = {bool(scored_goal)} | Terminated = {terminated} | Truncated = {truncated}"
+            )
+    finally:
+        final_score_blue = int(env.unwrapped.sim.score_blue)
+        final_score_orange = int(env.unwrapped.sim.score_orange)
+        env.close()
+
+    return {
+        "blue_policy": blue_pol,
+        "orange_policy": orange_pol,
+        "episodes": len(rewards_per_episode),
+        "mean_reward": float(np.mean(rewards_per_episode)) if rewards_per_episode else 0.0,
+        "goal_rate": float(np.mean(goals_per_episode)) * 100.0 if goals_per_episode else 0.0,
+        "score_blue": final_score_blue,
+        "score_orange": final_score_orange,
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dueling Double DQN Agent for Rocket League")
     parser.add_argument(

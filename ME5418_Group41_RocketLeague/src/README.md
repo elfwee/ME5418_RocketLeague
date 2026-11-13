@@ -90,7 +90,7 @@ obs, info = env.reset()
 ### B. Observation Space (52-Dimensional Flat Vector)
 
 - **Space**: `gym.spaces.Box(low=-1.0, high=1.0, shape=(52,), dtype=np.float32)`
-- Returned via `sim.get_state_norm(as_flat_array=True)`:
+- Returned via `sim.get_state_norm(as_flat_array=True)` for the Blue ego perspective, or `sim.get_state_norm_mirror(as_flat_array=True)` for the horizontally mirrored Orange ego perspective (reusing cached per-frame raycasts with cyclic permutation `[0, 7, 6, 5, 4, 3, 2, 1]` and zero extra Pymunk queries):
 
 | Index Range | Category                       | Dimension | Normalized Features                                                                                                                                    |
 | :---------- | :----------------------------- | :-------: | :----------------------------------------------------------------------------------------------------------------------------------------------------- |

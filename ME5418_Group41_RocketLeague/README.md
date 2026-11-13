@@ -80,13 +80,21 @@ python -m src --train --training_architecture --model_path path_to_model.pt
 #### Evaluate a Trained Learning Agent
 
 ```bash
-# Evaluate Dueling Double DQN (headless or with live Pygame rendering)
-python -m src --eval --dueling_ddqn
-python -m src --eval --dueling_ddqn --render
+# 1. Blue = Policy, Orange = Heuristic Bot (default --blue mode)
+python -m src --eval --dueling_ddqn [--render] [--model_path path_to_model.pt]
+python -m src --eval --ppo          [--render] [--model_path path_to_model.pt]
 
-# Evaluate PPO (headless or with live Pygame rendering)
-python -m src --eval --ppo
-python -m src --eval --ppo --render
+# 2. Orange = Mirrored Policy, Blue = Human User (WASD/Arrows + Space + Shift)
+python -m src --eval --dueling_ddqn --orange --render [--model_path path_to_model.pt]
+python -m src --eval --ppo          --orange --render [--model_path path_to_model.pt]
+
+# 3. Same-Policy Bot-vs-Bot (both Blue and Orange controlled by the same trained policy)
+python -m src --eval --dueling_ddqn --bot-vs-bot [--render] [--model_path path_to_model.pt]
+python -m src --eval --ppo          --bot-vs-bot [--render] [--model_path path_to_model.pt]
+
+# 4. Mixed-Policy Bot-vs-Bot (e.g., Blue = Dueling DDQN vs Orange = PPO, or vice versa)
+python -m src --eval --mix --dueling_ddqn --ppo [--render] [--blue_model path_b.pt] [--orange_model path_o.pt]
+python -m src --eval --mix --ppo --dueling_ddqn [--render] [--blue_model path_b.pt] [--orange_model path_o.pt]
 ```
 
 #### Plot Learning Curves & Dashboards

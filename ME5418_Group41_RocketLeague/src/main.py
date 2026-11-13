@@ -12,7 +12,11 @@ from src.sim.game import play_headless, play_interactive
 from src.gym_env.rocket_league_env import demo_gym
 from src.neural_nets.dueling_ddqn_torch import run_dqn_network
 from src.neural_nets.ppo_torch import run_ppo_network
-from src.learning_agents.dueling_ddqn_agent import evaluate_dueling_ddqn, train_dueling_ddqn
+from src.learning_agents.dueling_ddqn_agent import (
+    evaluate_dueling_ddqn,
+    evaluate_mixed_policies,
+    train_dueling_ddqn,
+)
 from src.learning_agents.ppo_agent import evaluate_ppo, train_ppo
 from src.learning_agents.head_to_head import play_head_to_head
 
@@ -135,7 +139,94 @@ def main():
             # Default or explicit `--blue`
             control_car = "blue"
 
-        if "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
+        if "--mix" in sys.argv:
+            # Parse explicit or positional policy flags for Blue and Orange
+            policy_flags = {
+                "--dueling_ddqn": "dueling_ddqn",
+                "--ddqn": "dueling_ddqn",
+                "--double_dqn": "double_dqn",
+                "--dqn": "dqn",
+                "--ppo": "ppo",
+                "-ppo": "ppo",
+            }
+            ordered_policies = [policy_flags[arg] for arg in sys.argv if arg in policy_flags]
+
+            if len(ordered_policies) >= 2:
+                blue_policy, orange_policy = ordered_policies[0], ordered_policies[1]
+            elif len(ordered_policies) == 1:
+                chosen = ordered_policies[0]
+                other = "ppo" if chosen != "ppo" else "dueling_ddqn"
+                if "--orange" in sys.argv and "--blue" not in sys.argv:
+                    blue_policy, orange_policy = other, chosen
+                else:
+                    blue_policy, orange_policy = chosen, other
+            else:
+                if "--orange" in sys.argv and "--blue" not in sys.argv:
+                    blue_policy, orange_policy = "ppo", "dueling_ddqn"
+                else:
+                    blue_policy, orange_policy = "dueling_ddqn", "ppo"
+
+            if "--blue_policy" in sys.argv:
+                idx = sys.argv.index("--blue_policy")
+                if idx + 1 < len(sys.argv):
+                    blue_policy = sys.argv[idx + 1]
+            if "--orange_policy" in sys.argv:
+                idx = sys.argv.index("--orange_policy")
+                if idx + 1 < len(sys.argv):
+                    orange_policy = sys.argv[idx + 1]
+
+            blue_model_path = None
+            orange_model_path = None
+            for flag in ("--blue_model", "--model_path_blue"):
+                if flag in sys.argv:
+                    idx = sys.argv.index(flag)
+                    if idx + 1 < len(sys.argv):
+                        blue_model_path = sys.argv[idx + 1]
+            for flag in ("--orange_model", "--model_path_orange"):
+                if flag in sys.argv:
+                    idx = sys.argv.index(flag)
+                    if idx + 1 < len(sys.argv):
+                        orange_model_path = sys.argv[idx + 1]
+
+            # If `--model_path` was passed without `--blue_model`/`--orange_model`, assign intelligently
+            model_paths = [
+                sys.argv[i + 1]
+                for i, arg in enumerate(sys.argv[:-1])
+                if arg == "--model_path"
+            ]
+            if len(model_paths) >= 2:
+                if blue_model_path is None:
+                    blue_model_path = model_paths[0]
+                if orange_model_path is None:
+                    orange_model_path = model_paths[1]
+            elif len(model_paths) == 1 and blue_model_path is None and orange_model_path is None:
+                single_path = model_paths[0]
+                if os.path.exists(single_path):
+                    import torch
+
+                    sd = torch.load(single_path, map_location="cpu", weights_only=True)
+                    is_ppo_ckpt = any(k.startswith("actor_") or k.startswith("critic_") for k in sd.keys())
+                    if is_ppo_ckpt and orange_policy == "ppo" and blue_policy != "ppo":
+                        orange_model_path = single_path
+                    elif (not is_ppo_ckpt) and orange_policy != "ppo" and blue_policy == "ppo":
+                        orange_model_path = single_path
+                    else:
+                        blue_model_path = single_path
+                else:
+                    blue_model_path = single_path
+
+            metrics = evaluate_mixed_policies(
+                blue_policy=blue_policy,
+                orange_policy=orange_policy,
+                blue_model_path=blue_model_path,
+                orange_model_path=orange_model_path,
+                num_episodes=num_episodes,
+                render=render,
+                save_gif=save_gif,
+                gif_path=gif_path,
+            )
+            print(f"[Mixed Policy Evaluation ({blue_policy} vs {orange_policy})] {metrics}")
+        elif "--dueling_ddqn" in sys.argv or "--ddqn" in sys.argv:
             metrics = evaluate_dueling_ddqn(
                 num_episodes=num_episodes,
                 render=render,
@@ -191,7 +282,8 @@ def main():
                 "  python -m src --eval --dueling_ddqn [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Dueling Double DQN [alias: --ddqn]\n"
                 "  python -m src --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Double DQN\n"
                 "  python -m src --eval --dqn          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate Vanilla DQN\n"
-                "  python -m src --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate PPO [alias: -ppo]"
+                "  python -m src --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] # Evaluate PPO [alias: -ppo]\n"
+                "  python -m src --eval --mix [--dueling_ddqn --ppo | --ppo --dueling_ddqn] [--render] # Mixed policy vs policy"
             )
     elif "--plot" in sys.argv:
         from src.learning_agents.plot_learning_curves import main as plot_main
@@ -208,6 +300,7 @@ def main():
             "  python -m src --demo --ppo                          # Test PPO Actor-Critic network\n"
             "  python -m src --train --dueling_ddqn|--ppo          # Train Dueling Double DQN or PPO agent\n"
             "  python -m src --eval --dueling_ddqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--gif] # Evaluate agent\n"
+            "  python -m src --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...]     # Mixed policy match\n"
             "  python -m src --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard"
         )
 

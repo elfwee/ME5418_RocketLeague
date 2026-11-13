@@ -98,13 +98,13 @@ class RocketLeagueEnv(gym.Env):
         return np.asarray(self.sim.get_state_norm(as_flat_array=True), dtype=np.float32)
 
     def _decode_action(self, action, mirror_x: bool = False) -> CarAction:
-        if self.discrete_action:
+        if isinstance(action, (list, tuple, np.ndarray)):
+            direction, jump, boost = int(action[0]), int(action[1]), int(action[2])
+        else:
             act_int = int(action)
             direction = act_int // 4
             jump = (act_int % 4) // 2
             boost = act_int % 2
-        else:
-            direction, jump, boost = int(action[0]), int(action[1]), int(action[2])
         dir_x, dir_y = GymConfig.directions[direction]
         if mirror_x:
             dir_x = -dir_x
