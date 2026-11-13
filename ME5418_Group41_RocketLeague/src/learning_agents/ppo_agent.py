@@ -1,134 +1,70 @@
 """
-Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Evaluation Pipeline.
+Proximal Policy Optimization (PPO) Learning Agent: the PPO learning rule plus its `train` / `evaluate` entry points.
 
 Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
 comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
-- Identical `action_repeat = 4` with edge-triggered jump release (`_step_with_action_repeat`).
+- Identical `action_repeat = 4` with edge-triggered jump release (`ActionRepeat` env wrapper).
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
   and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
-- Identical logging, checkpointing and 100-episode rolling metrics; each training run writes its
-  outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
-
-This file holds the PPO learning rule and its training loop. Environment creation, action repeat,
-the evaluation loop, logging and plotting are shared with DQN in `agent_common.py`.
+- Identical episode loop, logging, checkpointing and 100-episode rolling metrics (`trainer.py`); each
+  training run writes its outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
 """
 
-import itertools
-import os
+from dataclasses import replace
 from pathlib import Path
-import sys
 
-import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-# Ensure repository root is on sys.path when invoked directly
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOConfig
-from src.learning_agents.agent_common import (
-    DashboardPanel,
-    TrainingLogger,
-    build_arg_parser,
-    control_car_from_args,
-    device,
-    infer_ppo_arch,
-    latest_model_path,
-    load_state_dict_if_exists,
-    make_env,
-    make_run_dir,
-    normalize_control_car,
-    obs_to_tensor,
-    resolve_eval_episodes,
-    rolling_mean,
-    run_eval_episodes,
-    save_gif,
-    save_periodic_checkpoint,
-    save_training_dashboard,
-    scored_goal,
-    step_with_action_repeat,
-    summarize_episodes,
-)
+from src.learning_agents.env_factory import device, make_env, normalize_control_car
+from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
+from src.learning_agents.rollout_buffer import RolloutBuffer
+from src.learning_agents.run_dirs import RunPaths, latest_model_path
+from src.learning_agents.trainer import run_training
+from src.neural_nets.checkpoint import infer_spec, load_state_dict
+from src.neural_nets.policy import greedy_action
 from src.neural_nets.ppo_torch import ActorCritic
 
 
-class RolloutBuffer:
-    """On-policy storage for one rollout of decision steps.
+def compute_gae(
+    rewards: torch.Tensor,
+    values: torch.Tensor,
+    next_values: torch.Tensor,
+    dones: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Generalized Advantage Estimation (GAE) with truncation-aware bootstrapping.
 
-    `next_value` is the bootstrap target V(s_{t+1}) for each step. For a step that does not end an
-    episode it is left as None and filled in by `backfill_next_value` once the next step's forward
-    pass has produced V(s_{t+1}), which saves one critic evaluation per step.
+        delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)
+        A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
+
+    Args:
+        rewards: Shape (T,), step rewards.
+        values: Shape (T,), critic estimates V(s_t).
+        next_values: Shape (T,), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
+                     and `V(s_timeout)` where `truncated=True`).
+        dones: Shape (T,), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
+
+    Returns:
+        (advantages, returns), each of shape (T,).
     """
-
-    def __init__(self):
-        self.states: list[torch.Tensor] = []
-        self.actions: list[torch.Tensor] = []
-        self.log_probs: list[torch.Tensor] = []
-        self.values: list[torch.Tensor] = []
-        self.next_values: list[torch.Tensor | None] = []
-        self.rewards: list[torch.Tensor] = []
-        self.dones: list[torch.Tensor] = []
-
-    def __len__(self) -> int:
-        return len(self.states)
-
-    def add(
-        self,
-        state: torch.Tensor,
-        action: torch.Tensor,
-        log_prob: torch.Tensor,
-        value: torch.Tensor,
-        next_value: torch.Tensor | None,
-        reward: float,
-        done: bool,
-    ):
-        self.states.append(state)
-        self.actions.append(action)
-        self.log_probs.append(log_prob)
-        self.values.append(value)
-        self.next_values.append(next_value)
-        self.rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
-        self.dones.append(torch.tensor(float(done), dtype=torch.float32, device=device))
-
-    def needs_next_value(self) -> bool:
-        """True when the most recent step is still waiting for its bootstrap value."""
-        return len(self.next_values) > 0 and self.next_values[-1] is None
-
-    def backfill_next_value(self, value: torch.Tensor):
-        """Give the most recent step its V(s_{t+1}), if it is still waiting for one."""
-        if self.needs_next_value():
-            self.next_values[-1] = value
-
-    def as_tensors(self) -> tuple[torch.Tensor, ...]:
-        """(states, actions, log_probs, values, next_values, rewards, dones), each stacked over time."""
-        return (
-            torch.stack(self.states),
-            torch.stack(self.actions),
-            torch.stack(self.log_probs),
-            torch.stack(self.values),
-            torch.stack(self.next_values),
-            torch.stack(self.rewards),
-            torch.stack(self.dones),
-        )
-
-    def clear(self):
-        for buf in (
-            self.states,
-            self.actions,
-            self.log_probs,
-            self.values,
-            self.next_values,
-            self.rewards,
-            self.dones,
-        ):
-            buf.clear()
+    T = rewards.shape[0]
+    advantages = torch.zeros_like(rewards)
+    last_gae = 0.0
+    for t in reversed(range(T)):
+        not_done = 1.0 - dones[t]
+        delta = rewards[t] + gamma * next_values[t] - values[t]
+        last_gae = delta + gamma * gae_lambda * not_done * last_gae
+        advantages[t] = last_gae
+    returns = advantages + values
+    return advantages, returns
 
 
 class PPOAgent:
@@ -138,7 +74,7 @@ class PPOAgent:
         1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
            Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
            Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
-        2. Action Repeat with Edge-Triggered Jump Release (`_step_with_action_repeat`):
+        2. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         3. Truncation-Aware Generalized Advantage Estimation (`_compute_gae`):
@@ -149,41 +85,28 @@ class PPOAgent:
            of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value MSE loss,
            entropy bonus, and global gradient norm clipping.
 
-    One training decision step (`_train`):
-        `_sample_action` -> `_step_with_action_repeat` -> `_bootstrap_value` -> `RolloutBuffer.add`
-        -> `_update_from_rollout` (every `rollout_steps` steps: `_compute_gae` then `optimize`).
+    One training decision step (driven by `trainer.run_training`):
+        `act` (`_sample_action`) -> `env.step` (`ActionRepeat`) -> `observe` (`_bootstrap_value`
+        -> `RolloutBuffer.add` -> `_update_from_rollout` every `rollout_steps` steps: `_compute_gae`
+        then `optimize`).
     """
 
-    def __init__(self, hyperparameter_set: str = PPOConfig.hyperparameter_set):
-        self.hyperparameter_set = hyperparameter_set
-        self.env_id = GymConfig.gym_id
-        self.bot_type = PPOConfig.bot_type
-        self.fcl_nodes = PPOConfig.hidden_size
-        self.learning_rate = PPOConfig.learning_rate
-        self.discount_factor_g = PPOConfig.discount_factor
-        self.gae_lambda = PPOConfig.gae_lambda
-        self.clip_coef = PPOConfig.clip_coef
-        self.value_loss_coef = PPOConfig.value_loss_coef
-        self.entropy_coef = PPOConfig.entropy_coef
-        self.max_grad_norm = PPOConfig.max_grad_norm
-        self.target_kl = getattr(PPOConfig, "target_kl", 0.02)
+    metric_columns = ("entropy", "value_loss")
 
-        self.action_repeat = PPOConfig.action_repeat
-        self.rollout_steps = PPOConfig.rollout_steps
-        self.update_epochs = PPOConfig.update_epochs
-        self.mini_batch_size = PPOConfig.minibatch_size
-
-        self.checkpoint_interval = PPOConfig.checkpoint_interval
-
+    def __init__(self, config: PPOConfig | None = None):
+        self.cfg = config or PPOConfig()
         self.optimizer = None
 
-    def _set_run_dir(self, run_dir: str | Path):
-        """Point every training output (log, checkpoint, dashboard, metrics CSV) at `run_dir`."""
-        self.LOG_FILE = os.path.join(run_dir, f"run_{self.hyperparameter_set}.log")
-        self.MODEL_FILE = os.path.join(run_dir, f"model_{self.hyperparameter_set}.pt")
-        self.GRAPH_FILE = os.path.join(run_dir, f"graph_{self.hyperparameter_set}.png")
-        self.METRICS_FILE = os.path.join(run_dir, f"metrics_{self.hyperparameter_set}.csv")
-        self.CHECKPOINT_DIR = os.path.join(run_dir, "checkpoints")
+        # Training state, set up by `train`
+        self.model: ActorCritic | None = None
+        self.buffer = RolloutBuffer()
+        self.current_entropy = 0.0
+        self.current_v_loss = 0.0
+        self._pending: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None  # (action, log pi, V(s))
+
+    @property
+    def dashboard_title(self) -> str:
+        return f"PPO Training Dashboard ({self.cfg.hyperparameter_set})"
 
     # ----------------------------------------------------------------------------------------
     # Learning rule
@@ -196,25 +119,8 @@ class PPOAgent:
         next_values: torch.Tensor,
         dones: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute Generalized Advantage Estimation (GAE) with truncation-aware bootstrapping.
-
-        Args:
-            rewards: Shape (T,), step rewards.
-            values: Shape (T,), critic estimates V(s_t).
-            next_values: Shape (T,), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
-                         and `V(s_timeout)` where `truncated=True`).
-            dones: Shape (T,), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
-        """
-        T = rewards.shape[0]
-        advantages = torch.zeros_like(rewards)
-        last_gae = 0.0
-        for t in reversed(range(T)):
-            not_done = 1.0 - dones[t]
-            delta = rewards[t] + self.discount_factor_g * next_values[t] - values[t]
-            last_gae = delta + self.discount_factor_g * self.gae_lambda * not_done * last_gae
-            advantages[t] = last_gae
-        returns = advantages + values
-        return advantages, returns
+        """Truncation-aware GAE over the rollout (see `compute_gae`)."""
+        return compute_gae(rewards, values, next_values, dones, self.cfg.discount_factor, self.cfg.gae_lambda)
 
     def optimize(
         self,
@@ -241,13 +147,13 @@ class PPOAgent:
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for epoch in range(self.update_epochs):
+        for _epoch in range(self.cfg.update_epochs):
             perm = torch.randperm(batch_size, device=device)
             epoch_kl_sum = 0.0
             epoch_mb_count = 0
 
-            for start in range(0, batch_size, self.mini_batch_size):
-                idx = perm[start : start + self.mini_batch_size]
+            for start in range(0, batch_size, self.cfg.minibatch_size):
+                idx = perm[start : start + self.cfg.minibatch_size]
                 mb_states = states[idx]
                 mb_actions = actions[idx]
                 mb_old_log_probs = old_log_probs[idx]
@@ -268,17 +174,17 @@ class PPOAgent:
 
                 # Clipped surrogate objective
                 pg_loss1 = -mb_adv * ratio
-                pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.clip_coef, 1.0 + self.clip_coef)
+                pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 v_loss = F.mse_loss(new_values, mb_returns)
                 entropy_loss = entropy.mean()
 
-                loss = pg_loss + self.value_loss_coef * v_loss - self.entropy_coef * entropy_loss
+                loss = pg_loss + self.cfg.value_loss_coef * v_loss - self.cfg.entropy_coef * entropy_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=self.max_grad_norm)
+                nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=self.cfg.max_grad_norm)
                 self.optimizer.step()
 
                 total_loss_sum += float(loss.item())
@@ -288,7 +194,7 @@ class PPOAgent:
 
             # Early stop if average KL divergence across this epoch exceeded target threshold
             mean_epoch_kl = epoch_kl_sum / max(epoch_mb_count, 1)
-            if self.target_kl is not None and mean_epoch_kl > self.target_kl:
+            if self.cfg.target_kl is not None and mean_epoch_kl > self.cfg.target_kl:
                 break
 
         denom = max(num_mb, 1)
@@ -308,11 +214,7 @@ class PPOAgent:
 
     def _greedy_action(self, policy_net: ActorCritic, state: torch.Tensor) -> int | list[int]:
         """Most likely action as an env action: a Discrete index, or [direction, jump, boost] when factored."""
-        with torch.no_grad():
-            logits, _ = policy_net(state.unsqueeze(0))
-        if policy_net.is_factored:
-            return [int(l.squeeze(0).argmax().item()) for l in logits]
-        return int(logits.squeeze(0).argmax().item())
+        return greedy_action(policy_net, state)
 
     def _state_value(self, policy_net: ActorCritic, state: torch.Tensor) -> torch.Tensor:
         """Critic estimate V(s) for a single state."""
@@ -349,60 +251,31 @@ class PPOAgent:
         buffer.clear()
         return entropy, value_loss
 
-    def _step_with_action_repeat(self, env: gym.Env, action, action_orange=None):
-        """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
-        edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions."""
-        return step_with_action_repeat(env, action, action_orange, self.action_repeat)
-
     # ----------------------------------------------------------------------------------------
-    # Plotting / GIF helpers
+    # Trainer hooks (see `trainer.Learner`)
     # ----------------------------------------------------------------------------------------
 
-    def _save_gif(self, frames: list[np.ndarray], path: str | Path, fps: int = 15):
-        """Compile and save a list of RGB frames as an optimized animated GIF."""
-        save_gif(frames, path, fps=fps, tag="PPO")
+    def act(self, state: torch.Tensor) -> int | list[int]:
+        action, log_prob, value = self._sample_action(self.model, state)
+        # Backfill the previous step's next_value using this step's already-computed value
+        self.buffer.backfill_next_value(value)
+        self._pending = (action, log_prob, value)
+        return action.cpu().numpy().tolist() if self.model.is_factored else int(action.item())
 
-    @staticmethod
-    def _rolling_mean(values: list[float] | np.ndarray, window: int) -> np.ndarray:
-        return rolling_mean(values, window)
+    def observe(self, state: torch.Tensor, reward: float, next_state: torch.Tensor, terminated: bool, truncated: bool):
+        action, log_prob, value = self._pending
+        next_value = self._bootstrap_value(self.model, next_state, terminated, truncated)
+        self.buffer.add(state, action, log_prob, value, next_value, reward, terminated or truncated)
 
-    def save_graph(
-        self,
-        rewards_per_episode: list[float],
-        entropy_history: list[float],
-        steps_per_episode: list[int] | None = None,
-        goals_per_episode: list[int] | None = None,
-        value_loss_history: list[float] | None = None,
-        dpi: int = 150,
-    ):
-        """Plot and save a comprehensive 2x2 training dashboard.
+        # Perform PPO multi-epoch minibatch update once rollout horizon is reached
+        if len(self.buffer) >= self.cfg.rollout_steps:
+            self.current_entropy, self.current_v_loss = self._update_from_rollout(self.buffer, self.model, next_state)
 
-        Subplots:
-            1. Sample Efficiency: 100-episode rolling mean reward & episodic return vs. Environment Steps.
-            2. Task Competency: 100-episode rolling goal conversion rate (%) vs. Environment Steps.
-            3. Exploration Dynamics: Policy entropy H(pi) vs. Environment Steps.
-            4. Critic Optimization Health: Critic value MSE loss (with 50-ep smoothing) vs. Environment Steps.
-        """
-        save_training_dashboard(
-            self.GRAPH_FILE,
-            f"PPO Training Dashboard ({self.hyperparameter_set})",
-            rewards_per_episode,
-            steps_per_episode,
-            goals_per_episode,
-            exploration=DashboardPanel(
-                values=entropy_history,
-                title="Exploration Dynamics (Policy Entropy)",
-                ylabel="Entropy H(pi)",
-                label="Policy Entropy H(pi)",
-            ),
-            loss=DashboardPanel(
-                values=value_loss_history,
-                title="Critic Optimization Health (Value Loss)",
-                ylabel="Value MSE Loss",
-                label="Raw Value Loss",
-            ),
-            dpi=dpi,
-        )
+    def progress(self) -> str:
+        return f"Ent = {self.current_entropy:.3f}"
+
+    def end_episode(self) -> tuple[float, float]:
+        return self.current_entropy, self.current_v_loss
 
     # ----------------------------------------------------------------------------------------
     # Training / evaluation loops
@@ -411,226 +284,141 @@ class PPOAgent:
     def _resolve_architecture(self, state_dict: dict | None) -> tuple[bool, int, int | list[int] | None]:
         """(factored, hidden_dim, action_dim) from a checkpoint if given, else from `PPOConfig`.
         `action_dim` is None when it should be taken from the env's action space."""
-        factored = getattr(PPOConfig, "factored_action", False)
         if state_dict is None:
-            return factored, self.fcl_nodes, None
-        hidden_dim, action_dim = infer_ppo_arch(state_dict)
-        if action_dim is not None:
-            factored = isinstance(action_dim, list)
-        return factored, hidden_dim, action_dim
+            return self.cfg.factored_action, self.cfg.hidden_size, None
+        spec = infer_spec(state_dict)
+        factored = spec.factored if spec.action_dim is not None else self.cfg.factored_action
+        return factored, spec.hidden_dim, spec.action_dim
 
-    def run(
+    def _build(
         self,
-        is_training: bool = True,
-        render: bool = False,
-        max_episode_steps: int | None = None,
-        num_episodes: int | None = None,
-        model_path: str | Path | None = None,
-        save_gif: bool = False,
-        gif_path: str | Path | None = None,
-        control_car: str = "blue",
-        random_spawn: bool = True,
-    ) -> dict[str, float]:
-        """Run PPO training (`is_training=True`) or validation/evaluation (`is_training=False`)."""
-        control_car = normalize_control_car(control_car)
-
-        # Training only reads a checkpoint when one is given (fine-tuning); evaluation always tries
-        # to, defaulting to the checkpoint of the most recent training run
-        ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.hyperparameter_set))
-        state_dict = load_state_dict_if_exists(ckpt_file) if (not is_training or model_path is not None) else None
+        state_dict: dict | None,
+        control_car: str,
+        render: bool,
+        save_gif: bool,
+        random_spawn: bool,
+        max_episode_steps: int | None,
+    ):
+        """The env (flat or factored actions to match the network) and an ActorCritic, loaded if `state_dict`."""
         factored, hidden_dim, action_dim = self._resolve_architecture(state_dict)
-
         env = make_env(
-            bot_type=self.bot_type,
+            bot_type=self.cfg.bot_type,
             discrete_action=not factored,
-            control_car="blue" if is_training else control_car,
+            control_car=control_car,
             render=render,
             save_gif=save_gif,
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
-            env_id=self.env_id,
+            env_id=GymConfig.gym_id,
+            action_repeat=self.cfg.action_repeat,
         )
+        if action_dim is None:
+            action_dim = list(env.action_space.nvec) if factored else env.action_space.n
+        policy_net = ActorCritic(env.observation_space.shape[0], action_dim, hidden_dim).to(device)
+        if state_dict is not None:
+            policy_net.load_state_dict(state_dict)
+        return env, policy_net, action_dim
+
+    def train(
+        self,
+        num_episodes: int | None = None,
+        model_path: str | Path | None = None,
+        max_episode_steps: int | None = None,
+        random_spawn: bool = True,
+    ) -> dict[str, float]:
+        """On-policy training: collect `rollout_steps` decision steps, then update on them.
+
+        `model_path` fine-tunes from a checkpoint. Outputs go to a new
+        `runs/YYYYMMDD_hhmm_<hyperparameter_set>/` folder.
+        """
+        # Training only reads a checkpoint when one is given (fine-tuning)
+        state_dict = load_state_dict(str(model_path), device) if model_path is not None else None
+        env, self.model, action_dim = self._build(state_dict, "blue", False, False, random_spawn, max_episode_steps)
         try:
-            if action_dim is None:
-                action_dim = list(env.action_space.nvec) if factored else env.action_space.n
-            policy_net = ActorCritic(env.observation_space.shape[0], action_dim, hidden_dim).to(device)
-            if state_dict is not None:
-                policy_net.load_state_dict(state_dict)
+            if model_path is None:
+                print("[PPO Train] Training from scratch; no model checkpoint specified.")
+            elif state_dict is not None:
+                print(f"[PPO Train] Loaded model weights from: {model_path}")
+            else:
+                print(f"[PPO Train] Warning: Checkpoint '{model_path}' not found; training from scratch.")
+            paths = RunPaths.new(self.cfg.hyperparameter_set)
+            print(f"[PPO Train] Saving outputs to: {paths.run_dir}")
 
-            if is_training:
-                if model_path is None:
-                    print("[PPO Train] Training from scratch; no model checkpoint specified.")
-                elif state_dict is not None:
-                    print(f"[PPO Train] Loaded model weights from: {ckpt_file}")
-                else:
-                    print(f"[PPO Train] Warning: Checkpoint '{ckpt_file}' not found; training from scratch.")
-                run_dir = make_run_dir(self.hyperparameter_set)
-                self._set_run_dir(run_dir)
-                print(f"[PPO Train] Saving outputs to: {run_dir}")
-                return self._train(env, policy_net, num_episodes, action_dim)
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+            self.buffer = RolloutBuffer()
+            self.current_v_loss = 0.0
+            # Until the first update, report the entropy of a uniform policy: sum over heads of log(n)
+            self.current_entropy = (
+                float(sum(np.log(d) for d in action_dim)) if isinstance(action_dim, list) else float(np.log(action_dim))
+            )
 
+            print(
+                f"[PPO Train] Device={device} | Rollout={self.cfg.rollout_steps} | Epochs={self.cfg.update_epochs} | "
+                f"Minibatch={self.cfg.minibatch_size} | Bot={self.cfg.bot_type} | Model={paths.model_file}"
+            )
+            return run_training(env, self, paths, num_episodes, self.cfg.checkpoint_interval)
+        finally:
+            env.close()
+
+    def evaluate(
+        self,
+        num_episodes: int | None = None,
+        model_path: str | Path | None = None,
+        render: bool = False,
+        save_gif: bool = False,
+        gif_path: str | Path | None = None,
+        control_car: str = "blue",
+        random_spawn: bool = True,
+        max_episode_steps: int | None = None,
+    ) -> dict[str, float]:
+        """Greedy evaluation; with `control_car="both"` the same network also drives the orange car.
+
+        Defaults to the checkpoint of the most recent training run.
+        """
+        control_car = normalize_control_car(control_car)
+        ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.cfg.hyperparameter_set))
+        state_dict = load_state_dict(ckpt_file, device)
+        env, policy_net, _ = self._build(state_dict, control_car, render, save_gif, random_spawn, max_episode_steps)
+        try:
             if state_dict is not None:
                 print(f"[PPO Eval] Loaded trained model weights from: {ckpt_file}")
             else:
                 print(f"[PPO Eval] Warning: Checkpoint '{ckpt_file}' not found; evaluating initial weights.")
             if save_gif and gif_path is None:
-                gif_path = Path(ckpt_file).parent / f"eval_{self.hyperparameter_set}.gif"
-            return self._evaluate(env, policy_net, num_episodes, control_car, gif_path if save_gif else None)
+                gif_path = Path(ckpt_file).parent / f"eval_{self.cfg.hyperparameter_set}.gif"
+            policy_net.eval()
+
+            def select(state: torch.Tensor) -> int | list[int]:
+                return self._greedy_action(policy_net, state)
+
+            return run_eval_episodes(
+                env,
+                select_blue=select,
+                select_orange=select if control_car == "both" else None,
+                num_episodes=num_episodes,
+                gif_path=gif_path if save_gif else None,
+                gif_tag="PPO",
+            )
         finally:
             env.close()
 
-    def _train(
-        self,
-        env: gym.Env,
-        policy_net: ActorCritic,
-        num_episodes: int | None,
-        action_dim: int | list[int],
-    ) -> dict[str, float]:
-        """On-policy training loop: collect `rollout_steps` decision steps, then update on them."""
-        self.optimizer = torch.optim.Adam(policy_net.parameters(), lr=self.learning_rate, eps=1e-5)
 
-        logger = TrainingLogger(self.LOG_FILE, self.METRICS_FILE, extra_columns=("entropy", "value_loss"))
-        buffer = RolloutBuffer()
-        entropy_history = []
-        value_loss_history = []
-        step_count = 0
-        current_v_loss = 0.0
-        # Until the first update, report the entropy of a uniform policy: sum over heads of log(n)
-        current_entropy = (
-            float(sum(np.log(d) for d in action_dim)) if isinstance(action_dim, list) else float(np.log(action_dim))
-        )
-
-        def save_graph(dpi: int = 150):
-            self.save_graph(
-                logger.rewards,
-                entropy_history,
-                steps_per_episode=logger.steps,
-                goals_per_episode=logger.goals,
-                value_loss_history=value_loss_history,
-                dpi=dpi,
-            )
-
-        print(
-            f"[PPO Train] Device={device} | Rollout={self.rollout_steps} | Epochs={self.update_epochs} | "
-            f"Minibatch={self.mini_batch_size} | Bot={self.bot_type} | Model={self.MODEL_FILE}"
-        )
-
-        episode_iter = range(num_episodes) if num_episodes is not None else itertools.count()
-        try:
-            for episode in episode_iter:
-                state, _ = env.reset()
-                state = obs_to_tensor(state)
-
-                if not env.unwrapped.isopen:
-                    break
-
-                terminated = False
-                truncated = False
-                episode_reward = 0.0
-                goal = 0
-
-                while not (terminated or truncated):
-                    action, log_prob, value = self._sample_action(policy_net, state)
-                    # Backfill the previous step's next_value using this step's already-computed value
-                    buffer.backfill_next_value(value)
-
-                    action_for_env = action.cpu().numpy().tolist() if policy_net.is_factored else int(action.item())
-                    next_state, reward, terminated, truncated, info = self._step_with_action_repeat(
-                        env, action_for_env
-                    )
-
-                    episode_reward += reward
-                    if scored_goal(info, terminated, reward):
-                        goal = 1
-
-                    new_state = obs_to_tensor(next_state)
-                    next_value = self._bootstrap_value(policy_net, new_state, terminated, truncated)
-                    buffer.add(state, action, log_prob, value, next_value, reward, terminated or truncated)
-                    step_count += 1
-
-                    # Perform PPO multi-epoch minibatch update once rollout horizon is reached
-                    if len(buffer) >= self.rollout_steps:
-                        current_entropy, current_v_loss = self._update_from_rollout(buffer, policy_net, new_state)
-
-                    state = new_state
-
-                    if not env.unwrapped.isopen:
-                        break
-
-                mean_reward_100, goal_rate_100 = logger.record_episode(episode_reward, goal)
-                print(
-                    f"Episode {episode:4d}: Reward = {episode_reward:7.2f} | "
-                    f"Mean(100) = {mean_reward_100:7.2f} | GoalRate(100) = {goal_rate_100:5.1f}% | "
-                    f"Ent = {current_entropy:.3f} | Steps = {step_count}"
-                )
-
-                entropy_history.append(current_entropy)
-                value_loss_history.append(current_v_loss)
-                logger.write_metrics(episode, step_count, extras=(current_entropy, current_v_loss))
-
-                # Save best model based on 100-episode rolling mean reward
-                if logger.is_new_best(episode, num_episodes):
-                    logger.log_new_best(episode, step_count)
-                    torch.save(policy_net.state_dict(), self.MODEL_FILE)
-
-                # Periodic snapshot of the current model, independent of the best-model file
-                save_periodic_checkpoint(
-                    policy_net, self.CHECKPOINT_DIR, self.hyperparameter_set, episode, self.checkpoint_interval
-                )
-
-                if logger.graph_due():
-                    save_graph(dpi=100)
-
-                if not env.unwrapped.isopen:
-                    print("Exiting environment.")
-                    break
-        finally:
-            # Also runs on Ctrl-C, so an interrupted training run still gets its final dashboard
-            if logger.rewards:
-                save_graph()
-
-        return summarize_episodes(env, logger.rewards, logger.goals)
-
-    def _evaluate(
-        self,
-        env: gym.Env,
-        policy_net: ActorCritic,
-        num_episodes: int | None,
-        control_car: str,
-        gif_path: str | Path | None,
-    ) -> dict[str, float]:
-        """Greedy evaluation; with `control_car="both"` the same network also drives the orange car."""
-        policy_net.eval()
-
-        def select(state: torch.Tensor) -> int | list[int]:
-            return self._greedy_action(policy_net, state)
-
-        return run_eval_episodes(
-            env,
-            select_blue=select,
-            select_orange=select if control_car == "both" else None,
-            action_repeat=self.action_repeat,
-            num_episodes=num_episodes,
-            gif_path=gif_path,
-            gif_tag="PPO",
-        )
+def _resolve_config(config: PPOConfig | None, hyperparameter_set: str | None) -> PPOConfig:
+    """`config` (default `PPOConfig()`) with the run name overridden when one is given."""
+    config = config or PPOConfig()
+    return replace(config, hyperparameter_set=hyperparameter_set) if hyperparameter_set is not None else config
 
 
 def train_ppo(
     num_episodes: int | None = None,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    hyperparameter_set: str = PPOConfig.hyperparameter_set,
+    hyperparameter_set: str | None = None,
+    config: PPOConfig | None = None,
 ) -> dict[str, float]:
     """Train the PPO agent."""
-    agent = PPOAgent(hyperparameter_set=hyperparameter_set)
-    return agent.run(
-        is_training=True,
-        render=False,
-        max_episode_steps=max_episode_steps,
-        num_episodes=num_episodes,
-        model_path=model_path,
-    )
+    agent = PPOAgent(_resolve_config(config, hyperparameter_set))
+    return agent.train(num_episodes=num_episodes, model_path=model_path, max_episode_steps=max_episode_steps)
 
 
 def evaluate_ppo(
@@ -638,44 +426,22 @@ def evaluate_ppo(
     render: bool = False,
     max_episode_steps: int | None = None,
     model_path: str | Path | None = None,
-    hyperparameter_set: str = PPOConfig.hyperparameter_set,
+    hyperparameter_set: str | None = None,
     save_gif: bool = False,
     gif_path: str | Path | None = None,
     control_car: str = "blue",
     random_spawn: bool = True,
+    config: PPOConfig | None = None,
 ) -> dict[str, float]:
     """Evaluate/validate a trained PPO agent."""
-    agent = PPOAgent(hyperparameter_set=hyperparameter_set)
-    return agent.run(
-        is_training=False,
+    agent = PPOAgent(_resolve_config(config, hyperparameter_set))
+    return agent.evaluate(
         render=render,
         max_episode_steps=max_episode_steps,
-        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, PPOConfig.eval_episodes),
+        num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, agent.cfg.eval_episodes),
         model_path=model_path,
         save_gif=save_gif,
         gif_path=gif_path,
         control_car=control_car,
         random_spawn=random_spawn,
     )
-
-
-if __name__ == "__main__":
-    args = build_arg_parser("PPO Agent for Rocket League", PPOConfig.hyperparameter_set).parse_args()
-
-    if args.train:
-        train_ppo(
-            num_episodes=args.episodes,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-        )
-    else:
-        eval_eps = args.episodes if args.episodes is not None else (None if args.render else PPOConfig.eval_episodes)
-        evaluate_ppo(
-            num_episodes=eval_eps,
-            render=args.render,
-            model_path=args.model_path,
-            hyperparameter_set=args.hyperparameter_set,
-            save_gif=args.gif,
-            gif_path=args.gif_path,
-            control_car=control_car_from_args(args),
-        )

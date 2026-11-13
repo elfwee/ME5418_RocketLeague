@@ -8,7 +8,12 @@ This directory contains the 2D rendering pipeline, procedural Octane vehicle gra
 
 | File | Description |
 | :--- | :--- |
-| [`renderer.py`](renderer.py) | Full Pygame rendering engine, coordinate mapping (meters to pixels), procedural vehicle drawing, HUD overlay, vector visualizers, and debug raycast rendering. |
+| [`renderer.py`](renderer.py) | Pygame rendering engine: coordinate mapping (meters to pixels), arena, ball, vector visualizers, and debug raycast rendering; delegates the car and the HUD. |
+| [`car_sprite.py`](car_sprite.py) | Procedural Octane-like car: wheels, spoiler, chassis, cabin, lights, and boost flame. |
+| [`hud.py`](hud.py) | HUD overlay: scoreboard, controls help, vector legend, Blue car telemetry, raycast toggle button, boost meter. |
+| [`event_handling.py`](event_handling.py) | Window, keyboard (`R`, `B`, `L`, `Esc`) and mouse events for the interactive loops. |
+
+Screen size, `PPM` and the colour palette are in [`src/config/render_config.py`](../../config/render_config.py).
 
 ---
 
