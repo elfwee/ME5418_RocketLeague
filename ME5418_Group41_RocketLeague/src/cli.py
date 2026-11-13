@@ -237,7 +237,7 @@ def run_demo(args: argparse.Namespace, parser: argparse.ArgumentParser):
     if target is None:
         print(DEMO_HELP)
     elif target == "gym":
-        from src.gym_env.rocket_league_env import demo_gym
+        from src.gym_env.demo import demo_gym
 
         demo_gym()
     elif target == "ppo":

@@ -4,7 +4,7 @@ Proximal Policy Optimization (PPO) Learning Agent — Training & Validation/Eval
 Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
 comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
-- Identical `action_repeat = 4` with edge-triggered jump release (`step_with_action_repeat`).
+- Identical `action_repeat = 4` with edge-triggered jump release (`ActionRepeat` env wrapper).
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
   and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
@@ -42,7 +42,6 @@ from src.learning_agents.agent_common import (
     save_periodic_checkpoint,
     save_training_dashboard,
     scored_goal,
-    step_with_action_repeat,
     summarize_episodes,
 )
 from src.neural_nets.checkpoint import infer_spec, load_state_dict
@@ -164,7 +163,7 @@ class PPOAgent:
         1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
            Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
            Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
-        2. Action Repeat with Edge-Triggered Jump Release (`step_with_action_repeat`):
+        2. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         3. Truncation-Aware Generalized Advantage Estimation (`_compute_gae`):
@@ -176,7 +175,7 @@ class PPOAgent:
            entropy bonus, and global gradient norm clipping.
 
     One training decision step (`_train`):
-        `_sample_action` -> `step_with_action_repeat` -> `_bootstrap_value` -> `RolloutBuffer.add`
+        `_sample_action` -> `env.step` (`ActionRepeat`) -> `_bootstrap_value` -> `RolloutBuffer.add`
         -> `_update_from_rollout` (every `rollout_steps` steps: `_compute_gae` then `optimize`).
     """
 
@@ -420,6 +419,7 @@ class PPOAgent:
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
             env_id=GymConfig.gym_id,
+            action_repeat=self.cfg.action_repeat,
         )
         try:
             if action_dim is None:
@@ -506,9 +506,7 @@ class PPOAgent:
                     buffer.backfill_next_value(value)
 
                     action_for_env = action.cpu().numpy().tolist() if policy_net.is_factored else int(action.item())
-                    next_state, reward, terminated, truncated, info = step_with_action_repeat(
-                        env, action_for_env, action_repeat=self.cfg.action_repeat
-                    )
+                    next_state, reward, terminated, truncated, info = env.step(action_for_env)
 
                     episode_reward += reward
                     if scored_goal(info, terminated, reward):
@@ -580,7 +578,6 @@ class PPOAgent:
             env,
             select_blue=select,
             select_orange=select if control_car == "both" else None,
-            action_repeat=self.cfg.action_repeat,
             num_episodes=num_episodes,
             gif_path=gif_path,
             gif_tag="PPO",

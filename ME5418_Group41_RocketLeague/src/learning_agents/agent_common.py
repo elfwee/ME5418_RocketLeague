@@ -1,7 +1,7 @@
 """
 Shared plumbing for the learning agents (`dueling_ddqn_agent.py`, `ppo_agent.py`, `mixed_eval.py`).
 
-Everything here is algorithm-agnostic: environment creation, action repeat, checkpoint loading,
+Everything here is algorithm-agnostic: environment creation (with action repeat), checkpoint saving,
 per-run output folders, the evaluation episode loop, training bookkeeping (CSV / log / best-model tracking), the 2x2
 training dashboard and GIF export. The learning rules themselves
 (replay + TD targets, GAE + clipped surrogate) stay in the agent files.
@@ -22,8 +22,8 @@ import torch
 
 from src.config.gym_config import GymConfig
 from src.config.sim_config import GIF_FRAME_SIZE
-from src.gym_env.action_codec import clear_jump
 from src.gym_env.rocket_league_env import RocketLeagueEnv  # noqa: F401  (import registers the gym env id)
+from src.gym_env.wrappers import ActionRepeat
 from src.paths import RUNS_DIR
 
 RUN_DIR_TIME_FORMAT = "%Y%m%d_%H%M"
@@ -54,8 +54,13 @@ def make_env(
     random_spawn: bool = True,
     max_episode_steps: int | None = None,
     env_id: str = GymConfig.gym_id,
+    action_repeat: int = 1,
 ) -> gym.Env:
-    """Create the Rocket League env; renders to a window, to RGB frames (for GIFs), or not at all."""
+    """Create the Rocket League env; renders to a window, to RGB frames (for GIFs), or not at all.
+
+    With `action_repeat > 1` the env is wrapped in `ActionRepeat`: each `step` holds the action for
+    that many sim frames. `max_episode_steps` always counts sim frames.
+    """
     if render:
         render_mode = "human"
     elif save_gif:
@@ -67,7 +72,7 @@ def make_env(
     if max_episode_steps is not None:
         make_kwargs["max_episode_steps"] = max_episode_steps
 
-    return gym.make(
+    env = gym.make(
         env_id,
         render_mode=render_mode,
         bot_type=bot_type,
@@ -76,6 +81,7 @@ def make_env(
         random_spawn=random_spawn,
         **make_kwargs,
     )
+    return ActionRepeat(env, action_repeat) if action_repeat > 1 else env
 
 
 def obs_to_tensor(obs) -> torch.Tensor:
@@ -85,48 +91,6 @@ def obs_to_tensor(obs) -> torch.Tensor:
 def scored_goal(info: dict, terminated: bool, reward: float) -> bool:
     """True when the decision step ended with the controlled car scoring."""
     return bool(info.get("is_success", False) or (terminated and reward > 0.0))
-
-
-def step_with_action_repeat(env: gym.Env, action, action_orange=None, action_repeat: int = 1):
-    """Repeat chosen action for `action_repeat` frames, releasing jump after frame 0 so
-    edge-triggered jumping in Car._apply_jump can fire again on subsequent decisions.
-
-    Observations are only built on the last frame (`_defer_obs`). Returns the usual gym 5-tuple
-    with the reward summed over the repeated frames.
-    """
-    total_reward = 0.0
-    terminated = False
-    truncated = False
-    info = {}
-    next_state = None
-
-    # Clear jump bit on repeat frames > 0 so _prev_jump_action resets between decisions
-    held_action = clear_jump(action)
-    held_action_orange = clear_jump(action_orange) if action_orange is not None else None
-
-    repeat = max(1, action_repeat)
-    unwrapped = env.unwrapped
-    deferred = False
-    for sub in range(repeat):
-        deferred = sub < (repeat - 1)
-        unwrapped._defer_obs = deferred
-        act = action if sub == 0 else held_action
-        if action_orange is not None:
-            act_orange = action_orange if sub == 0 else held_action_orange
-            next_state, reward, terminated, truncated, info = env.step((act, act_orange))
-        else:
-            next_state, reward, terminated, truncated, info = env.step(act)
-        total_reward += float(reward)
-        if terminated or truncated or not unwrapped.isopen:
-            break
-
-    unwrapped._defer_obs = False
-    if deferred:
-        next_state = unwrapped._get_obs()
-        if unwrapped.control_car == "both":
-            info["obs_orange"] = unwrapped._get_obs("orange")
-
-    return next_state, total_reward, terminated, truncated, info
 
 
 # --------------------------------------------------------------------------------------------
@@ -226,7 +190,6 @@ def run_eval_episodes(
     select_blue: Callable[[torch.Tensor], object],
     select_orange: Callable[[torch.Tensor], object] | None = None,
     *,
-    action_repeat: int,
     num_episodes: int | None,
     gif_path: str | Path | None = None,
     gif_tag: str = "Eval",
@@ -262,9 +225,7 @@ def run_eval_episodes(
             action = select_blue(state)
             action_orange = select_orange(state_orange) if state_orange is not None else None
 
-            next_state, reward, terminated, truncated, info = step_with_action_repeat(
-                env, action, action_orange, action_repeat
-            )
+            next_state, reward, terminated, truncated, info = env.step(action, action_orange)
 
             if recording and len(gif_frames) < MAX_GIF_FRAMES:
                 frame = env.unwrapped.get_frame()

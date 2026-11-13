@@ -112,6 +112,7 @@ def evaluate_mixed_policies(
         save_gif=save_gif,
         random_spawn=random_spawn,
         max_episode_steps=max_episode_steps,
+        action_repeat=DQNConfig.action_repeat,
     )
     try:
         num_states = env.observation_space.shape[0]
@@ -125,7 +126,6 @@ def evaluate_mixed_policies(
             env,
             select_blue,
             select_orange,
-            action_repeat=DQNConfig.action_repeat,
             num_episodes=resolve_eval_episodes(num_episodes, render, save_gif, DQNConfig.eval_episodes),
             gif_path=gif_path if save_gif else None,
             gif_tag="DQN",

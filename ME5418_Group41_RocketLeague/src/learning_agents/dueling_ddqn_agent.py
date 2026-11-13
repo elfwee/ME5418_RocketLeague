@@ -35,7 +35,6 @@ from src.learning_agents.agent_common import (
     save_periodic_checkpoint,
     save_training_dashboard,
     scored_goal,
-    step_with_action_repeat,
     summarize_episodes,
 )
 from src.learning_agents.experience_replay import ReplayMemory
@@ -54,7 +53,7 @@ class DuelingDDQNAgent:
            network evaluates them to mitigate maximization bias.
         2. Experience Replay (`ReplayMemory`):
            Stores `(state, action, next_state, reward, terminated, truncated)` transitions.
-        3. Action Repeat with Edge-Triggered Jump Release (`step_with_action_repeat`):
+        3. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         4. Truncation-Aware Value Bootstrapping (`optimize`):
@@ -62,7 +61,7 @@ class DuelingDDQNAgent:
            on true goal `terminated` states (`target_q = r + (1 - terminated) * gamma * next_q`).
 
     One training decision step (`_train`):
-        `_select_action` -> `step_with_action_repeat` -> `_store_transition` -> `_maybe_optimize`
+        `_select_action` -> `env.step` (`ActionRepeat`) -> `_store_transition` -> `_maybe_optimize`
         -> `_sync_target_network` (every `target_update_interval` steps); `_decay_epsilon` once per episode.
     """
 
@@ -242,6 +241,7 @@ class DuelingDDQNAgent:
             random_spawn=random_spawn,
             max_episode_steps=max_episode_steps,
             env_id=GymConfig.gym_id,
+            action_repeat=self.cfg.action_repeat,
         )
         try:
             policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
@@ -325,9 +325,7 @@ class DuelingDDQNAgent:
 
                 while not (terminated or truncated):
                     action = self._select_action(env, policy_dqn, state, epsilon)
-                    next_state, reward, terminated, truncated, info = step_with_action_repeat(
-                        env, int(action.item()), action_repeat=self.cfg.action_repeat
-                    )
+                    next_state, reward, terminated, truncated, info = env.step(int(action.item()))
 
                     episode_reward += reward
                     if scored_goal(info, terminated, reward):
@@ -410,7 +408,6 @@ class DuelingDDQNAgent:
             env,
             select_blue=select,
             select_orange=select if control_car == "both" else None,
-            action_repeat=self.cfg.action_repeat,
             num_episodes=num_episodes,
             gif_path=gif_path,
             gif_tag="DQN",

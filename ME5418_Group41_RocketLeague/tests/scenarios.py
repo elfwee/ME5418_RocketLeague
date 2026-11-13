@@ -65,9 +65,9 @@ def set_last_touch(env, team: str | None):
 
 
 def step_repeat(env, action, action_orange=None, repeat: int = 4):
-    from src.learning_agents.agent_common import step_with_action_repeat
+    from src.gym_env.wrappers import ActionRepeat
 
-    return step_with_action_repeat(env, action, action_orange, repeat)
+    return ActionRepeat(env, repeat).step(action, action_orange)
 
 
 def make_sim(**kwargs):
