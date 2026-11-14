@@ -36,9 +36,14 @@ def _default_spec(policy_type: str, num_states: int) -> PolicySpec:
     """The architecture `policy_type` trains with, used when its checkpoint does not exist."""
     if policy_type == "ppo":
         action_dim = list(PPOConfig.action_dims) if PPOConfig.factored_action else NUM_DISCRETE_ACTIONS
-        return PolicySpec(PPO, num_states, PPOConfig.hidden_size, action_dim)
+        return PolicySpec(PPO, num_states, PPOConfig.hidden_size, action_dim, split_trunk=PPOConfig.split_trunk)
     return PolicySpec(
-        DQN_KIND, num_states, DQNConfig.hidden_size, NUM_DISCRETE_ACTIONS, dueling=policy_type == "dueling_ddqn"
+        DQN_KIND,
+        num_states,
+        DQNConfig.hidden_size,
+        NUM_DISCRETE_ACTIONS,
+        dueling=policy_type == "dueling_ddqn",
+        split_trunk=DQNConfig.split_trunk,
     )
 
 

@@ -1,7 +1,7 @@
 # Learning Agents (`src/learning_agents/`)
 
 Training and evaluation of the two agents compared in the report. Both use the same episode loop,
-the same 150,949-parameter `LayerNorm` trunk width, `Adam(3e-4)`, `gamma = 0.99` and 4x action repeat
+the same `LayerNorm` trunk width (231,333 parameters with one trunk per stream, `split_trunk`; 150,949 shared), `Adam(3e-4)`, `gamma = 0.99` and 4x action repeat
 (15 Hz decisions, jump released after the first frame). Hyperparameters are in
 [`src/config/nn_config.py`](../config/nn_config.py) (`DQNConfig`, `PPOConfig`); build a variant with
 `dataclasses.replace(DQNConfig(), batch_size=128)` and pass it as `config=`.

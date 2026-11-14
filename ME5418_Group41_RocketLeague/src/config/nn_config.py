@@ -16,6 +16,7 @@ class AgentConfig:
 
     # Architecture
     hidden_size: int = 256
+    split_trunk: bool = True  # Each stream (actor/critic, value/advantage) gets its own feature trunk
 
     # Optimization
     learning_rate: float = 3e-4
@@ -33,7 +34,7 @@ class AgentConfig:
 
 @dataclass(frozen=True)
 class DQNConfig(AgentConfig):
-    # Architecture (150,949 trainable parameters when enable_dueling_dqn=True)
+    # Architecture (231,333 trainable parameters with dueling + split_trunk; 150,949 with a shared trunk)
     enable_double_dqn: bool = True
     enable_dueling_dqn: bool = True
 

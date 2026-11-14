@@ -27,8 +27,9 @@ def run_dqn_network(enable_dueling_dqn: bool = True, enable_double_dqn: bool = T
     hidden_dim = DQNConfig.hidden_size
 
     # 1. Create Policy and Target DQN Networks
-    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=enable_dueling_dqn).to(device)
-    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn=enable_dueling_dqn).to(device)
+    split_trunk = DQNConfig.split_trunk
+    policy_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn, split_trunk).to(device)
+    target_dqn = DQN(num_states, num_actions, hidden_dim, enable_dueling_dqn, split_trunk).to(device)
     target_dqn.load_state_dict(policy_dqn.state_dict())
     target_dqn.eval()
 
@@ -130,7 +131,7 @@ def run_ppo_network():
     hidden_dim = PPOConfig.hidden_size
 
     # 1. Create Actor-Critic Network
-    agent = ActorCritic(num_states, action_dim, hidden_dim).to(device)
+    agent = ActorCritic(num_states, action_dim, hidden_dim, split_trunk=PPOConfig.split_trunk).to(device)
     total_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
 
     optimizer = torch.optim.Adam(agent.parameters(), lr=PPOConfig.learning_rate, eps=1e-5)

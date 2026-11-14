@@ -5,6 +5,10 @@ Every saved model is a plain ``state_dict``. Layer names tell the network type a
 - PPO ``ActorCritic``: ``fc_actor`` / ``fc_critic`` streams, and either one flat ``actor`` head or
   factored ``actor_heads.N`` heads (one per action axis).
 - ``DQN``: dueling ``fc_value`` / ``advantages`` streams, or a single ``fc3`` Q head.
+
+Trunk layout: a shared trunk saves ``fc1/ln1/fc2/ln2`` at the top level; a split trunk saves one
+``Trunk`` per stream (``actor_trunk`` / ``critic_trunk`` for PPO, ``value_trunk`` /
+``advantage_trunk`` for dueling DQN).
 """
 
 import os
@@ -19,7 +23,8 @@ from src.neural_nets.ppo_torch import ActorCritic
 
 PPO = "ppo"
 DQN_KIND = "dqn"
-_PPO_PREFIXES = ("actor", "actor_heads", "critic", "fc_actor", "fc_critic")
+_PPO_PREFIXES = ("actor", "actor_heads", "critic", "fc_actor", "fc_critic", "actor_trunk", "critic_trunk")
+_SPLIT_TRUNK_PREFIXES = ("actor_trunk", "value_trunk")
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,7 @@ class PolicySpec:
     hidden_dim: int
     action_dim: int | list[int] | None
     dueling: bool = False
+    split_trunk: bool = False
 
     @property
     def factored(self) -> bool:
@@ -47,7 +53,9 @@ def is_ppo_state_dict(state_dict: dict) -> bool:
 
 def infer_spec(state_dict: dict) -> PolicySpec:
     """Architecture of a saved ``ActorCritic`` or ``DQN`` from its layer names and shapes."""
-    hidden_dim, state_dim = state_dict["fc1.weight"].shape
+    trunk = next((p for p in _SPLIT_TRUNK_PREFIXES if f"{p}.fc1.weight" in state_dict), None)
+    split_trunk = trunk is not None
+    hidden_dim, state_dim = state_dict[f"{trunk}.fc1.weight" if split_trunk else "fc1.weight"].shape
     if is_ppo_state_dict(state_dict):
         if "actor_heads.0.weight" in state_dict:
             n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("actor_heads.")})
@@ -56,17 +64,21 @@ def infer_spec(state_dict: dict) -> PolicySpec:
             action_dim = state_dict["actor.weight"].shape[0]
         else:
             action_dim = None
-        return PolicySpec(PPO, state_dim, hidden_dim, action_dim)
+        return PolicySpec(PPO, state_dim, hidden_dim, action_dim, split_trunk=split_trunk)
     dueling = "advantages.weight" in state_dict
     out_key = "advantages.weight" if dueling else "fc3.weight"
-    return PolicySpec(DQN_KIND, state_dim, hidden_dim, state_dict[out_key].shape[0], dueling=dueling)
+    return PolicySpec(
+        DQN_KIND, state_dim, hidden_dim, state_dict[out_key].shape[0], dueling=dueling, split_trunk=split_trunk
+    )
 
 
 def build_network(spec: PolicySpec) -> nn.Module:
     """A freshly initialised network with the given architecture."""
     if spec.kind == PPO:
-        return ActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim)
-    return DQN(spec.state_dim, spec.action_dim, spec.hidden_dim, enable_dueling_dqn=spec.dueling)
+        return ActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim, split_trunk=spec.split_trunk)
+    return DQN(
+        spec.state_dim, spec.action_dim, spec.hidden_dim, enable_dueling_dqn=spec.dueling, split_trunk=spec.split_trunk
+    )
 
 
 def load_state_dict(path: str | Path, device: str | torch.device = "cpu") -> dict | None:

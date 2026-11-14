@@ -23,7 +23,7 @@ from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episod
 from src.learning_agents.experience_replay import ReplayMemory
 from src.learning_agents.run_dirs import RunPaths, latest_model_path
 from src.learning_agents.trainer import run_training
-from src.neural_nets.checkpoint import load_state_dict
+from src.neural_nets.checkpoint import infer_spec, load_state_dict
 from src.neural_nets.dueling_ddqn_torch import DQN
 from src.neural_nets.policy import greedy_action
 
@@ -112,10 +112,21 @@ class DuelingDDQNAgent:
     # Algorithm steps
     # ----------------------------------------------------------------------------------------
 
-    def _build_network(self, num_states: int, num_actions: int) -> DQN:
-        return DQN(num_states, num_actions, self.cfg.hidden_size, enable_dueling_dqn=self.cfg.enable_dueling_dqn).to(
-            device
-        )
+    def _build_network(self, num_states: int, num_actions: int, split_trunk: bool | None = None) -> DQN:
+        """A fresh DQN from the config; `split_trunk` overrides `cfg.split_trunk` (e.g. to match a checkpoint)."""
+        return DQN(
+            num_states,
+            num_actions,
+            self.cfg.hidden_size,
+            enable_dueling_dqn=self.cfg.enable_dueling_dqn,
+            split_trunk=self.cfg.split_trunk if split_trunk is None else split_trunk,
+        ).to(device)
+
+    def _checkpoint_split_trunk(self, ckpt_file: str | Path | None) -> bool:
+        """Whether the checkpoint at `ckpt_file` uses split trunks; `cfg.split_trunk` when there is none,
+        so older shared-trunk checkpoints still load."""
+        state_dict = load_state_dict(ckpt_file, device) if ckpt_file is not None else None
+        return self.cfg.split_trunk if state_dict is None else infer_spec(state_dict).split_trunk
 
     def _load_checkpoint(self, policy_dqn: DQN, ckpt_file: str) -> bool:
         """Load weights into `policy_dqn`; returns False when the checkpoint file does not exist."""
@@ -229,7 +240,8 @@ class DuelingDDQNAgent:
         )
         try:
             num_states, num_actions = env.observation_space.shape[0], env.action_space.n
-            self.model = self._build_network(num_states, num_actions)
+            split_trunk = self._checkpoint_split_trunk(model_path)
+            self.model = self._build_network(num_states, num_actions, split_trunk)
             paths = RunPaths.new(self.cfg.hyperparameter_set)
             print(f"[DuelingDDQN Train] Saving outputs to: {paths.run_dir}")
 
@@ -245,7 +257,7 @@ class DuelingDDQNAgent:
             self.memory = ReplayMemory(maxlen=self.cfg.buffer_size, seed=self.cfg.seed)
             self.epsilon = self.cfg.epsilon_finetune if loaded_ckpt else self.cfg.epsilon_init
 
-            self.target_dqn = self._build_network(num_states, num_actions)
+            self.target_dqn = self._build_network(num_states, num_actions, split_trunk)
             self._sync_target_network(self.model, self.target_dqn)
             self.target_dqn.eval()
 
@@ -280,9 +292,11 @@ class DuelingDDQNAgent:
         control_car = normalize_control_car(control_car)
         env = self._make_env(control_car, render, save_gif, random_spawn, max_episode_steps)
         try:
-            policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
             if model_path is None:
                 model_path = latest_model_path(self.cfg.hyperparameter_set)
+            policy_dqn = self._build_network(
+                env.observation_space.shape[0], env.action_space.n, self._checkpoint_split_trunk(model_path)
+            )
             if save_gif and gif_path is None:
                 gif_path = Path(model_path).parent / f"eval_{self.cfg.hyperparameter_set}.gif"
 

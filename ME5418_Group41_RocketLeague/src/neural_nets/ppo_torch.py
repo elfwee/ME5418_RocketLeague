@@ -7,13 +7,18 @@ from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
 
+from src.neural_nets.trunk import Trunk
+
 
 class ActorCritic(nn.Module):
     """Actor-Critic network for PPO supporting discrete and factored MultiDiscrete action spaces.
 
     Architecture:
         - Input Layer: 52-dimensional normalized state vector in [-1, 1].
-        - Shared Feature Extractor: 2 fully-connected layers (256 units) with LayerNorm and ReLU.
+        - Feature Extractor: 2 fully-connected layers (256 units) with LayerNorm and ReLU. With
+          ``split_trunk=True`` the actor and critic each get their own trunk (``actor_trunk`` /
+          ``critic_trunk``) so the value loss does not shape the policy's features; with
+          ``split_trunk=False`` one shared trunk (``fc1/ln1 -> fc2/ln2``) feeds both heads.
         - Two Heads:
             1. Actor (Policy) Head:
                - Discrete: Single Linear layer outputting logits over all discrete actions.
@@ -27,8 +32,10 @@ class ActorCritic(nn.Module):
         state_dim: int,
         action_dim: int | list[int] | tuple[int, ...],
         hidden_dim: int = 256,
+        split_trunk: bool = True,
     ):
         super().__init__()
+        self.split_trunk = split_trunk
         self.is_factored = isinstance(action_dim, (list, tuple))
         self.action_dims = list(action_dim) if self.is_factored else [action_dim]
 
@@ -37,11 +44,15 @@ class ActorCritic(nn.Module):
             nn.init.constant_(layer.bias, bias_const)
             return layer
 
-        # Shared feature backbone with LayerNorm (hidden: gain = sqrt(2))
-        self.fc1 = layer_init(nn.Linear(state_dim, hidden_dim))
-        self.ln1 = nn.LayerNorm(hidden_dim)
-        self.fc2 = layer_init(nn.Linear(hidden_dim, hidden_dim))
-        self.ln2 = nn.LayerNorm(hidden_dim)
+        # Feature backbone(s) with LayerNorm (hidden: gain = sqrt(2))
+        if self.split_trunk:
+            self.actor_trunk = Trunk(state_dim, hidden_dim, init=layer_init)
+            self.critic_trunk = Trunk(state_dim, hidden_dim, init=layer_init)
+        else:
+            self.fc1 = layer_init(nn.Linear(state_dim, hidden_dim))
+            self.ln1 = nn.LayerNorm(hidden_dim)
+            self.fc2 = layer_init(nn.Linear(hidden_dim, hidden_dim))
+            self.ln2 = nn.LayerNorm(hidden_dim)
 
         # Actor stream (hidden: gain = sqrt(2), policy output: gain = 0.01 for near-uniform exploration)
         self.fc_actor = layer_init(nn.Linear(hidden_dim, hidden_dim // 2))
@@ -58,19 +69,22 @@ class ActorCritic(nn.Module):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor | list[torch.Tensor], torch.Tensor]:
         """Compute action logits and state value V(s) for input state tensor x."""
-        # Shared feature extraction
-        x = F.relu(self.ln1(self.fc1(x)))
-        x = F.relu(self.ln2(self.fc2(x)))
+        # Feature extraction: separate actor / critic trunks, or one shared trunk
+        if self.split_trunk:
+            x_actor, x_critic = self.actor_trunk(x), self.critic_trunk(x)
+        else:
+            x = F.relu(self.ln1(self.fc1(x)))
+            x_actor = x_critic = F.relu(self.ln2(self.fc2(x)))
 
         # Compute action logits for pi(a | s)
-        a = F.relu(self.fc_actor(x))
+        a = F.relu(self.fc_actor(x_actor))
         if self.is_factored:
             logits = [head(a) for head in self.actor_heads]
         else:
             logits = self.actor(a)
 
         # Compute state value V(s)
-        v = F.relu(self.fc_critic(x))
+        v = F.relu(self.fc_critic(x_critic))
         V = self.critic(v).squeeze(-1)
         return logits, V
 

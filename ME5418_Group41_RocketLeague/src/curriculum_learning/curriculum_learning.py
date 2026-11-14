@@ -183,7 +183,7 @@ class Curriculum:
             obs_dim = env.observation_space.shape[0]
             if is_ppo:
                 action_dim = [int(n) for n in env.action_space.nvec] if factored else env.action_space.n
-                net = ActorCritic(obs_dim, action_dim, self.config.hidden_size)
+                net = ActorCritic(obs_dim, action_dim, self.config.hidden_size, split_trunk=self.config.split_trunk)
             else:
                 net = self.agent(self.config)._build_network(obs_dim, env.action_space.n)
         finally:

@@ -3,7 +3,8 @@ Proximal Policy Optimization (PPO) Learning Agent: the PPO learning rule plus it
 
 Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
 comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
-- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
+- Identical `LayerNorm + ReLU` two-stream network width (`ActorCritic` in `src/neural_nets/ppo_torch.py`); by default
+  the actor and critic each have their own trunk (`split_trunk`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`ActionRepeat` env wrapper).
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
@@ -71,8 +72,9 @@ class PPOAgent:
 
     Key algorithmic components:
         1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
-           Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
-           Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
+           2-layer `LayerNorm + ReLU` feature backbone (256 units) per stream (`split_trunk`; one shared
+           backbone otherwise) with 128-unit Actor (`pi(a|s)`) and Critic (`V(s)`) heads.
+           Flat head: 231,333 parameters split / 150,949 shared, matching Dueling DDQN.
         2. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
@@ -280,14 +282,14 @@ class PPOAgent:
     # Training / evaluation loops
     # ----------------------------------------------------------------------------------------
 
-    def _resolve_architecture(self, state_dict: dict | None) -> tuple[bool, int, int | list[int] | None]:
-        """(factored, hidden_dim, action_dim) from a checkpoint if given, else from `PPOConfig`.
+    def _resolve_architecture(self, state_dict: dict | None) -> tuple[bool, int, int | list[int] | None, bool]:
+        """(factored, hidden_dim, action_dim, split_trunk) from a checkpoint if given, else from `PPOConfig`.
         `action_dim` is None when it should be taken from the env's action space."""
         if state_dict is None:
-            return self.cfg.factored_action, self.cfg.hidden_size, None
+            return self.cfg.factored_action, self.cfg.hidden_size, None, self.cfg.split_trunk
         spec = infer_spec(state_dict)
         factored = spec.factored if spec.action_dim is not None else self.cfg.factored_action
-        return factored, spec.hidden_dim, spec.action_dim
+        return factored, spec.hidden_dim, spec.action_dim, spec.split_trunk
 
     def _build(
         self,
@@ -299,7 +301,7 @@ class PPOAgent:
         max_episode_steps: int | None,
     ):
         """The env (flat or factored actions to match the network) and an ActorCritic, loaded if `state_dict`."""
-        factored, hidden_dim, action_dim = self._resolve_architecture(state_dict)
+        factored, hidden_dim, action_dim, split_trunk = self._resolve_architecture(state_dict)
         env = make_env(
             bot_type=self.cfg.bot_type,
             discrete_action=not factored,
@@ -313,7 +315,9 @@ class PPOAgent:
         )
         if action_dim is None:
             action_dim = list(env.action_space.nvec) if factored else env.action_space.n
-        policy_net = ActorCritic(env.observation_space.shape[0], action_dim, hidden_dim).to(device)
+        policy_net = ActorCritic(env.observation_space.shape[0], action_dim, hidden_dim, split_trunk=split_trunk).to(
+            device
+        )
         if state_dict is not None:
             policy_net.load_state_dict(state_dict)
         return env, policy_net, action_dim

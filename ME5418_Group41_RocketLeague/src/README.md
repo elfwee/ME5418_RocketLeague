@@ -28,6 +28,7 @@ src/
 │   └── demo.py                  # --demo --gym: env checker + one random episode
 │
 ├── neural_nets/                 # PyTorch networks (import only torch)
+│   ├── trunk.py                 # Trunk: LayerNorm + ReLU feature extractor (one per stream when split)
 │   ├── dueling_ddqn_torch.py    # DQN / Double DQN / Dueling Double DQN
 │   ├── ppo_torch.py             # PPO Actor-Critic (flat or factored policy heads + value head)
 │   ├── checkpoint.py            # load_policy(path): rebuilds any saved network from its state_dict
@@ -86,7 +87,7 @@ src/
 
 ## 2. Learning Agents (`learning_agents/`)
 
-Both learning agents run in the same episode loop (`trainer.py`) and share an identical feature trunk (`LayerNorm`-stabilized 2-layer MLP of width $256$, totaling $150,949$ trainable parameters), `Adam` learning rate ($3 \times 10^{-4}$), discount factor ($\gamma = 0.99$), and $4\times$ action repeat ($15\text{ Hz}$ decision frequency with edge-triggered jump release):
+Both learning agents run in the same episode loop (`trainer.py`) and share an identical feature trunk design (`LayerNorm`-stabilized 2-layer MLP of width $256$, one per stream by default via `split_trunk`, totaling $231,333$ trainable parameters; $150,949$ with a single shared trunk), `Adam` learning rate ($3 \times 10^{-4}$), discount factor ($\gamma = 0.99$), and $4\times$ action repeat ($15\text{ Hz}$ decision frequency with edge-triggered jump release):
 
 - **Dueling Double DQN (`learning_agents/dueling_ddqn_agent.py`)**:
   - **Off-Policy Replay**: Stores transitions $(s_t, a_t, s_{t+1}, R_t, \text{terminated}_t)$ in `ReplayMemory` (`experience_replay.py`, capacity $100,000$, warm-up $2,000$ steps) and updates on $64$-sample minibatches every `train_freq = 4` decisions.
