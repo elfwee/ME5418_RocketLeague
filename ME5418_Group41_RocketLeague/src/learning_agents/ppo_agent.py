@@ -9,6 +9,8 @@ comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
 - On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
   and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
+- Rewards scaled by `reward_scale` (0.05: a goal is +/-1) before the critic and GAE see them; the
+  logged episode returns stay in raw env units, the logged value loss is in scaled units.
 - Identical episode loop, logging, checkpointing and 100-episode rolling metrics (`trainer.py`); each
   training run writes its outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
 """
@@ -85,6 +87,11 @@ class PPOAgent:
            Normalizes advantages across the entire 4,096-step rollout batch and performs `update_epochs` (6)
            of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value Huber loss,
            entropy bonus, and global gradient norm clipping.
+        5. Reward Scaling and Critic Warm-up (`observe`, `_loss_weights`):
+           Rewards are multiplied by `reward_scale` so returns are of order 1 and the critic's gradient
+           does not shrink the actor's step under the shared grad-norm clip. When training starts from a
+           checkpoint, the first `critic_warmup_updates` updates fit only the critic, so a critic trained
+           at another reward scale or against another opponent does not feed garbage advantages to the policy.
 
     One training decision step (driven by `trainer.run_training`):
         `act` (`_sample_action`) -> `env.step` (`ActionRepeat`) -> `observe` (`_bootstrap_value`
@@ -104,6 +111,7 @@ class PPOAgent:
         self.current_entropy = 0.0
         self.current_v_loss = 0.0
         self._pending: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None  # (action, log pi, V(s))
+        self._warmup_updates_left = 0  # critic-only updates still to run (set by `train` when fine-tuning)
 
     @property
     def dashboard_title(self) -> str:
@@ -122,6 +130,12 @@ class PPOAgent:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Truncation-aware GAE over the rollout (see `compute_gae`)."""
         return compute_gae(rewards, values, next_values, dones, self.cfg.discount_factor, self.cfg.gae_lambda)
+
+    def _loss_weights(self) -> tuple[float, float]:
+        """(policy weight, entropy weight) for this update: zero during critic warm-up, else (1, entropy_coef)."""
+        if self._warmup_updates_left > 0:
+            return 0.0, 0.0
+        return 1.0, self.cfg.entropy_coef
 
     def optimize(
         self,
@@ -143,6 +157,7 @@ class PPOAgent:
         value_loss_sum = 0.0
         kl_sum = 0.0
         num_mb = 0
+        policy_weight, entropy_weight = self._loss_weights()
 
         # Normalize advantages across the entire 4,096-sample rollout batch before minibatch sampling
         if advantages.numel() > 1:
@@ -178,13 +193,12 @@ class PPOAgent:
                 pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                # Huber (SmoothL1) value loss, matching DDQN's TD loss: linear beyond |error| > 1 so
-                # the +/-20 goal returns don't dominate the critic gradient
-                # v_loss = F.mse_loss(new_values, mb_returns)
+                # Huber (SmoothL1) value loss, matching DDQN's TD loss. With scaled rewards (returns ~ +/-1)
+                # the errors are mostly below 1, where it equals 0.5 * MSE (CleanRL's value loss)
                 v_loss = F.smooth_l1_loss(new_values, mb_returns)
                 entropy_loss = entropy.mean()
 
-                loss = pg_loss + self.cfg.value_loss_coef * v_loss - self.cfg.entropy_coef * entropy_loss
+                loss = policy_weight * pg_loss + self.cfg.value_loss_coef * v_loss - entropy_weight * entropy_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -269,11 +283,17 @@ class PPOAgent:
     def observe(self, state: torch.Tensor, reward: float, next_state: torch.Tensor, terminated: bool, truncated: bool):
         action, log_prob, value = self._pending
         next_value = self._bootstrap_value(self.model, next_state, terminated, truncated)
-        self.buffer.add(state, action, log_prob, value, next_value, reward, terminated or truncated)
+        # The critic learns scaled returns; the trainer still logs the raw env reward
+        scaled_reward = reward * self.cfg.reward_scale
+        self.buffer.add(state, action, log_prob, value, next_value, scaled_reward, terminated or truncated)
 
         # Perform PPO multi-epoch minibatch update once rollout horizon is reached
         if len(self.buffer) >= self.cfg.rollout_steps:
             self.current_entropy, self.current_v_loss = self._update_from_rollout(self.buffer, self.model, next_state)
+            if self._warmup_updates_left > 0:
+                self._warmup_updates_left -= 1
+                if self._warmup_updates_left == 0:
+                    print("[PPO Train] Critic warm-up done; policy updates start.")
 
     def progress(self) -> str:
         return f"Ent = {self.current_entropy:.3f}"
@@ -353,6 +373,10 @@ class PPOAgent:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
             self.buffer = RolloutBuffer()
             self.current_v_loss = 0.0
+            # A loaded critic was fitted at another reward scale / against another opponent: refit it first
+            self._warmup_updates_left = self.cfg.critic_warmup_updates if state_dict is not None else 0
+            if self._warmup_updates_left > 0:
+                print(f"[PPO Train] Critic warm-up: the first {self._warmup_updates_left} update(s) train the critic only.")
             # Until the first update, report the entropy of a uniform policy: sum over heads of log(n)
             self.current_entropy = (
                 float(sum(np.log(d) for d in action_dim)) if isinstance(action_dim, list) else float(np.log(action_dim))
@@ -360,7 +384,8 @@ class PPOAgent:
 
             print(
                 f"[PPO Train] Device={device} | Rollout={self.cfg.rollout_steps} | Epochs={self.cfg.update_epochs} | "
-                f"Minibatch={self.cfg.minibatch_size} | Bot={self.cfg.bot_type} | Model={paths.model_file}"
+                f"Minibatch={self.cfg.minibatch_size} | RewardScale={self.cfg.reward_scale} | Bot={self.cfg.bot_type} | "
+                f"Model={paths.model_file}"
             )
             return run_training(env, self, paths, num_episodes, self.cfg.checkpoint_interval)
         finally:

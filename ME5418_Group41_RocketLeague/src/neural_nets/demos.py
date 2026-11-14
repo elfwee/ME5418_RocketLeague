@@ -207,7 +207,8 @@ def run_ppo_network():
     actions = torch.stack(actions)  # Shape: (T,)
     old_log_probs = torch.stack(log_probs)  # Shape: (T,)
     values = torch.stack(values)  # Shape: (T,)
-    rewards = torch.tensor(rewards, dtype=torch.float32, device=device)  # Shape: (T,)
+    # Scaled like training (`PPOConfig.reward_scale`: a goal is +/-1), so returns are of order 1
+    rewards = torch.tensor(rewards, dtype=torch.float32, device=device) * PPOConfig.reward_scale  # Shape: (T,)
     dones = torch.tensor(dones, dtype=torch.float32, device=device)  # Shape: (T,)
 
     # 3. Backward Pass (GAE, Clipped Surrogate Loss & Gradient Backpropagation)
@@ -225,7 +226,7 @@ def run_ppo_network():
     pg_loss2 = -norm_advantages * torch.clamp(ratio, 1.0 - clip_coef, 1.0 + clip_coef)
     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-    v_loss = F.mse_loss(new_values, returns)
+    v_loss = F.smooth_l1_loss(new_values, returns)  # Huber, as in training
     entropy_loss = entropy.mean()
 
     # Total loss: policy loss + weighted value loss - weighted entropy bonus
@@ -237,13 +238,13 @@ def run_ppo_network():
     print("3. BACKWARD PASS (LOSS & GRADIENTS)")
     print("=" * 65)
     print(
-        f"Rollout Steps       : {rollout_steps} | Total Reward: {rewards.sum().item():.4f} | Episodes Done: {int(dones.sum().item())}"
+        f"Rollout Steps       : {rollout_steps} | Total Reward (scaled): {rewards.sum().item():.4f} | Episodes Done: {int(dones.sum().item())}"
     )
     print(f"Mean Advantage (raw): {advantages.mean().item():.6f}")
     print(f"Mean Return         : {returns.mean().item():.6f}")
     print(f"Mean Ratio          : {ratio.mean().item():.6f} (should be ~1.0 before update)")
     print(f"Policy (Clip) Loss  : {pg_loss.item():.6f}")
-    print(f"Value MSE Loss      : {v_loss.item():.6f}")
+    print(f"Value Huber Loss    : {v_loss.item():.6f}")
     print(f"Entropy             : {entropy_loss.item():.6f}")
     print(f"Total Loss          : {loss.item():.6f}")
 
@@ -262,7 +263,7 @@ def run_ppo_network():
         approx_kl = ((ratio_after - 1.0) - log_ratio_after).mean()  # non-negative KL(old || new) estimate
     print(f"\nMean Ratio          : {ratio_after.mean().item():.6f} (after 1 optimizer step)")
     print(f"Approx KL           : {approx_kl.item():.6f}")
-    print(f"Value MSE Loss      : {F.mse_loss(values_after, returns).item():.6f} (after 1 optimizer step)")
+    print(f"Value Huber Loss    : {F.smooth_l1_loss(values_after, returns).item():.6f} (after 1 optimizer step)")
     print("=" * 65)
 
     env.close()

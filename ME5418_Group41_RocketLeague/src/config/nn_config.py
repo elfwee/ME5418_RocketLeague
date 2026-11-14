@@ -69,6 +69,10 @@ class PPOConfig(AgentConfig):
     entropy_coef: float = 0.01
     max_grad_norm: float = 0.5
     target_kl: float = 0.02  # Early stopping threshold to preserve trust region
+    # Rewards are multiplied by this before the critic sees them (goal +/-20 -> +/-1), so the critic's
+    # gradient does not dominate the global grad-norm clip and shrink the actor's step. Logged returns stay raw.
+    reward_scale: float = 0.05
+    critic_warmup_updates: int = 6  # Fine-tuning: first updates train the critic only (~6 to refit a raw-scale critic)
 
     # Rollout & Multi-Epoch Minibatch Schedule
     rollout_steps: int = 4096

@@ -220,6 +220,9 @@ class Curriculum:
         if first and isinstance(cfg, DQNConfig):
             # DQN drops to epsilon_finetune when given a checkpoint; the init weights are untrained
             cfg = replace(cfg, epsilon_finetune=cfg.epsilon_init)
+        if first and isinstance(cfg, PPOConfig):
+            # PPO warms up a loaded critic before policy updates; the init weights have nothing to protect
+            cfg = replace(cfg, critic_warmup_updates=0)
         self._opponent_action_repeat = cfg.action_repeat
         agent = self.agent(cfg)
 

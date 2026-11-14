@@ -2,6 +2,31 @@
 
 Scope: `PPOConfig` values and small edits inside `ppo_agent.py`. No multiprocessing, no change to `trainer.py`, the curriculum, the reward or DDQN.
 
+## Status (2026-11-14, evening)
+
+| Change | State |
+| :-- | :-- |
+| Split feature trunks for PPO (`actor_trunk` / `critic_trunk`) and Dueling DDQN (`value_trunk` / `advantage_trunk`) | Done, commit `a24be11` |
+| PPO value loss MSE -> Huber | Done, commit `534b50c` |
+| PPO reward scaling (`PPOConfig.reward_scale = 0.05`, goal = +/-1, applied in `PPOAgent.observe` only) | Done, uncommitted |
+| PPO critic warm-up when fine-tuning (`critic_warmup_updates = 6`; skipped for curriculum stage 1) | Done, uncommitted |
+| Steps 0 to 3 and 5 below | Not started |
+| Step 4 (`value_loss_coef` sweep) | Dropped, replaced by reward scaling |
+
+What the trunk split and reward scaling changed, measured on the split stage-1 model against the bot. "Actor step kept" is how much of the
+actor's gradient survives the global 0.5 grad-norm clip:
+
+| Setup | Critic grad / actor grad | Actor step kept | Actor-only clip would keep |
+| :-- | :-- | :-- | :-- |
+| Shared trunk, MSE, raw rewards (before) | 7 to 18x on the trunk | 0.02 to 0.15 | n/a |
+| Split, MSE, raw rewards | 15 to 22x | 0.02 to 0.03 | 0.36 to 0.46 |
+| Split, Huber, raw rewards | 0.5 to 1.2x | 0.40 to 0.63 | 0.56 to 0.86 |
+| Split, Huber, rewards x0.05 (now), after the critic settles | 0.05 to 0.25x | 0.48 to 0.63 | the same |
+
+A critic loaded from a raw-reward checkpoint needs about 6 critic-only updates to rescale (fresh-rollout explained variance -3.5 at the start,
+about 0 after 2 updates, 0.1 to 0.3 from update 7), hence `critic_warmup_updates = 6`. Logged `reward` / `mean_reward_100` stay raw;
+the `value_loss` column is now in scaled units.
+
 ## Context
 
 PPO matches Dueling DDQN with no opponent, then falls behind as soon as there is one (`curriculum.log`, 04:00 runs):
@@ -44,7 +69,7 @@ Updates are just as noisy with no opponent, where PPO learns fine. So noise alon
 
 **3. From scratch against the bot there is no signal at all.** Gradient agreement is about 0 at every batch size, and the model from the 08:58 run scored 1 full goal in 40 greedy episodes. Its "25% goal rate" is the bot touching the ball last on the way in. That run will not learn; training has to go no opponent first, then the bot.
 
-**4. Smaller findings.** The value loss gradient on the shared trunk is 7 to 18 times the policy gradient, and the 0.5 grad-norm clip is active on every minibatch. The critic's explained variance is 0.0 to 0.35 on a fresh rollout and 0.55 to 0.90 on the same rollout after the update. Logged `goal` includes +2 goals, and logged return is for the sampled policy, which against the bot is far below the greedy one.
+**4. Smaller findings.** The value loss gradient on the shared trunk is 7 to 18 times the policy gradient, and the 0.5 grad-norm clip is active on every minibatch (fixed since: see Status). The critic's explained variance is 0.0 to 0.35 on a fresh rollout and 0.55 to 0.90 on the same rollout after the update. Logged `goal` includes +2 goals, and logged return is for the sampled policy, which against the bot is far below the greedy one.
 
 **Intended outcome:** PPO enters stage 2 at its stage-1 skill level instead of a perturbed copy, and stage 2 ends no worse than it starts. On a converged stage-1 model that is about 78% full goals and 13% conceded, already above DDQN's stage-2 model.
 
@@ -59,7 +84,7 @@ All three fine-tune `runs/20261114_0303_ppo/checkpoints/model_ppo_ep011000.pt` a
 | Run | Start weights | Config |
 | :-- | :-- | :-- |
 | S, status quo | checkpoint as saved | current |
-| Z, silenced | copy with `fc1.weight[:, 35:52] = 0`, saved outside the repo | current |
+| Z, silenced | copy with the opponent columns 35:52 of every first layer zeroed (`fc1`, or `actor_trunk.fc1` and `critic_trunk.fc1`), saved outside the repo | current |
 | ZB, silenced and big batch | same copy | `rollout_steps=32768, minibatch_size=2048` |
 
 Then greedy evaluation, 100 episodes, of every fifth periodic checkpoint of each run, giving full goals, conceded and mean return over training.
@@ -69,7 +94,7 @@ Then greedy evaluation, 100 episodes, of every fifth periodic checkpoint of each
 
 ### Step 1: silence untrained opponent inputs (`ppo_agent.py`)
 
-New helper `_silence_opponent_inputs(policy_net)`, called in `train()` right after `_build` when the env has no Orange car (`env.unwrapped.sim.orange_car is None`). It zeroes `fc1.weight[:, OPPONENT_PRESENT]` and `fc1.weight[:, OPPONENT_FEATURES]`, using the index constants that already exist in `src/sim/core/observation.py`, and prints one line saying so.
+New helper `_silence_opponent_inputs(policy_net)`, called in `train()` right after `_build` when the env has no Orange car (`env.unwrapped.sim.orange_car is None`). It zeroes columns `OPPONENT_PRESENT` and `OPPONENT_FEATURES` of every first layer that sees the observation (`actor_trunk.fc1` and `critic_trunk.fc1` with split trunks, the shared `fc1` on legacy checkpoints), using the index constants that already exist in `src/sim/core/observation.py`, and prints one line saying so.
 
 - The no-opponent run itself is unchanged: those inputs are exactly 0, so the columns contribute nothing, and their gradient is exactly 0, so they stay 0.
 - When an opponent appears, the stage-1 policy plays exactly as trained and learns the opponent inputs from zero influence.
@@ -78,7 +103,7 @@ New helper `_silence_opponent_inputs(policy_net)`, called in `train()` right aft
 
 ### Step 2: per-update diagnostics (`ppo_agent.py`)
 
-- `optimize` also returns clip fraction, epochs run before the KL stop, pre-clip grad norm, and the value-to-policy gradient ratio on the trunk (first minibatch of each update only).
+- `optimize` also returns clip fraction, epochs run before the KL stop, pre-clip grad norm, the critic-to-actor gradient ratio and the share of the actor's step kept after the global clip (first minibatch of each update only).
 - `_update_from_rollout` adds explained variance on the fresh rollout (before the update).
 - `observe` tallies episode endings in the current rollout from the terminal reward: full goal, +2 goal, conceded, timeout.
 - `train()` keeps the run folder; after each update the agent appends one row to `updates_<name>.csv` there and prints a one-line summary.
@@ -94,9 +119,9 @@ Adopt if ZB ends at least 3 mean-return points or 10 points of full-goal rate ab
 
 Cost with one env: a 32k-step update takes roughly 30 to 50 seconds to collect, so an opponent stage runs for hours.
 
-### Step 4: balance the two losses on the trunk
+### Step 4: dropped
 
-`value_loss_coef` 0.5 against 0.05, same setup as the Step 0 winner. 0.05 brings the measured trunk ratio from about 11 to about 1; the critic's own layers are unaffected because Adam rescales them. Adopt 0.05 only if fresh-rollout explained variance does not fall and the greedy result is not worse. This is the least certain change.
+The `value_loss_coef` sweep is replaced by the trunk split, the Huber value loss and reward scaling (see Status).
 
 ### Step 5: only if the diagnostics call for it
 
@@ -106,7 +131,7 @@ Cost with one env: a 32k-step update takes roughly 30 to 50 seconds to collect, 
 ### Outside the chosen scope, with what each is worth
 
 1. **Which stage-1 model stage 2 receives.** Largest measured effect: 47% against 78% full goals with the opponent inputs zeroed in both cases. Two or three lines in `Curriculum._train_stage`, to hand over the newest periodic checkpoint instead of the best-by-return file for the no-opponent stage. Until then, `--train --ppo --model_path <newest checkpoint>` does it by hand.
-2. **The same opponent-input fix for DDQN.** Its stage-1 model goes from 63% to 83% full goals. Without it PPO gets a fix DDQN does not, which matters for the comparison.
+2. **The same opponent-input fix for DDQN** (zero the opponent columns of `value_trunk.fc1` and `advantage_trunk.fc1`). Its stage-1 model goes from 63% to 83% full goals. Without it PPO gets a fix DDQN does not, which matters for the comparison.
 3. **Reward for deflected shots.** Against the bot about 40% of PPO's goals pay +2 instead of +20; in 24 of 27 the ego car had hit the ball within 2 seconds. Decided: leave the reward alone.
 4. **Parallel environments,** which would make Step 3's batch about 6 times faster to collect.
 
@@ -115,7 +140,7 @@ Cost with one env: a 32k-step update takes roughly 30 to 50 seconds to collect, 
 | File | Change |
 | :-- | :-- |
 | `src/learning_agents/ppo_agent.py` | `_silence_opponent_inputs`, update statistics and `updates_<name>.csv`, effective rollout and minibatch size, docstring numbers |
-| `src/config/nn_config.py` | `silence_opponent_inputs`, `opponent_batch_scale`, and `value_loss_coef` if Step 4 passes |
+| `src/config/nn_config.py` | `silence_opponent_inputs`, `opponent_batch_scale` |
 
 Reused as they are: `OPPONENT_PRESENT` and `OPPONENT_FEATURES` (`src/sim/core/observation.py`), `RunPaths`, `compute_gae`, `RolloutBuffer`, `run_training`.
 

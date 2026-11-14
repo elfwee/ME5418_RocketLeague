@@ -24,6 +24,11 @@ Each training run writes `model_<name>.pt` (best model), `checkpoints/model_<nam
 `metrics_<name>.csv` (`episode,step,reward,mean_reward_100,goal,goal_rate_100` plus
 `epsilon,td_loss` or `entropy,value_loss`), `run_<name>.log` and `graph_<name>.png`.
 
+PPO multiplies rewards by `PPOConfig.reward_scale` (0.05, so a goal is +/-1) before its critic sees
+them, so its `value_loss` column is in scaled units and not comparable with runs from before this change;
+`reward` and `mean_reward_100` are always the raw env return. When PPO training starts from a checkpoint,
+the first `critic_warmup_updates` updates train only the critic.
+
 Policy-vs-policy matches live in [`src/eval/`](../eval/): `mixed_eval.py` (`--eval --mix`, env episodes) and
 `head_to_head.py` (`--head_to_head`, a continuous match). Both drive Orange the same way: the
 mirrored observation and a mirrored action, so any checkpoint trained on Blue plays either side.
