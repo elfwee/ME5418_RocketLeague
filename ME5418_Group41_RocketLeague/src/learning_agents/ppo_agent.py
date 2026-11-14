@@ -83,7 +83,7 @@ class PPOAgent:
            (`truncated=True`) bootstrap from the critic's value estimate `V(s_timeout)` before reset.
         4. Clipped Surrogate Objective (`optimize`):
            Normalizes advantages across the entire 4,096-step rollout batch and performs `update_epochs` (6)
-           of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value MSE loss,
+           of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value Huber loss,
            entropy bonus, and global gradient norm clipping.
 
     One training decision step (driven by `trainer.run_training`):
@@ -178,7 +178,10 @@ class PPOAgent:
                 pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                v_loss = F.mse_loss(new_values, mb_returns)
+                # Huber (SmoothL1) value loss, matching DDQN's TD loss: linear beyond |error| > 1 so
+                # the +/-20 goal returns don't dominate the critic gradient
+                # v_loss = F.mse_loss(new_values, mb_returns)
+                v_loss = F.smooth_l1_loss(new_values, mb_returns)
                 entropy_loss = entropy.mean()
 
                 loss = pg_loss + self.cfg.value_loss_coef * v_loss - self.cfg.entropy_coef * entropy_loss
