@@ -1,0 +1,10 @@
+rank,model,wins,draws,losses,goals_for,goals_against,goal_diff,points,self_play_blue_orange
+1,DDQN_s3_r1,7,0,1,556,150,406,21,21-20
+2,DDQN_s2,6,1,1,757,451,306,19,52-17
+3,PPO_s3_r1,4,2,2,559,354,205,14,6-6
+4,DDQN_none,4,2,2,516,499,17,14,0-0
+5,heuristic_bot,4,0,4,697,507,190,12,4-5
+6,PPO_none,3,3,2,501,549,-48,12,1-0
+7,PPO_s3_r2,2,1,5,278,291,-13,7,0-1
+8,PPO_s2,1,0,7,88,878,-790,3,0-0
+9,DDQN_s3_r2,0,1,7,425,698,-273,1,8-8

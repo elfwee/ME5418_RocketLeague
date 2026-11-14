@@ -20,7 +20,7 @@ class CurriculumConfig:
     self_play_rounds: int = 5  # Self-play rounds; the opponent is refreshed to the newest best model after each
 
     # Plateau detection (ends a stage / self-play round)
-    patience: int = 1000  # Episodes without a new best rolling mean return before the stage ends
+    patience: int = 5000  # Episodes without a new best rolling mean return before the stage ends
     reward_window: int = 100  # Episodes in the rolling mean return (matches the agents' best-model metric)
     min_episodes: int = 20  # Warm-up before a stage can set a best / plateau (matches TrainingLogger)
     max_stage_episodes: int | None = None  # Hard cap on episodes per stage / round (None: until plateau)
