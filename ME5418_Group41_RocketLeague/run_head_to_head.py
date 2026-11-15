@@ -12,14 +12,25 @@ from src.sim.ai import heuristic_bot
 from src.eval.head_to_head import play_head_to_head
 
 heuristic_bot = None
-DDQN_none = "./runs/20261114_0855_dueling_ddqn_s1_none/checkpoints/model_dueling_ddqn_s1_none_ep024000.pt"
-PPO_none = "./runs/20261114_0855_ppo_s1_none/checkpoints/model_ppo_s1_none_ep011000.pt"
-DDQN_s2 = "./runs/20261114_0953_dueling_ddqn_s2_heuristic/checkpoints/model_dueling_ddqn_s2_heuristic_ep007000.pt"
+# Previous picks (king of the hill without the heuristic qualifying round)
+# DDQN_none = "./runs/20261114_0855_dueling_ddqn_s1_none/checkpoints/model_dueling_ddqn_s1_none_ep024000.pt"
+# PPO_none = "./runs/20261114_0855_ppo_s1_none/checkpoints/model_ppo_s1_none_ep011000.pt"
+# DDQN_s2 = "./runs/20261114_0953_dueling_ddqn_s2_heuristic/checkpoints/model_dueling_ddqn_s2_heuristic_ep007000.pt"
+# PPO_s2 = "./runs/20261114_0953_ppo_s2_heuristic/checkpoints/model_ppo_s2_heuristic_ep008000.pt"
+# DDQN_s3_r1 = "./runs/20261114_1015_dueling_ddqn_s3_self_r1/checkpoints/model_dueling_ddqn_s3_self_r1_ep021500.pt"
+# PPO_s3_r1 = "./runs/20261114_1035_ppo_s3_self_r1/checkpoints/model_ppo_s3_self_r1_ep017500.pt"
+# DDQN_s3_r2 = "./runs/20261114_1102_dueling_ddqn_s3_self_r2/checkpoints/model_dueling_ddqn_s3_self_r2_ep012000.pt"
+# PPO_s3_r2 = "./runs/20261114_0447_ppo_s3_self_r2/checkpoints/model_ppo_s3_self_r2_ep001000.pt"
+
+# Best models: king of the hill with the heuristic-bot qualifying round
+DDQN_none = "./runs/20261114_0855_dueling_ddqn_s1_none/checkpoints/model_dueling_ddqn_s1_none_ep018000.pt"
+PPO_none = "./runs/20261114_0855_ppo_s1_none/checkpoints/model_ppo_s1_none_ep009000.pt"
+DDQN_s2 = "./runs/20261114_0953_dueling_ddqn_s2_heuristic/checkpoints/model_dueling_ddqn_s2_heuristic_ep006500.pt"
 PPO_s2 = "./runs/20261114_0953_ppo_s2_heuristic/checkpoints/model_ppo_s2_heuristic_ep008000.pt"
 DDQN_s3_r1 = "./runs/20261114_1015_dueling_ddqn_s3_self_r1/checkpoints/model_dueling_ddqn_s3_self_r1_ep021500.pt"
-PPO_s3_r1 = "./runs/20261114_1035_ppo_s3_self_r1/checkpoints/model_ppo_s3_self_r1_ep017500.pt"
-DDQN_s3_r2 = "./runs/20261114_1102_dueling_ddqn_s3_self_r2/checkpoints/model_dueling_ddqn_s3_self_r2_ep012000.pt"
-PPO_s3_r2 = "./runs/20261114_0447_ppo_s3_self_r2/checkpoints/model_ppo_s3_self_r2_ep001000.pt"
+PPO_s3_r1 = "./runs/20261114_1035_ppo_s3_self_r1/checkpoints/model_ppo_s3_self_r1_ep017000.pt"
+DDQN_s3_r2 = "./runs/20261114_1102_dueling_ddqn_s3_self_r2/checkpoints/model_dueling_ddqn_s3_self_r2_ep008500.pt"
+PPO_s3_r2 = "./runs/20261114_0447_ppo_s3_self_r2/model_ppo_s3_self_r2.pt"
 
 # ---- Settings -----------------------------------------------------------------
 BLUE_MODEL = None
