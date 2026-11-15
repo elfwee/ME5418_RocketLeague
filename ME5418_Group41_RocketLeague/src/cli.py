@@ -16,6 +16,7 @@ USAGE = f"""Usage:
   {PROG} --play --headless                     # Run headless physics benchmark
   {PROG} --head_to_head [--headless] [--random_spawn] [--seed N] [--max_goals N] [--max_seconds S] [--blue PATH|none] [--orange PATH|none]  # Continuous agent vs agent
   {PROG} --round_robin [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
+  {PROG} --best_checkpoint RUN_DIR [--threshold N] [--max_seconds S] [--max_goals N] [--random_spawn] [--seed N]  # Pick the strongest model in a training run
   {PROG} --demo --gym                          # Demo Gymnasium environment
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
   {PROG} --demo --ppo                          # Test PPO Actor-Critic network
@@ -31,6 +32,7 @@ MODES = {
     "play": "play interactively, or run the headless physics benchmark",
     "head_to_head": "continuous match between two checkpoints or heuristic bots",
     "round_robin": "headless side-swapped round-robin tournament across a folder of checkpoints + heuristic bot",
+    "best_checkpoint": "pick the strongest model in a training run (heuristic-bot qualifying + king of the hill)",
     "demo": "Gymnasium environment or network forward/backward pass demo",
     "train": "train a learning agent",
     "curriculum": "train a learning agent through a curriculum: no opponent -> heuristic bot -> self-play",
@@ -155,6 +157,22 @@ def round_robin_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no_heuristic", action="store_true", help="exclude HeuristicBot from the tournament")
     parser.add_argument("--no_mirrors", action="store_true", help="skip Bot-vs-Bot mirror pairings")
     parser.add_argument("--workers", type=int, default=None, help="parallel CPU workers (default: cpu_count - 1)")
+    return parser
+
+
+def best_checkpoint_parser() -> argparse.ArgumentParser:
+    parser = _sub_parser("best_checkpoint", MODES["best_checkpoint"])
+    parser.add_argument("run_dir", help="training run folder, e.g. runs/20261114_1537_ppo_s3_self_r4")
+    parser.add_argument(
+        "--threshold",
+        type=int,
+        default=3,
+        help="goal difference a challenger must exceed to dethrone the champion (default: %(default)s)",
+    )
+    parser.add_argument("--max_seconds", type=float, default=300.0, help="sim seconds per game (default: %(default)s)")
+    parser.add_argument("--max_goals", type=int, default=None, help="stop a game after this many total goals")
+    parser.add_argument("--random_spawn", action="store_true", help="randomise every kickoff")
+    parser.add_argument("--seed", type=int, default=None, help="seed for repeatable random spawns")
     return parser
 
 
@@ -294,6 +312,19 @@ def run_round_robin(args: argparse.Namespace):
         include_heuristic=not args.no_heuristic,
         include_mirrors=not args.no_mirrors,
         workers=args.workers,
+    )
+
+
+def run_best_checkpoint(args: argparse.Namespace):
+    from src.eval.best_checkpoint import best_model_in_run
+
+    best_model_in_run(
+        args.run_dir,
+        goal_difference_threshold=args.threshold,
+        max_seconds=args.max_seconds,
+        max_goals=args.max_goals,
+        random_spawn=args.random_spawn,
+        seed=args.seed,
     )
 
 
@@ -501,6 +532,7 @@ SUB_PARSERS = {
     "play": play_parser,
     "head_to_head": head_to_head_parser,
     "round_robin": round_robin_parser,
+    "best_checkpoint": best_checkpoint_parser,
     "demo": demo_parser,
     "train": train_parser,
     "curriculum": curriculum_parser,
@@ -529,6 +561,8 @@ def main(argv: Sequence[str] | None = None):
         run_head_to_head(args)
     elif known.mode == "round_robin":
         run_round_robin(args)
+    elif known.mode == "best_checkpoint":
+        run_best_checkpoint(args)
     elif known.mode == "demo":
         run_demo(args, parser)
     elif known.mode == "train":

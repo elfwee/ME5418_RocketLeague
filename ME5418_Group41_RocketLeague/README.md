@@ -28,7 +28,7 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
-- 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches in `src/eval/`.
+- 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches, round-robin tournaments and best-checkpoint selection in `src/eval/`.
 - 🧠 **[Neural Networks (`src/neural_nets/README.md`)](./src/neural_nets/README.md)**: PyTorch `nn.Module` definitions (`dueling_ddqn_torch.py` and `ppo_torch.py`), checkpoint loading, and standalone forward/backward pass verification (`--demo`).
 - 📚 **[System & RL Environment (`src/README.md`)](./src/README.md)**: Package structure, Gymnasium observation/action spaces, reward shaping formulation, and control scheme.
 - ⚙️ **[Physics & Vehicle Kinematics (`src/sim/core/README.md`)](./src/sim/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
@@ -122,6 +122,29 @@ python -m src --head_to_head [--blue PATH|none] [--orange PATH|none] [--random_s
 # Headless match with score/time limits
 python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/YYYYMMDD_hhmm_dueling_ddqn/model_dueling_ddqn.pt --orange none
 ```
+
+#### Pick the Best Checkpoint in a Run (`--best_checkpoint`)
+
+Find the strongest model in a training run folder. Every model (`model_*.pt` plus `checkpoints/*.pt`) first plays the heuristic bot once from each side; only models with a positive goal difference qualify. The qualifiers then play king of the hill: each challenger plays the current champion once from each side, and takes over if its goal difference exceeds `--threshold`.
+
+```bash
+# Default: 300 s games, fixed kickoffs, challenger must win by more than 3 goals
+python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo
+
+# Shorter games with repeatable random kickoffs and a lower threshold
+python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo --max_seconds 120 --random_spawn --seed 0 --threshold 1
+```
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `RUN_DIR` | _(required)_ | Training run folder containing `model_*.pt` and/or `checkpoints/*.pt`. |
+| `--threshold N` | `3` | Goal difference (over both sides) a challenger must **exceed** to replace the champion. |
+| `--max_seconds S` | `300.0` | Simulation time per game in seconds. |
+| `--max_goals N` | _none_ | End a game early after this many total goals. |
+| `--random_spawn` | `False` | Randomise every kickoff. |
+| `--seed N` | _none_ | Seed for repeatable random spawns. |
+
+The best model's path is printed at the end, along with a summary of every challenge. If no model beats the heuristic bot, the command stops with an error naming the closest model.
 
 #### Plot Learning Curves & Dashboards
 

@@ -6,18 +6,17 @@ positive goal difference against it go forward, so the final champion is guarant
 heuristic bot. If no model beats it, a RuntimeError is raised.
 
 Among the qualifiers, the run's best model (`model_<name>.pt`, saved by 100-episode mean return)
-starts as the champion. Every qualifying checkpoint in `checkpoints/` then challenges it, king-of-the-hill style: each pairing
-is played once from each side (the challenger as Blue, then as Orange) and goal difference over both
-games decides it. A challenger that wins on goal difference becomes the new champion; a tie keeps
-the current one. Prints and returns the path of the final champion.
+starts as the champion. Every qualifying checkpoint in `checkpoints/` then challenges it, king-of-the-hill
+style: each pairing is played once from each side (the challenger as Blue, then as Orange) and goal
+difference over both games decides it. A challenger whose goal difference exceeds the threshold becomes
+the new champion; otherwise the current one holds. Prints and returns the path of the final champion.
 
 Run from the repo root:
 
-    python test_checkpoints.py runs/20261114_1537_ppo_s3_self_r4
-    python test_checkpoints.py runs/20261114_1537_ppo_s3_self_r4 --seconds 300 --random_spawn --seed 0
+    python -m src --best_checkpoint runs/20261114_1537_ppo_s3_self_r4
+    python -m src --best_checkpoint runs/20261114_1537_ppo_s3_self_r4 --max_seconds 300 --random_spawn --seed 0
 """
 
-import argparse
 from pathlib import Path
 
 from src.eval.head_to_head import play_head_to_head
@@ -39,7 +38,7 @@ def goal_difference(model_a: Path | None, model_b: Path | None, **match_kwargs) 
 
 def best_model_in_run(
     run_dir: str | Path,
-    goal_difference_threshold : int = 3,
+    goal_difference_threshold: int = 3,
     max_seconds: float | None = 300.0,
     max_goals: int | None = None,
     random_spawn: bool = False,
@@ -86,26 +85,3 @@ def best_model_in_run(
         print(f"  {challenger_name:<45} vs {champion_name:<45} {diff:+d}")
     print(f"\n[Checkpoints] Best model: {champion} (vs heuristic bot {vs_heuristic[champion]:+d})")
     return champion
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Pick the strongest model in a training run.")
-    parser.add_argument("run_dir", type=Path, help="Training run folder, e.g. runs/20261114_1537_ppo_s3_self_r4")
-    parser.add_argument("--threshold", type=int, default=3, help="goal_difference_threshold")
-    parser.add_argument("--seconds", type=float, default=300.0, help="Sim seconds per game (default 300)")
-    parser.add_argument("--goals", type=int, default=None, help="Stop a game after this many total goals")
-    parser.add_argument("--random_spawn", action="store_true", help="Randomise every kickoff")
-    parser.add_argument("--seed", type=int, default=None, help="Seed for repeatable random spawns")
-    args = parser.parse_args()
-
-    best_model_in_run(
-        args.run_dir,
-        max_seconds=args.seconds,
-        max_goals=args.goals,
-        random_spawn=args.random_spawn,
-        seed=args.seed,
-    )
-
-
-if __name__ == "__main__":
-    main()
