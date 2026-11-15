@@ -15,6 +15,7 @@ USAGE = f"""Usage:
   {PROG} --play [--blue|--orange|--bot-vs-bot] [--no-orange]  # Play interactively (default: control Blue car)
   {PROG} --play --headless                     # Run headless physics benchmark
   {PROG} --head_to_head [--headless] [--random_spawn] [--seed N] [--max_goals N] [--max_seconds S] [--blue PATH|none] [--orange PATH|none]  # Continuous agent vs agent
+  {PROG} --round_robin [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
   {PROG} --demo --gym                          # Demo Gymnasium environment
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
   {PROG} --demo --ppo                          # Test PPO Actor-Critic network
@@ -29,6 +30,7 @@ Run `{PROG} --<mode> --help` for every option of a mode."""
 MODES = {
     "play": "play interactively, or run the headless physics benchmark",
     "head_to_head": "continuous match between two checkpoints or heuristic bots",
+    "round_robin": "headless side-swapped round-robin tournament across a folder of checkpoints + heuristic bot",
     "demo": "Gymnasium environment or network forward/backward pass demo",
     "train": "train a learning agent",
     "curriculum": "train a learning agent through a curriculum: no opponent -> heuristic bot -> self-play",
@@ -128,6 +130,31 @@ def head_to_head_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None, help="seed for repeatable random spawns")
     parser.add_argument("--max_goals", type=int, default=None, help="stop after this many goals in total")
     parser.add_argument("--max_seconds", type=float, default=600.0, help="stop after this much sim time (default 600)")
+    return parser
+
+
+def round_robin_parser() -> argparse.ArgumentParser:
+    from src.eval.round_robin import DEFAULT_MODELS_DIR, DEFAULT_OUT_DIR
+
+    parser = _sub_parser("round_robin", MODES["round_robin"])
+    parser.add_argument(
+        "--models_dir",
+        default=str(DEFAULT_MODELS_DIR),
+        help="directory containing .pt checkpoints to evaluate (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out_dir",
+        default=str(DEFAULT_OUT_DIR),
+        help="directory where CSVs, raw logs and Markdown report are saved (default: %(default)s)",
+    )
+    parser.add_argument("--matches", type=int, default=100, help="matches per directed Blue-vs-Orange pairing (default: 100)")
+    parser.add_argument("--max_goals", type=int, default=1, help="goals to end each match (default: 1; 0 disables)")
+    parser.add_argument("--max_seconds", type=float, default=60.0, help="sim time cap per match in seconds (default: 60)")
+    parser.add_argument("--seed", type=int, default=50, help="base seed for repeatable random spawns (default: 50)")
+    parser.add_argument("--no_random_spawn", action="store_true", help="use fixed kickoff spawns instead of random spawns")
+    parser.add_argument("--no_heuristic", action="store_true", help="exclude HeuristicBot from the tournament")
+    parser.add_argument("--no_mirrors", action="store_true", help="skip Bot-vs-Bot mirror pairings")
+    parser.add_argument("--workers", type=int, default=None, help="parallel CPU workers (default: cpu_count - 1)")
     return parser
 
 
@@ -250,6 +277,23 @@ def run_head_to_head(args: argparse.Namespace):
         max_seconds=args.max_seconds,
         random_spawn=args.random_spawn,
         seed=args.seed,
+    )
+
+
+def run_round_robin(args: argparse.Namespace):
+    from src.eval.round_robin import run_round_robin_eval
+
+    run_round_robin_eval(
+        models_dir=args.models_dir,
+        out_dir=args.out_dir,
+        matches=args.matches,
+        seed=args.seed,
+        max_seconds=args.max_seconds,
+        max_goals=None if args.max_goals == 0 else args.max_goals,
+        random_spawn=not args.no_random_spawn,
+        include_heuristic=not args.no_heuristic,
+        include_mirrors=not args.no_mirrors,
+        workers=args.workers,
     )
 
 
@@ -456,6 +500,7 @@ def run_plot(rest: list[str]):
 SUB_PARSERS = {
     "play": play_parser,
     "head_to_head": head_to_head_parser,
+    "round_robin": round_robin_parser,
     "demo": demo_parser,
     "train": train_parser,
     "curriculum": curriculum_parser,
@@ -482,6 +527,8 @@ def main(argv: Sequence[str] | None = None):
         run_play(args)
     elif known.mode == "head_to_head":
         run_head_to_head(args)
+    elif known.mode == "round_robin":
+        run_round_robin(args)
     elif known.mode == "demo":
         run_demo(args, parser)
     elif known.mode == "train":
