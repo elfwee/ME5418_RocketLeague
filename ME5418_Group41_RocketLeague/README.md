@@ -176,6 +176,51 @@ python -m src --demo --dqn
 python -m src --demo --ppo
 ```
 
+## 4. Evaluate across models
+
+Run a headless side-swapped round-robin tournament across all `.pt` checkpoints placed in a folder (default: `eval_model/`) together with `HeuristicBot`, using the continuous simulation engine (`Simulation` + `PolicyController` / `HeuristicController`):
+
+```bash
+# Default: evaluate all checkpoints in eval_model/ + HeuristicBot
+# (100 matches per directed Blue-vs-Orange pairing, 1-goal / 60s cap, seed 50, random spawns)
+python -m src --round_robin
+
+# Custom folder, output directory, match budget, seed and worker count
+python -m src --round_robin \
+  --models_dir eval_model \
+  --out_dir eval_model/eval_report \
+  --matches 100 \
+  --max_goals 1 \
+  --max_seconds 60 \
+  --seed 50 \
+  --workers 11
+```
+
+### Options (`python -m src --round_robin --help`)
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--models_dir DIR` | `eval_model` | Folder containing curated `.pt` checkpoints (architecture auto-inferred). |
+| `--out_dir DIR` | `eval_model/eval_report` | Output folder for CSVs, raw logs, and Markdown summary report. |
+| `--matches N` | `100` | Matches played per directed `(Blue, Orange)` pairing. |
+| `--max_goals N` | `1` | Goals required to end a match (`0` disables goal cap). |
+| `--max_seconds S` | `60.0` | Simulation time limit per match in seconds (`0-0` timeout = Draw). |
+| `--seed N` | `50` | Base seed for repeatable random spawns (match `i` uses `seed + i`). |
+| `--no_random_spawn` | `False` | Use fixed kickoff spawns instead of random spawns. |
+| `--no_heuristic` | `False` | Exclude `HeuristicBot` from the tournament. |
+| `--no_mirrors` | `False` | Skip `Bot vs Bot` mirror pairings. |
+| `--workers N` | `cpu_count - 1` | Number of parallel CPU worker processes (`1` runs sequentially). |
+
+### Generated Artifacts (`--out_dir`)
+
+- `overall_standings.csv`: Ranked overall standings (non-mirror and all-match win rate, goal differential, and Blue/Orange splits).
+- `pairings_summary.csv`: Per-pairing statistics for all directed `(Blue, Orange)` matchups.
+- `matrix_score_b_o_d.csv`: $N \times N$ directed matrix (`BlueWins-OrangeWins-Draws`).
+- `matrix_combined_200_matches.csv`: $N \times N$ side-swapped combined matrix (`RowWins-ColWins-Draws`).
+- `matrix_blue_win_rate_pct.csv` & `matrix_blue_goal_diff.csv`: Blue win-rate and goal-differential matrices.
+- `raw_matches.csv` & `raw_matches.log`: Per-match logs (`pairing_id`, `seed`, `winner`, goals, `sim_seconds`, `steps`, `last_touch`).
+- `eval_report.md`: Markdown summary containing the standings and head-to-head matrices.
+
 ---
 
 ## AI Tool Declaration
