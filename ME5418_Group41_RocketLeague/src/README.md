@@ -9,7 +9,7 @@ This directory contains the complete simulation engine, Gymnasium RL environment
 ```text
 src/
 ├── __main__.py                  # Enables `python -m src`
-├── cli.py                       # Command-line interface (--play, --head_to_head, --demo, --train, --curriculum, --eval, --plot)
+├── cli.py                       # Command-line interface (--play, --head_to_head, --round_robin, --best_checkpoint, --demo, --train, --curriculum, --eval, --plot)
 ├── main.py                      # Compatibility shim re-exporting cli.main
 ├── paths.py                     # ROOT_DIR and RUNS_DIR (the only definitions)
 │
@@ -49,7 +49,9 @@ src/
 │
 ├── eval/                        # Policy-vs-policy matches
 │   ├── mixed_eval.py            # --eval --mix: any DQN variant / PPO as Blue vs. mirrored Orange (env episodes)
-│   └── head_to_head.py          # --head_to_head: continuous scoreboard match (sim level)
+│   ├── head_to_head.py          # --head_to_head: continuous scoreboard match (sim level)
+│   ├── round_robin.py           # --round_robin: side-swapped tournament across a folder of checkpoints
+│   └── best_checkpoint.py       # --best_checkpoint: heuristic-bot qualifying + king of the hill within one run
 │
 └── sim/                         # 2D simulation (physics, controllers, AI opponent, rendering)
     ├── game.py                  # Interactive & headless game loops (play_interactive, play_headless)

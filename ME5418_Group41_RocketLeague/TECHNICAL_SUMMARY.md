@@ -55,7 +55,7 @@ ME5418_Group41_RocketLeague/
     ├── gym_env/                  # RocketLeagueEnv, action codec, rewards, ActionRepeat wrapper
     ├── neural_nets/              # DQN / ActorCritic networks, checkpoint loading, demos
     ├── learning_agents/          # Dueling DDQN and PPO agents, shared training loop, plotting
-    ├── eval/                     # --eval --mix and --head_to_head matches
+    ├── eval/                     # --eval --mix, --head_to_head, --round_robin and --best_checkpoint
     └── sim/
         ├── game.py               # Interactive Pygame sandbox and headless benchmark runner
         ├── core/                 # actions, arena, ball, car, simulation, observation, spawns

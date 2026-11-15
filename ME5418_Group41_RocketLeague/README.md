@@ -28,7 +28,7 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
 
 Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
 
-- 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches in `src/eval/`.
+- 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches, round-robin tournaments and best-checkpoint selection in `src/eval/`.
 - 🧠 **[Neural Networks (`src/neural_nets/README.md`)](./src/neural_nets/README.md)**: PyTorch `nn.Module` definitions (`dueling_ddqn_torch.py` and `ppo_torch.py`), checkpoint loading, and standalone forward/backward pass verification (`--demo`).
 - 📚 **[System & RL Environment (`src/README.md`)](./src/README.md)**: Package structure, Gymnasium observation/action spaces, reward shaping formulation, and control scheme.
 - ⚙️ **[Physics & Vehicle Kinematics (`src/sim/core/README.md`)](./src/sim/core/README.md)**: Suspension equations, Coulomb traction, attitude control, jump ballistics, ball restitution/drag, and arena geometry.
@@ -123,6 +123,29 @@ python -m src --head_to_head [--blue PATH|none] [--orange PATH|none] [--random_s
 python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/YYYYMMDD_hhmm_dueling_ddqn/model_dueling_ddqn.pt --orange none
 ```
 
+#### Pick the Best Checkpoint in a Run (`--best_checkpoint`)
+
+Find the strongest model in a training run folder. Every model (`model_*.pt` plus `checkpoints/*.pt`) first plays the heuristic bot once from each side; only models with a positive goal difference qualify. The qualifiers then play king of the hill: each challenger plays the current champion once from each side, and takes over if its goal difference exceeds `--threshold`.
+
+```bash
+# Default: 300 s games, fixed kickoffs, challenger must win by more than 3 goals
+python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo
+
+# Shorter games with repeatable random kickoffs and a lower threshold
+python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo --max_seconds 120 --random_spawn --seed 0 --threshold 1
+```
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `RUN_DIR` | _(required)_ | Training run folder containing `model_*.pt` and/or `checkpoints/*.pt`. |
+| `--threshold N` | `3` | Goal difference (over both sides) a challenger must **exceed** to replace the champion. |
+| `--max_seconds S` | `300.0` | Simulation time per game in seconds. |
+| `--max_goals N` | _none_ | End a game early after this many total goals. |
+| `--random_spawn` | `False` | Randomise every kickoff. |
+| `--seed N` | _none_ | Seed for repeatable random spawns. |
+
+The best model's path is printed at the end, along with a summary of every challenge. If no model beats the heuristic bot, the command stops with an error naming the closest model.
+
 #### Plot Learning Curves & Dashboards
 
 ```bash
@@ -175,6 +198,51 @@ python -m src --demo --dqn
 # PPO Actor-Critic (Policy + Value heads with clipped surrogate + GAE update)
 python -m src --demo --ppo
 ```
+
+## 4. Evaluate across models
+
+Run a headless side-swapped round-robin tournament across all `.pt` checkpoints placed in a folder (default: `eval_model/`) together with `HeuristicBot`, using the continuous simulation engine (`Simulation` + `PolicyController` / `HeuristicController`):
+
+```bash
+# Default: evaluate all checkpoints in eval_model/ + HeuristicBot
+# (100 matches per directed Blue-vs-Orange pairing, 1-goal / 60s cap, seed 50, random spawns)
+python -m src --round_robin
+
+# Custom folder, output directory, match budget, seed and worker count
+python -m src --round_robin \
+  --models_dir eval_model \
+  --out_dir eval_model/eval_report \
+  --matches 100 \
+  --max_goals 1 \
+  --max_seconds 60 \
+  --seed 50 \
+  --workers 11
+```
+
+### Options (`python -m src --round_robin --help`)
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--models_dir DIR` | `eval_model` | Folder containing curated `.pt` checkpoints (architecture auto-inferred). |
+| `--out_dir DIR` | `eval_model/eval_report` | Output folder for CSVs, raw logs, and Markdown summary report. |
+| `--matches N` | `100` | Matches played per directed `(Blue, Orange)` pairing. |
+| `--max_goals N` | `1` | Goals required to end a match (`0` disables goal cap). |
+| `--max_seconds S` | `60.0` | Simulation time limit per match in seconds (`0-0` timeout = Draw). |
+| `--seed N` | `50` | Base seed for repeatable random spawns (match `i` uses `seed + i`). |
+| `--no_random_spawn` | `False` | Use fixed kickoff spawns instead of random spawns. |
+| `--no_heuristic` | `False` | Exclude `HeuristicBot` from the tournament. |
+| `--no_mirrors` | `False` | Skip `Bot vs Bot` mirror pairings. |
+| `--workers N` | `cpu_count - 1` | Number of parallel CPU worker processes (`1` runs sequentially). |
+
+### Generated Artifacts (`--out_dir`)
+
+- `overall_standings.csv`: Ranked overall standings (non-mirror and all-match win rate, goal differential, and Blue/Orange splits).
+- `pairings_summary.csv`: Per-pairing statistics for all directed `(Blue, Orange)` matchups.
+- `matrix_score_b_o_d.csv`: $N \times N$ directed matrix (`BlueWins-OrangeWins-Draws`).
+- `matrix_combined_200_matches.csv`: $N \times N$ side-swapped combined matrix (`RowWins-ColWins-Draws`).
+- `matrix_blue_win_rate_pct.csv` & `matrix_blue_goal_diff.csv`: Blue win-rate and goal-differential matrices.
+- `raw_matches.csv` & `raw_matches.log`: Per-match logs (`pairing_id`, `seed`, `winner`, goals, `sim_seconds`, `steps`, `last_touch`).
+- `eval_report.md`: Markdown summary containing the standings and head-to-head matrices.
 
 ---
 
