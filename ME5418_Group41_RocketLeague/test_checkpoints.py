@@ -35,6 +35,7 @@ def goal_difference(model_a: Path, model_b: Path, **match_kwargs) -> int:
 
 def best_model_in_run(
     run_dir: str | Path,
+    goal_difference_threshold : int = 3,
     max_seconds: float | None = 300.0,
     max_goals: int | None = None,
     random_spawn: bool = False,
@@ -54,7 +55,7 @@ def best_model_in_run(
         print(f"\n[Checkpoints] {challenger.name}  vs  champion {champion.name}")
         diff = goal_difference(challenger, champion, **match_kwargs)
         results.append((challenger.name, champion.name, diff))
-        if diff > 0:
+        if diff > goal_difference_threshold:
             print(f"[Checkpoints] {challenger.name} wins ({diff:+d}) and is the new champion")
             champion = challenger
         else:
@@ -70,6 +71,7 @@ def best_model_in_run(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pick the strongest model in a training run.")
     parser.add_argument("run_dir", type=Path, help="Training run folder, e.g. runs/20261114_1537_ppo_s3_self_r4")
+    parser.add_argument("--threshold", type=int, default=3, help="goal_difference_threshold")
     parser.add_argument("--seconds", type=float, default=300.0, help="Sim seconds per game (default 300)")
     parser.add_argument("--goals", type=int, default=None, help="Stop a game after this many total goals")
     parser.add_argument("--random_spawn", action="store_true", help="Randomise every kickoff")
