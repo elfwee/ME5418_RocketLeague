@@ -22,10 +22,10 @@ DDQN_s3_r2 = "./runs/20261114_1102_dueling_ddqn_s3_self_r2/checkpoints/model_due
 PPO_s3_r2 = "./runs/20261114_0447_ppo_s3_self_r2/checkpoints/model_ppo_s3_self_r2_ep001000.pt"
 
 # ---- Settings -----------------------------------------------------------------
-BLUE_MODEL = None
+BLUE_MODEL = DDQN_s2
 ORANGE_MODEL = DDQN_s3_r2
 
-RENDER = False # False = headless, runs as fast as possible
+RENDER = True # False = headless, runs as fast as possible
 MAX_GOALS = None  # stop after this many total goals (None = no limit)
 MAX_SECONDS = 600.0  # stop after this much sim time (None = no limit)
 RANDOM_SPAWN = False  # randomise every kickoff
