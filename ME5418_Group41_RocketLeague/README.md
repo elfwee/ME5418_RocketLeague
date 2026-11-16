@@ -69,11 +69,14 @@ python -m src --train --dueling_ddqn
 # Train Proximal Policy Optimization (PPO)
 python -m src --train --ppo
 
+# Train PPO v2 (separate actor/critic MLPs, factored heads, parallel envs)
+python -m src --train --ppo_v2 [--num_envs 8]
+
 # Optional DQN ablation variants:
 python -m src --train --double_dqn
 python -m src --train --dqn
 
-# To start from a checkpoint for training (any of --dueling_ddqn / --double_dqn / --dqn / --ppo)
+# To start from a checkpoint for training (any of --dueling_ddqn / --double_dqn / --dqn / --ppo / --ppo_v2)
 python -m src --train --ppo --model_path path_to_model.pt
 
 # Limit the number of episodes
@@ -97,14 +100,17 @@ Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed 
 # 1. Blue = Policy, Orange = Heuristic Bot (default --blue mode)
 python -m src --eval --dueling_ddqn [--render] [--model_path path_to_model.pt]
 python -m src --eval --ppo          [--render] [--model_path path_to_model.pt]
+python -m src --eval --ppo_v2       [--render] [--model_path path_to_model.pt]
 
 # 2. Orange = Mirrored Policy, Blue = Human User (WASD/Arrows + Space + Shift)
 python -m src --eval --dueling_ddqn --orange --render [--model_path path_to_model.pt]
 python -m src --eval --ppo          --orange --render [--model_path path_to_model.pt]
+python -m src --eval --ppo_v2       --orange --render [--model_path path_to_model.pt]
 
 # 3. Same-Policy Bot-vs-Bot (both Blue and Orange controlled by the same trained policy)
 python -m src --eval --dueling_ddqn --bot-vs-bot [--render] [--model_path path_to_model.pt]
 python -m src --eval --ppo          --bot-vs-bot [--render] [--model_path path_to_model.pt]
+python -m src --eval --ppo_v2       --bot-vs-bot [--render] [--model_path path_to_model.pt]
 
 # 4. Mixed-Policy Bot-vs-Bot (e.g., Blue = Dueling DDQN vs Orange = PPO, or vice versa)
 python -m src --eval --mix --dueling_ddqn --ppo [--render] [--blue_model path_b.pt] [--orange_model path_o.pt]
