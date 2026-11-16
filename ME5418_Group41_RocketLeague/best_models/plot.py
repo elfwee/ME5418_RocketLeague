@@ -12,7 +12,7 @@ def plotter(data_dict, keyword):
 
     cols = ["mean_reward_100", "goal_rate_100"]
     for metric in cols:
-        plt.figure(figsize=(16,12))
+        plt.figure(figsize=(12,9))
         for key, value in data_interest.items():
             x = data_dict[key]["step"]
             y = data_dict[key][metric]
