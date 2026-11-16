@@ -30,6 +30,7 @@ src/
 ├── neural_nets/                 # PyTorch networks (import only torch)
 │   ├── dueling_ddqn_torch.py    # DQN / Double DQN / Dueling Double DQN
 │   ├── ppo_torch.py             # PPO Actor-Critic (flat or factored policy heads + value head)
+│   ├── ppo_v2_torch.py          # PPO v2 SeparateActorCritic (independent actor & critic MLPs, factored heads)
 │   ├── checkpoint.py            # load_policy(path): rebuilds any saved network from its state_dict
 │   ├── policy.py                # greedy_action(net, obs) for every network type
 │   └── demos.py                 # --demo --dqn/--double_dqn/--dueling_ddqn/--ppo forward/backward passes
@@ -37,6 +38,7 @@ src/
 ├── learning_agents/             # RL learning agents (training, evaluation, checkpointing)
 │   ├── dueling_ddqn_agent.py    # DuelingDDQNAgent: DQN learning rule, train() / evaluate()
 │   ├── ppo_agent.py             # PPOAgent: GAE + clipped surrogate, train() / evaluate()
+│   ├── ppo_v2_agent.py          # PPOv2Agent: separate-net PPO with parallel envs & periodic eval
 │   ├── trainer.py               # run_training: the episode loop shared by both agents
 │   ├── experience_replay.py     # ReplayMemory circular transition buffer (off-policy DQN)
 │   ├── rollout_buffer.py        # RolloutBuffer on-policy storage (PPO)
@@ -94,8 +96,9 @@ Both learning agents run in the same episode loop (`trainer.py`) and share an id
   - **Off-Policy Replay**: Stores transitions $(s_t, a_t, s_{t+1}, R_t, \text{terminated}_t)$ in `ReplayMemory` (`experience_replay.py`, capacity $100,000$, warm-up $2,000$ steps) and updates on $64$-sample minibatches every `train_freq = 4` decisions.
   - **Target Decoupling**: Uses the online network to select the greedy next action $a^* = \arg\max_{a'} Q_\theta(s_{t+1}, a')$ and the periodic target network $Q_{\theta^-}$ (synced every $1,000$ steps) to evaluate it, trained via Huber loss (`SmoothL1Loss`) and global gradient norm clipping ($10.0$).
 - **Proximal Policy Optimization (`learning_agents/ppo_agent.py`)**:
-  - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 4,096$ macro-steps) in a rollout buffer, bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
-  - **Clipped Surrogate Optimization**: Normalizes advantages across the entire $4,096$-sample rollout batch and performs $K = 6$ epochs of shuffled minibatch ($256$) updates using the clipped surrogate objective ($\epsilon = 0.2$), MSE critic loss ($c_1 = 0.5$), and entropy bonus ($c_2 = 0.01$).
+  - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 4,096$ macro-steps) with learner-internal reward scaling ($1/20 = 0.05$; `value_loss` is logged in env-reward units), bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
+  - **Clipped Surrogate Optimization**: Normalizes advantages across the entire $4,096$-sample rollout batch and performs $K = 6$ epochs of shuffled minibatch ($256$) updates using the clipped surrogate objective ($\epsilon = 0.2$), KL early stopping (`target_kl = 0.02`), MSE critic loss ($c_1 = 0.5$), entropy bonus ($c_2 = 0.001$), and global gradient clipping ($0.5$).
+- **PPO v2 (`learning_agents/ppo_v2_agent.py`)**: An independent, non-parameter-matched PPO variant ($164,366$ parameters in `SeparateActorCritic` with separate actor and critic MLPs and factored `[9, 2, 2]` heads) that collects $512 \times 8 = 4,096$ steps per update across parallel env workers (`--ppo_v2`) and logs periodic fixed-seed greedy evaluations to `eval_<name>.csv`.
 
 ---
 

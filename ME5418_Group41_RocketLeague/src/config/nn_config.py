@@ -23,7 +23,7 @@ class AgentConfig:
     action_repeat: int = 4  # Simulation steps per agent decision
 
     # Environment & Checkpointing
-    bot_type: str = "none"  # "none" or "heuristic_bot"
+    bot_type: str = "heuristic_bot"  # "none" or "heuristic_bot"
     env_id: str = GymConfig.gym_id  # Registered gym id the agent trains / evaluates on
     eval_episodes: int = 5
     runs_dir: str = "runs"
@@ -57,17 +57,18 @@ class DQNConfig(AgentConfig):
 
 @dataclass(frozen=True)
 class PPOConfig(AgentConfig):
-    # Architecture
-    factored_action: bool = True  # Use MultiDiscrete([9, 2, 2])
+    # Architecture (150,949 trainable parameters when factored_action=False)
+    factored_action: bool = False  # Discrete(36) matching DDQN; factored checkpoints auto-detect
     action_dims: tuple[int, int, int] = (9, 2, 2)  # (direction: 9, jump: 2, boost: 2)
 
     # Optimization & Returns
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
     value_loss_coef: float = 0.5
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.001
     max_grad_norm: float = 0.5
-    target_kl: float = 0.02  # Early stopping threshold to preserve trust region
+    target_kl: float | None = 0.02  # Early stopping threshold to preserve trust region
+    reward_scale: float = 1.0 / GymConfig.reward_goal  # Scales rewards inside PPO learner only (0.05)
 
     # Rollout & Multi-Epoch Minibatch Schedule
     rollout_steps: int = 4096
@@ -77,3 +78,32 @@ class PPOConfig(AgentConfig):
 
     # Checkpointing
     hyperparameter_set: str = "ppo"
+
+
+@dataclass(frozen=True)
+class PPOv2Config(AgentConfig):
+    # Architecture (164,366 trainable parameters: separate actor & critic MLPs, factored heads)
+    action_dims: tuple[int, int, int] = (9, 2, 2)
+
+    # Optimization & Returns
+    gae_lambda: float = 0.95
+    clip_coef: float = 0.2
+    value_loss_coef: float = 0.5
+    entropy_coef: float = 0.001
+    max_grad_norm: float = 0.5
+    target_kl: float | None = 0.02
+    reward_scale: float = 1.0 / GymConfig.reward_goal  # Scales rewards inside PPO learner only (0.05)
+
+    # Parallel Rollout & Multi-Epoch Minibatch Schedule
+    num_envs: int = 8  # parallel environments
+    rollout_steps: int = 512  # decision steps per env per rollout (8 x 512 = 4096 samples per update)
+    update_epochs: int = 6
+    minibatch_size: int = 256
+    env_workers: str = "subproc"  # "subproc": one process per env; "sync": all envs in this process
+
+    # Periodic Greedy Evaluation
+    eval_interval_steps: int = 250_000  # greedy evaluation every this many env steps (0 disables)
+    periodic_eval_episodes: int = 50
+
+    # Checkpointing
+    hyperparameter_set: str = "ppo_v2"
