@@ -30,19 +30,12 @@ def make_env(
     max_episode_steps: int | None = None,
     env_id: str = GymConfig.gym_id,
     action_repeat: int = 1,
-    env_kwargs: dict | None = None,
 ) -> gym.Env:
     """Create the Rocket League env; renders to a window, to RGB frames (for GIFs), or not at all.
 
     With `action_repeat > 1` the env is wrapped in `ActionRepeat`: each `step` holds the action for
     that many sim frames. `max_episode_steps` always counts sim frames.
     """
-    if env_id not in gym.envs.registry:
-        from src.config.curriculum_learning import CurriculumConfig
-
-        if env_id == CurriculumConfig.env_id:
-            import src.curriculum_learning.curriculum_learning  # noqa: F401
-
     if render:
         render_mode = "human"
     elif save_gif:
@@ -50,7 +43,7 @@ def make_env(
     else:
         render_mode = None
 
-    make_kwargs = dict(env_kwargs) if env_kwargs else {}
+    make_kwargs = {}
     if max_episode_steps is not None:
         make_kwargs["max_episode_steps"] = max_episode_steps
 

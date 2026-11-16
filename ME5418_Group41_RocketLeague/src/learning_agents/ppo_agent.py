@@ -3,16 +3,11 @@ Proximal Policy Optimization (PPO) Learning Agent: the PPO learning rule plus it
 
 Adapted from CleanRL's `ppo.py` (https://github.com/vwxyzjn/cleanrl) for a controlled
 comparison with `DuelingDDQNAgent` (`dueling_ddqn_agent.py`):
-- Identical 150,949-parameter `LayerNorm`-stabilized shared feature trunk (`ActorCritic` in
-  `src/neural_nets/ppo_torch.py`).
+- Identical 150,949-parameter `LayerNorm + ReLU` two-stream network (`ActorCritic` in `src/neural_nets/ppo_torch.py`).
 - Identical `action_repeat = 4` with edge-triggered jump release (`ActionRepeat` env wrapper).
 - Identical core hyperparameters (`lr = 3e-4`, `gamma = 0.99`).
-- On-policy rollout (`T = 4096`), learner-internal reward scaling (`reward_scale = 1 / 20 = 0.05`;
-  `value_loss` is converted back to env-reward units before logging), reverse-time GAE (`lambda = 0.95`),
-  whole-rollout advantage normalization, and `6` epochs of shuffled `256`-sample minibatch clipped surrogate
-  updates with KL early stopping (`target_kl = 0.02`, `entropy_coef = 0.001`) and global gradient-norm
-  clipping (`max_grad_norm = 0.5`). Note: checkpoints trained before `reward_scale` store critic heads in
-  unscaled units (the actor head is unaffected).
+- On-policy rollout (`T = 4096`), reverse-time GAE (`lambda = 0.95`), batch-level advantage normalization,
+  and `6` epochs of shuffled `256`-sample minibatch clipped surrogate updates.
 - Identical episode loop, logging, checkpointing and 100-episode rolling metrics (`trainer.py`); each
   training run writes its outputs to its own `runs/YYYYMMDD_hhmm_ppo/` folder (`model_ppo.pt`, `graph_ppo.png`, ...).
 """
@@ -50,14 +45,14 @@ def compute_gae(
         A_t     = delta_t + gamma * lambda * (1 - done_t) * A_{t+1}
 
     Args:
-        rewards: Shape (T, ...), step rewards.
-        values: Shape (T, ...), critic estimates V(s_t).
-        next_values: Shape (T, ...), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
+        rewards: Shape (T,), step rewards.
+        values: Shape (T,), critic estimates V(s_t).
+        next_values: Shape (T,), bootstrap values V(s_{t+1}) (already 0.0 where `terminated=True`,
                      and `V(s_timeout)` where `truncated=True`).
-        dones: Shape (T, ...), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
+        dones: Shape (T,), 1.0 where episode ended (`terminated or truncated`), resetting the GAE trace.
 
     Returns:
-        (advantages, returns), matching input shape (T, ...).
+        (advantages, returns), each of shape (T,).
     """
     T = rewards.shape[0]
     advantages = torch.zeros_like(rewards)
@@ -76,20 +71,18 @@ class PPOAgent:
 
     Key algorithmic components:
         1. Actor-Critic Architecture (`ActorCritic` from `src.neural_nets.ppo_torch`):
-           Shared 2-layer `LayerNorm + ReLU` feature trunk (256 units, 150,949 params total)
-           feeding 128-unit Actor (`pi(a|s)`) and Critic (`V(s)`) heads.
+           Shared 2-layer `LayerNorm + ReLU` feature backbone (256 units) with 128-unit
+           Actor (`pi(a|s)`) and Critic (`V(s)`) heads (150,949 parameters, matching Dueling DDQN).
         2. Action Repeat with Edge-Triggered Jump Release (`ActionRepeat` env wrapper):
            Repeats chosen discrete action for `action_repeat` frames while clearing the jump
            bit on repeat frames > 0 so `Car._apply_jump` edge-triggering resets cleanly.
         3. Truncation-Aware Generalized Advantage Estimation (`_compute_gae`):
-           Learner-internal `reward_scale` (0.05) keeps critic targets well-conditioned while
-           terminal goal states (`terminated=True`) bootstrap to 0.0 and timeout states
+           Terminal goal states (`terminated=True`) bootstrap to 0.0, whereas timeout states
            (`truncated=True`) bootstrap from the critic's value estimate `V(s_timeout)` before reset.
         4. Clipped Surrogate Objective (`optimize`):
-           Normalizes advantages once across the full 4,096-sample rollout batch and performs
-           `update_epochs` (6) of shuffled 256-sample minibatch updates with ratio clipping
-           `clip_coef`, KL early stopping (`target_kl = 0.02`), value MSE loss, entropy bonus
-           (`entropy_coef = 0.001`), and global gradient-norm clipping (`max_grad_norm = 0.5`).
+           Normalizes advantages across the entire 4,096-step rollout batch and performs `update_epochs` (6)
+           of shuffled 256-sample minibatch updates with ratio clipping `clip_coef`, value MSE loss,
+           entropy bonus, and global gradient norm clipping.
 
     One training decision step (driven by `trainer.run_training`):
         `act` (`_sample_action`) -> `env.step` (`ActionRepeat`) -> `observe` (`_bootstrap_value`
@@ -149,7 +142,7 @@ class PPOAgent:
         kl_sum = 0.0
         num_mb = 0
 
-        # Normalize advantages once over the full rollout batch before minibatch sampling
+        # Normalize advantages across the entire 4,096-sample rollout batch before minibatch sampling
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -271,15 +264,11 @@ class PPOAgent:
     def observe(self, state: torch.Tensor, reward: float, next_state: torch.Tensor, terminated: bool, truncated: bool):
         action, log_prob, value = self._pending
         next_value = self._bootstrap_value(self.model, next_state, terminated, truncated)
-        self.buffer.add(
-            state, action, log_prob, value, next_value, reward * self.cfg.reward_scale, terminated or truncated
-        )
+        self.buffer.add(state, action, log_prob, value, next_value, reward, terminated or truncated)
 
-        # Perform PPO multi-epoch minibatch update once rollout horizon is reached; convert value loss
-        # back into unscaled env-reward units for consistent dashboard/CSV reporting.
+        # Perform PPO multi-epoch minibatch update once rollout horizon is reached
         if len(self.buffer) >= self.cfg.rollout_steps:
-            self.current_entropy, scaled_v_loss = self._update_from_rollout(self.buffer, self.model, next_state)
-            self.current_v_loss = scaled_v_loss / (self.cfg.reward_scale**2)
+            self.current_entropy, self.current_v_loss = self._update_from_rollout(self.buffer, self.model, next_state)
 
     def progress(self) -> str:
         return f"Ent = {self.current_entropy:.3f}"

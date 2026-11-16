@@ -4,7 +4,6 @@ Every saved model is a plain ``state_dict``. Layer names tell the network type a
 
 - PPO ``ActorCritic``: ``fc_actor`` / ``fc_critic`` streams, and either one flat ``actor`` head or
   factored ``actor_heads.N`` heads (one per action axis).
-- PPO v2 ``SeparateActorCritic``: separate ``pi_fc1`` / ``pi_heads.N`` and ``vf_fc1`` / ``vf_out`` MLPs.
 - ``DQN``: dueling ``fc_value`` / ``advantages`` streams, or a single ``fc3`` Q head.
 """
 
@@ -17,13 +16,10 @@ from torch import nn
 
 from src.neural_nets.dueling_ddqn_torch import DQN
 from src.neural_nets.ppo_torch import ActorCritic
-from src.neural_nets.ppo_v2_torch import SeparateActorCritic
 
 PPO = "ppo"
-PPO_V2 = "ppo_v2"
 DQN_KIND = "dqn"
 _PPO_PREFIXES = ("actor", "actor_heads", "critic", "fc_actor", "fc_critic")
-_PPO_V2_PREFIXES = ("pi_fc1", "pi_heads", "vf_fc1", "vf_out")
 
 
 @dataclass(frozen=True)
@@ -45,22 +41,12 @@ class PolicySpec:
         return isinstance(self.action_dim, list)
 
 
-def is_ppo_v2_state_dict(state_dict: dict) -> bool:
-    return any(key.split(".")[0] in _PPO_V2_PREFIXES for key in state_dict)
-
-
 def is_ppo_state_dict(state_dict: dict) -> bool:
-    return is_ppo_v2_state_dict(state_dict) or any(key.split(".")[0] in _PPO_PREFIXES for key in state_dict)
+    return any(key.split(".")[0] in _PPO_PREFIXES for key in state_dict)
 
 
 def infer_spec(state_dict: dict) -> PolicySpec:
-    """Architecture of a saved ``ActorCritic``, ``SeparateActorCritic`` or ``DQN`` from its layer names."""
-    if is_ppo_v2_state_dict(state_dict):
-        hidden_dim, state_dim = state_dict["pi_fc1.weight"].shape
-        n_heads = len({k.split(".")[1] for k in state_dict if k.startswith("pi_heads.")})
-        action_dim = [state_dict[f"pi_heads.{i}.weight"].shape[0] for i in range(n_heads)]
-        return PolicySpec(PPO_V2, state_dim, hidden_dim, action_dim)
-
+    """Architecture of a saved ``ActorCritic`` or ``DQN`` from its layer names and shapes."""
     hidden_dim, state_dim = state_dict["fc1.weight"].shape
     if is_ppo_state_dict(state_dict):
         if "actor_heads.0.weight" in state_dict:
@@ -78,8 +64,6 @@ def infer_spec(state_dict: dict) -> PolicySpec:
 
 def build_network(spec: PolicySpec) -> nn.Module:
     """A freshly initialised network with the given architecture."""
-    if spec.kind == PPO_V2:
-        return SeparateActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim)
     if spec.kind == PPO:
         return ActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim)
     return DQN(spec.state_dim, spec.action_dim, spec.hidden_dim, enable_dueling_dqn=spec.dueling)
@@ -95,7 +79,7 @@ def load_state_dict(path: str | Path, device: str | torch.device = "cpu") -> dic
 def load_policy(path: str | Path, device: str | torch.device = "cpu") -> tuple[nn.Module, str]:
     """Rebuild and load the network saved at ``path`` in eval mode; returns ``(network, kind)``.
 
-    ``kind`` is ``"ppo"``, ``"ppo_v2"`` or ``"dqn"``. Raises ``FileNotFoundError`` when the file is missing.
+    ``kind`` is ``"ppo"`` or ``"dqn"``. Raises ``FileNotFoundError`` when the file is missing.
     """
     state_dict = load_state_dict(path, device)
     if state_dict is None:

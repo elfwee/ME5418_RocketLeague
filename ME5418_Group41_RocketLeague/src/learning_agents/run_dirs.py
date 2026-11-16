@@ -59,10 +59,6 @@ class RunPaths:
         return self.run_dir / f"metrics_{self.model_name}.csv"
 
     @property
-    def eval_file(self) -> Path:
-        return self.run_dir / f"eval_{self.model_name}.csv"
-
-    @property
     def checkpoint_dir(self) -> Path:
         """Periodic snapshots of the current model."""
         return self.run_dir / "checkpoints"

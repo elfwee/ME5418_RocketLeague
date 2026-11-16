@@ -13,9 +13,8 @@ class ActorCritic(nn.Module):
 
     Architecture:
         - Input Layer: 52-dimensional normalized state vector in [-1, 1].
-        - Shared Feature Extractor: 2 fully-connected layers (256 units) with LayerNorm and ReLU,
-          matching Dueling DDQN capacity (150,949 parameters for Discrete(36)).
-        - Two Heads (128 hidden units each):
+        - Shared Feature Extractor: 2 fully-connected layers (256 units) with LayerNorm and ReLU.
+        - Two Heads:
             1. Actor (Policy) Head:
                - Discrete: Single Linear layer outputting logits over all discrete actions.
                - Factored MultiDiscrete: ModuleList of independent Linear heads for each action axis

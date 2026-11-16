@@ -212,8 +212,7 @@ def run_ppo_network():
     # 3. Backward Pass (GAE, Clipped Surrogate Loss & Gradient Backpropagation)
     # Bootstrap targets V(s_{t+1}): the next step's value, or 0.0 where the episode ended
     next_values = torch.cat([values[1:], next_value.reshape(1)]) * (1.0 - dones)
-    scaled_rewards = rewards * PPOConfig.reward_scale
-    advantages, returns = compute_gae(scaled_rewards, values, next_values, dones, gamma, gae_lambda)
+    advantages, returns = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda)
     norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Re-evaluate rollout actions under the current policy
