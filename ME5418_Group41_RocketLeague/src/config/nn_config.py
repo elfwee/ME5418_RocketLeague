@@ -57,17 +57,18 @@ class DQNConfig(AgentConfig):
 
 @dataclass(frozen=True)
 class PPOConfig(AgentConfig):
-    # Architecture
-    factored_action: bool = True  # Use MultiDiscrete([9, 2, 2])
+    # Architecture (150,949 trainable parameters when factored_action=False)
+    factored_action: bool = False  # Discrete(36) matching DDQN; factored checkpoints auto-detect
     action_dims: tuple[int, int, int] = (9, 2, 2)  # (direction: 9, jump: 2, boost: 2)
 
     # Optimization & Returns
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
     value_loss_coef: float = 0.5
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.001
     max_grad_norm: float = 0.5
-    target_kl: float = 0.02  # Early stopping threshold to preserve trust region
+    target_kl: float | None = 0.02  # Early stopping threshold to preserve trust region
+    reward_scale: float = 1.0 / GymConfig.reward_goal  # Scales rewards inside PPO learner only (0.05)
 
     # Rollout & Multi-Epoch Minibatch Schedule
     rollout_steps: int = 4096

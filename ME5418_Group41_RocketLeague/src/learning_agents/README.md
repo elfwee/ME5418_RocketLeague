@@ -9,7 +9,7 @@ the same 150,949-parameter `LayerNorm` trunk width, `Adam(3e-4)`, `gamma = 0.99`
 | File | Description |
 | :--- | :--- |
 | [`dueling_ddqn_agent.py`](dueling_ddqn_agent.py) | `DuelingDDQNAgent`: epsilon-greedy acting, replay, Double-DQN target, Huber loss, target sync; `train()` / `evaluate()`; `train_dueling_ddqn` / `evaluate_dueling_ddqn` (also plain and Double DQN). |
-| [`ppo_agent.py`](ppo_agent.py) | `PPOAgent`: rollouts, truncation-aware GAE (`compute_gae`), clipped surrogate with KL early stop; `train()` / `evaluate()`; `train_ppo` / `evaluate_ppo`. |
+| [`ppo_agent.py`](ppo_agent.py) | `PPOAgent`: rollouts with `reward_scale = 0.05`, truncation-aware GAE (`compute_gae`), clipped surrogate (`entropy_coef = 0.001`, `target_kl = 0.02`); `train()` / `evaluate()`; `train_ppo` / `evaluate_ppo`. |
 | [`trainer.py`](trainer.py) | `run_training`: the shared episode loop. Agents plug in through `act`, `observe`, `progress` and `end_episode`. |
 | [`experience_replay.py`](experience_replay.py) | `ReplayMemory`: circular buffer with its own seeded sampler (`AgentConfig.seed`). |
 | [`rollout_buffer.py`](rollout_buffer.py) | `RolloutBuffer`: on-policy storage with next-value backfilling. |

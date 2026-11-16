@@ -94,8 +94,8 @@ Both learning agents run in the same episode loop (`trainer.py`) and share an id
   - **Off-Policy Replay**: Stores transitions $(s_t, a_t, s_{t+1}, R_t, \text{terminated}_t)$ in `ReplayMemory` (`experience_replay.py`, capacity $100,000$, warm-up $2,000$ steps) and updates on $64$-sample minibatches every `train_freq = 4` decisions.
   - **Target Decoupling**: Uses the online network to select the greedy next action $a^* = \arg\max_{a'} Q_\theta(s_{t+1}, a')$ and the periodic target network $Q_{\theta^-}$ (synced every $1,000$ steps) to evaluate it, trained via Huber loss (`SmoothL1Loss`) and global gradient norm clipping ($10.0$).
 - **Proximal Policy Optimization (`learning_agents/ppo_agent.py`)**:
-  - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 4,096$ macro-steps) in a rollout buffer, bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
-  - **Clipped Surrogate Optimization**: Normalizes advantages across the entire $4,096$-sample rollout batch and performs $K = 6$ epochs of shuffled minibatch ($256$) updates using the clipped surrogate objective ($\epsilon = 0.2$), MSE critic loss ($c_1 = 0.5$), and entropy bonus ($c_2 = 0.01$).
+  - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 4,096$ macro-steps) with learner-internal reward scaling ($1/20 = 0.05$; `value_loss` is logged in env-reward units), bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
+  - **Clipped Surrogate Optimization**: Normalizes advantages across the entire $4,096$-sample rollout batch and performs $K = 6$ epochs of shuffled minibatch ($256$) updates using the clipped surrogate objective ($\epsilon = 0.2$), KL early stopping (`target_kl = 0.02`), MSE critic loss ($c_1 = 0.5$), entropy bonus ($c_2 = 0.001$), and global gradient clipping ($0.5$).
 
 ---
 
