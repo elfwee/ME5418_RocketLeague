@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Car Soccer Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="../intro_slides/data.js"></script>
+<style>
+/* 1920x1080 motion piece. window.render(t) draws the frame at time t (seconds); render.js steps it.
+   Open with ?play to preview in real time. */
+:root {
+  --bg: #0d1017;            /* matches the game's background in the recording */
+  --bg-2: #121722;
+  --line: #222a3a;
+  --line-2: #33405a;
+  --text: #f2f4f8;
+  --text-2: #a9b3c6;
+  --muted: #6c7890;
+  --blue: #4aa3ff;
+  --orange: #ff8a3d;
+  --ddqn: #22a77a;
+  --ppo: #9085e9;
+  --gray: #8b93a7;
+  --ray: #5cc8ff;
+  --display: "Space Grotesk", sans-serif;
+  --body: "Inter", sans-serif;
+  --mono: "JetBrains Mono", monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--body); -webkit-font-smoothing: antialiased; }
+#stage { position: absolute; inset: 0; overflow: hidden; background: var(--bg); }
+.layer, .scene { position: absolute; inset: 0; }
+.scene { visibility: hidden; opacity: 0; }
+svg.full { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: visible; }
+.abs { position: absolute; }
+
+/* background */
+#grid { position: absolute; inset: -120px; background-image:
+  linear-gradient(to right, rgba(140,160,200,0.055) 1px, transparent 1px),
+  linear-gradient(to bottom, rgba(140,160,200,0.055) 1px, transparent 1px);
+  background-size: 64px 64px; }
+.glow { position: absolute; width: 1100px; height: 1100px; border-radius: 50%; filter: blur(140px); opacity: 0.16; }
+#glowB { background: var(--blue); }
+#glowO { background: var(--orange); }
+#vignette { position: absolute; inset: 0; background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 55%, rgba(5,7,11,0.75) 100%); }
+#grain { position: absolute; inset: 0; opacity: 0.07; mix-blend-mode: overlay; pointer-events: none; }
+
+/* typography */
+.label { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+.label b { color: var(--text-2); }
+.h { font-family: var(--display); font-weight: 700; letter-spacing: -0.03em; line-height: 1.02; }
+.mask { display: block; overflow: hidden; padding-bottom: 0.1em; margin-bottom: -0.1em; }
+.mask > span { display: inline-block; white-space: pre; }
+.c { display: inline-block; white-space: pre; will-change: transform; }
+.soft { color: var(--text-2); }
+.num { font-family: var(--display); font-weight: 700; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1; }
+
+/* scene 1 */
+.stat { position: absolute; left: 140px; width: 760px; }
+.stat .num { font-size: 100px; }
+.stat .num small { font-size: 40px; letter-spacing: -0.01em; color: var(--text-2); margin-left: 10px; }
+.stat .lab { font-size: 26px; color: var(--text-2); margin-top: 10px; }
+.stat .rule { height: 2px; background: var(--line-2); margin-top: 18px; transform-origin: left; width: 520px; }
+
+/* scene 2 */
+.algo { position: absolute; left: 140px; width: 560px; height: 116px; border-radius: 18px; background: rgba(21,27,39,0.9); border: 1px solid var(--line); overflow: hidden; padding: 22px 30px 0 40px; }
+.algo::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--c); }
+.algo .t { font-family: var(--display); font-size: 40px; font-weight: 700; letter-spacing: -0.01em; }
+.algo .s { font-size: 22px; color: var(--text-2); margin-top: 4px; }
+
+/* scene 3 */
+.chip { position: absolute; top: 300px; height: 64px; padding: 0 24px; border-radius: 14px; background: rgba(21,27,39,0.9); border: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+.chip b { font-family: var(--display); font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.chip span { font-size: 21px; color: var(--text-2); }
+.legend { position: absolute; top: 320px; display: flex; gap: 30px; font-size: 22px; color: var(--text-2); align-items: center; }
+.legend i { display: inline-block; width: 30px; height: 4px; border-radius: 2px; margin-right: 10px; vertical-align: 6px; }
+
+/* scene 4 */
+.row { position: absolute; left: 140px; width: 1640px; height: 64px; }
+.row .nm { position: absolute; left: 0; top: 2px; font-family: var(--display); font-size: 32px; font-weight: 700; }
+.row .rk { position: absolute; left: 0; top: 42px; font-family: var(--mono); font-size: 17px; color: var(--muted); letter-spacing: 0.12em; }
+.row .track { position: absolute; left: 400px; top: 0; width: 1160px; height: 64px; border-radius: 14px; background: rgba(255,255,255,0.04); }
+.row .fill { position: absolute; left: 400px; top: 0; height: 64px; border-radius: 14px; transform-origin: left; }
+.row .val { position: absolute; top: 4px; font-family: var(--display); font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+
+/* scene 5 */
+#win { position: absolute; overflow: hidden; visibility: hidden; }
+#gp { position: absolute; left: 0; top: 0; width: 1920px; height: 986px; transform-origin: 0 0; }
+.tag { display: inline-flex; align-items: center; gap: 12px; font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: 0.02em; }
+.tag i { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.tag em { font-style: normal; font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--text-2); letter-spacing: 0.06em; }
+
+/* wipe */
+#wipe { position: absolute; left: 0; top: -40px; height: 1160px; width: 4160px; display: flex; visibility: hidden; }
+#wipe .s1 { width: 80px; background: var(--orange); }
+#wipe .s2 { width: 26px; background: var(--bg); }
+#wipe .s3 { width: 22px; background: var(--orange); opacity: 0.55; }
+#wipe .body { flex: 1; background: #10141d; }
+#wipe .s4 { width: 22px; background: var(--blue); opacity: 0.55; }
+#wipe .s5 { width: 26px; background: var(--bg); }
+#wipe .s6 { width: 80px; background: var(--blue); }
+
+/* hud */
+#hud { opacity: 0; }
+.tick { position: absolute; width: 28px; height: 28px; border-color: var(--line-2); border-style: solid; border-width: 0; }
+#hudWord { position: absolute; left: 92px; top: 46px; font-family: var(--mono); font-size: 17px; letter-spacing: 0.24em; color: var(--muted); }
+#hudWord b { color: var(--orange); }
+#hudIdx { position: absolute; right: 92px; top: 46px; font-family: var(--mono); font-size: 17px; letter-spacing: 0.2em; color: var(--muted); }
+#hudIdx b { color: var(--text); }
+#bar { position: absolute; left: 0; bottom: 0; height: 4px; width: 1920px; transform-origin: left; background: linear-gradient(90deg, var(--blue), var(--orange)); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- background -->
+  <div class="layer" id="bgl"><div id="grid"></div><div class="glow" id="glowB"></div><div class="glow" id="glowO"></div></div>
+
+  <!-- ============ S0: ignition + title ============ -->
+  <div class="scene" id="s0">
+    <svg class="full" id="s0svg">
+      <defs>
+        <linearGradient id="gB" x1="0" x2="1"><stop offset="0" stop-color="#4aa3ff" stop-opacity="0"/><stop offset="1" stop-color="#4aa3ff"/></linearGradient>
+        <linearGradient id="gO" x1="1" x2="0"><stop offset="0" stop-color="#ff8a3d" stop-opacity="0"/><stop offset="1" stop-color="#ff8a3d"/></linearGradient>
+        <pattern id="netB" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M14 0H0V14" fill="none" stroke="#4aa3ff" stroke-opacity="0.35" stroke-width="1"/></pattern>
+        <pattern id="netO" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M14 0H0V14" fill="none" stroke="#ff8a3d" stroke-opacity="0.35" stroke-width="1"/></pattern>
+        <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+      </defs>
+      <g id="arena" fill="none" stroke-linecap="round" stroke-linejoin="round"></g>
+      <g id="streaks">
+        <rect id="stBg" x="-400" y="526" width="0" height="28" rx="14" fill="url(#gB)" filter="url(#soft)" opacity="0.7"/>
+        <rect id="stOg" x="2320" y="526" width="0" height="28" rx="14" fill="url(#gO)" filter="url(#soft)" opacity="0.7"/>
+        <rect id="stB" x="-400" y="536" width="0" height="8" rx="4" fill="url(#gB)"/>
+        <rect id="stO" x="2320" y="536" width="0" height="8" rx="4" fill="url(#gO)"/>
+        <circle id="hdBg" cx="-400" cy="540" r="22" fill="#4aa3ff" filter="url(#soft)"/>
+        <circle id="hdOg" cx="2320" cy="540" r="22" fill="#ff8a3d" filter="url(#soft)"/>
+        <circle id="hdB" cx="-400" cy="540" r="9" fill="#e6f2ff"/>
+        <circle id="hdO" cx="2320" cy="540" r="9" fill="#fff0e6"/>
+      </g>
+      <circle id="ring1" cx="960" cy="540" r="10" fill="none" stroke="#fff" stroke-width="3" opacity="0"/>
+      <circle id="ring2" cx="960" cy="540" r="10" fill="none" stroke="#ff8a3d" stroke-width="2" opacity="0"/>
+      <circle id="ring3" cx="960" cy="540" r="10" fill="none" stroke="#4aa3ff" stroke-width="2" opacity="0"/>
+      <g id="ball" transform="translate(960 540) scale(0)">
+        <circle r="26" fill="#f7fafc"/>
+        <path d="M-22 4 L22 -4 M-4 -22 L4 22" stroke="#e53e3e" stroke-width="2.6" stroke-linecap="round"/>
+      </g>
+    </svg>
+    <div class="abs label" id="s0kick" style="left:0;width:1920px;text-align:center;top:338px;color:var(--text-2)">ME5418 · Group 41 · Final project</div>
+    <div class="abs h" id="s0title" style="left:0;width:1920px;text-align:center;top:388px;font-size:196px">
+      <span class="mask" style="display:inline-block;vertical-align:top"><span id="s0car">CAR SOCCER</span></span><span id="s0two" class="c" style="color:var(--orange);margin-left:0.22em">2D</span>
+    </div>
+    <div class="abs" id="s0sub" style="left:0;width:1920px;text-align:center;top:632px;font-size:34px;color:var(--text-2);font-weight:500">Two deep-RL agents. One physics world, built from scratch.</div>
+    <div id="flash" class="abs" style="inset:0;background:#fff;opacity:0"></div>
+  </div>
+
+  <!-- ============ S1: the world ============ -->
+  <div class="scene" id="s1">
+    <div class="abs label" id="s1lab" style="left:140px;top:150px"><b>01</b> — The world</div>
+    <div class="abs h" style="left:140px;top:192px;font-size:80px">
+      <span class="mask"><span id="s1h1">Built from scratch.</span></span>
+      <span class="mask soft"><span id="s1h2">Every bounce is physics.</span></span>
+    </div>
+    <div class="stat" id="st0" style="top:430px"><div class="num"><span data-count="240">0</span><small>Hz</small></div><div class="lab">physics simulation, 4 sub-steps per frame</div><div class="rule"></div></div>
+    <div class="stat" id="st1" style="top:604px"><div class="num"><span data-count="52">0</span></div><div class="lab">numbers the agent sees every decision</div><div class="rule"></div></div>
+    <div class="stat" id="st2" style="top:778px"><div class="num"><span data-count="36">0</span></div><div class="lab">actions: 9 directions × jump × boost</div><div class="rule"></div></div>
+    <svg class="full" id="s1svg">
+      <g id="s1box" fill="none" stroke="#33405a" stroke-width="2.5"></g>
+      <g id="rays"></g>
+      <g id="s1ballg" opacity="0">
+        <line id="c2b" x1="0" y1="0" x2="0" y2="0" stroke="#f2f4f8" stroke-width="2" stroke-dasharray="8 10" opacity="0.7"/>
+        <g id="s1ball"><circle r="30" fill="#f7fafc"/><path d="M-25 5 L25 -5 M-5 -25 L5 25" stroke="#e53e3e" stroke-width="2.6" stroke-linecap="round"/></g>
+      </g>
+      <g id="car">
+        <path id="flame" d="M-118 -20 L-200 -8 L-118 4 Z" fill="#ffb066" opacity="0"/>
+        <path id="flameCore" d="M-118 -14 L-160 -8 L-118 -2 Z" fill="#fff" opacity="0"/>
+        <path id="hull" d="M-118 -2 L-112 -26 L-60 -34 L-26 -62 L44 -62 L78 -34 L118 -28 L124 -2 Z" fill="#163152" stroke="#4aa3ff" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M-14 -54 L36 -54 L60 -34 L-36 -34 Z" fill="#7dd3fc" opacity="0.85"/>
+        <g id="wheelL" transform="translate(-72 4)"><circle r="24" fill="#1e293b" stroke="#94a3b8" stroke-width="3"/><circle r="7" fill="#e2e8f0"/></g>
+        <g id="wheelR" transform="translate(76 4)"><circle r="24" fill="#1e293b" stroke="#94a3b8" stroke-width="3"/><circle r="7" fill="#e2e8f0"/></g>
+      </g>
+      <g font-family="JetBrains Mono" font-size="18" fill="#a9b3c6" letter-spacing="1.5">
+        <text id="lbRays" x="1088" y="302" opacity="0">8 RAYCASTS</text>
+        <text id="lbBall" x="1560" y="420" opacity="0">CAR → BALL</text>
+        
+      </g>
+    </svg>
+  </div>
+
+  <!-- ============ S2: the learners ============ -->
+  <div class="scene" id="s2">
+    <div class="abs label" style="left:140px;top:150px"><b>02</b> — The learners</div>
+    <div class="abs h" style="left:140px;top:192px;font-size:80px">
+      <span class="mask"><span id="s2h1">Two learners.</span></span>
+      <span class="mask soft"><span id="s2h2">Same-sized brain.</span></span>
+    </div>
+    <div class="algo" id="cardA" style="top:444px;--c:var(--ddqn)"><div class="t">D3QN</div><div class="s">Dueling Double DQN · off-policy</div></div>
+    <div class="algo" id="cardB" style="top:584px;--c:var(--ppo)"><div class="t">PPO</div><div class="s">Actor–critic · on-policy</div></div>
+    <div class="abs" id="s2stat" style="left:140px;top:752px"><div class="num" style="font-size:110px">≈<span id="pcount">0</span>k</div><div style="font-size:26px;color:var(--text-2);margin-top:10px">parameters each, so it's a fair fight</div></div>
+    <svg class="full" id="net"></svg>
+  </div>
+
+  <!-- ============ S3: curriculum ============ -->
+  <div class="scene" id="s3">
+    <div class="abs label" style="left:140px;top:150px"><b>03</b> — How we trained</div>
+    <div class="abs h" style="left:140px;top:192px;font-size:80px"><span class="mask"><span id="s3h">Three-stage curriculum</span></span></div>
+    <div class="chip" id="ch0" style="left:140px"><b id="cv0">0k</b><span>episodes</span></div>
+    <div class="chip" id="ch1" style="left:400px"><b id="cv1">0M</b><span>decisions</span></div>
+    <div class="chip" id="ch2" style="left:640px"><b id="cv2">0 h</b><span>of simulated play</span></div>
+    <div class="legend" id="leg" style="left:1440px"><span><i style="background:var(--ddqn)"></i>D3QN</span><span><i style="background:var(--ppo)"></i>PPO</span></div>
+    <svg class="full" id="curv"></svg>
+  </div>
+
+  <!-- ============ S4: results ============ -->
+  <div class="scene" id="s4">
+    <div class="abs label" style="left:140px;top:150px"><b>04</b> — Results</div>
+    <div class="abs num" id="bigN" style="left:132px;top:186px;font-size:210px">0</div>
+    <div class="abs" id="s4sub" style="left:140px;top:408px;font-size:30px;color:var(--text-2)">round-robin matches · 25 bots · every pairing, both sides</div>
+    <div class="row" id="r0" style="top:520px"><div class="nm">D3QN</div><div class="rk">BEST · RANK 1 / 25</div><div class="track"></div><div class="fill" style="background:var(--ddqn);width:933.8px"></div><div class="val">0%</div></div>
+    <div class="row" id="r1" style="top:640px"><div class="nm">PPO</div><div class="rk">BEST · RANK 7 / 25</div><div class="track"></div><div class="fill" style="background:var(--ppo);width:769.1px"></div><div class="val">0%</div></div>
+    <div class="row" id="r2" style="top:760px"><div class="nm">Heuristic bot</div><div class="rk">SCRIPTED · RANK 21 / 25</div><div class="track"></div><div class="fill" style="background:var(--gray);width:255.2px"></div><div class="val">0%</div></div>
+    <div class="abs" id="s4foot" style="left:140px;top:870px;font-size:22px;color:var(--muted)">Win rate of the best model of each kind, excluding mirror matches</div>
+  </div>
+
+  <!-- ============ S5: hand-off ============ -->
+  <div class="scene" id="s5">
+    <div class="abs label" id="s5kick" style="left:0;width:1920px;text-align:center;top:146px;color:var(--text-2)">Up next</div>
+    <div class="abs h" id="s5title" style="left:0;width:1920px;text-align:center;top:184px;font-size:96px"><span class="mask"><span id="s5h">Now watch them play</span></span></div>
+  </div>
+  <div id="win"><canvas id="gp" width="1920" height="986"></canvas></div>
+  <svg class="full" id="goalfx" style="pointer-events:none">
+    <circle id="gr1" r="10" fill="none" stroke="#fff" stroke-width="4" opacity="0"/>
+    <circle id="gr2" r="10" fill="none" stroke="#4aa3ff" stroke-width="3" opacity="0"/>
+  </svg>
+  <div class="abs" id="tags" style="left:0;width:1920px;top:964px;display:flex;justify-content:center;opacity:0">
+    <div style="display:flex;gap:34px;align-items:center;padding:12px 30px;border-radius:999px;background:rgba(13,16,23,0.88);border:1px solid #2b3447">
+      <span class="tag"><i style="background:var(--blue)"></i><span style="color:var(--blue)">BLUE</span><em>D3QN · 1st</em></span>
+      <span style="font-family:var(--mono);color:var(--muted);font-size:20px">VS</span>
+      <span class="tag"><i style="background:var(--orange)"></i><span style="color:var(--orange)">ORANGE</span><em>D3QN · 2nd</em></span>
+    </div>
+  </div>
+  <div class="abs" id="goalTag" style="left:0;width:1920px;top:118px;text-align:center;opacity:0">
+    <span style="font-family:var(--display);font-weight:700;font-size:44px;letter-spacing:0.18em;color:#fff;padding:8px 26px;border-radius:12px;background:rgba(74,163,255,0.9)">GOAL · BLUE</span>
+  </div>
+
+  <!-- morph helpers shared across scenes -->
+  <svg class="full" id="morph" style="pointer-events:none"></svg>
+  <svg class="full" id="iris" style="pointer-events:none">
+    <circle id="ir1" cx="0" cy="0" r="0" fill="none" stroke="#4aa3ff" stroke-width="6" opacity="0"/>
+    <circle id="ir2" cx="0" cy="0" r="0" fill="none" stroke="#ff8a3d" stroke-width="3" opacity="0"/>
+  </svg>
+
+  <!-- hud -->
+  <div class="layer" id="hud">
+    <div class="tick" style="left:44px;top:44px;border-left-width:2px;border-top-width:2px"></div>
+    <div class="tick" style="right:44px;top:44px;border-right-width:2px;border-top-width:2px"></div>
+    <div class="tick" style="left:44px;bottom:44px;border-left-width:2px;border-bottom-width:2px"></div>
+    <div class="tick" style="right:44px;bottom:44px;border-right-width:2px;border-bottom-width:2px"></div>
+    <div id="hudWord">CAR SOCCER <b>2D</b></div>
+    <div id="hudIdx"><b>01</b> / 04</div>
+  </div>
+  <div id="bar"></div>
+  <div id="wipe"><div class="s1"></div><div class="s2"></div><div class="s3"></div><div class="body"></div><div class="s4"></div><div class="s5"></div><div class="s6"></div></div>
+  <div class="layer" id="vignette"></div>
+  <canvas id="grain" width="1920" height="1080"></canvas>
+</div>
+
+<script>
+const T_END = 18.5, FPS = 60;
+const T_GP = 15.5;             // timeline time of gameplay frame 0 (source 0:50.000)
+const T_GOAL = 15.5 + 2.233;   // score changes at source 0:52.233
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+const tl = gsap.timeline({ paused: true });
+const live = [];   // per-frame hooks: (t) => void, run after tl.seek
+
+function splitChars(el) {
+  const txt = el.textContent; el.textContent = "";
+  return [...txt].map((ch) => { const s = document.createElement("span"); s.className = "c"; s.textContent = ch; el.appendChild(s); return s; });
+}
+function riseIn(el, at, { stagger = 0.022, dur = 0.9, y = 115 } = {}) {
+  const chars = splitChars(el);
+  gsap.set(chars, { yPercent: y });
+  tl.to(chars, { yPercent: 0, duration: dur, ease: "expo.out", stagger }, at);
+  return chars;
+}
+function riseOut(chars, at, { stagger = 0.01, dur = 0.45 } = {}) {
+  tl.to(chars, { yPercent: -115, duration: dur, ease: "power3.in", stagger }, at);
+}
+function drawOn(el, at, dur, ease = "power2.inOut") {
+  const L = el.getTotalLength();
+  el.style.strokeDasharray = `${L} ${L}`; el.style.strokeDashoffset = L;
+  tl.to(el, { strokeDashoffset: 0, duration: dur, ease }, at);
+}
+function counter(el, to, at, dur, fmt = (v) => Math.round(v).toLocaleString("en-US")) {
+  const o = { v: 0 }; el.textContent = fmt(0);
+  tl.to(o, { v: to, duration: dur, ease: "expo.out" }, at);
+  live.push(() => { el.textContent = fmt(o.v); });
+}
+function showScene(id, tIn, tOut) {
+  tl.set(id, { autoAlpha: 1 }, tIn);
+  if (tOut != null) tl.set(id, { autoAlpha: 0 }, tOut);
+}
+/* Vector wipe: skewed stripes cross the screen; the scene swap happens while they cover it. */
+function wipe(at, dir, swap) {
+  const W = 4160, cover = dir > 0 ? -1120 : 1920 - W + 1120;
+  const from = dir > 0 ? -W - 400 : 1920 + 400, to = dir > 0 ? 1920 + 400 : -W - 400;
+  tl.set("#wipe", { visibility: "visible", x: from, scaleX: dir > 0 ? 1 : -1 }, at);
+  tl.to("#wipe", { x: cover, duration: 0.36, ease: "power3.in" }, at);
+  swap(at + 0.36);
+  tl.to("#wipe", { x: to, duration: 0.36, ease: "power3.out" }, at + 0.36);
+  tl.set("#wipe", { visibility: "hidden" }, at + 0.73);
+}
+
+/* ---------------- background, grain, hud ---------------- */
+const grainCanvas = $("#grain"), gctx = grainCanvas.getContext("2d");
+const grainTiles = [...Array(6)].map(() => {
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const x = c.getContext("2d"), d = x.createImageData(256, 256);
+  for (let i = 0; i < d.data.length; i += 4) { const v = rnd() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  x.putImageData(d, 0, 0); return c;
+});
+live.push((t) => {
+  const f = Math.round(t * FPS), tile = grainTiles[f % grainTiles.length];
+  gctx.fillStyle = gctx.createPattern(tile, "repeat");
+  gctx.save(); gctx.translate((f * 97) % 256, (f * 61) % 256); gctx.fillRect(-256, -256, 1920 + 512, 1080 + 512); gctx.restore();
+  $("#grid").style.transform = `translate(${(t * 9) % 64}px, ${(t * 5) % 64}px)`;
+  $("#glowB").style.transform = `translate(${-380 + 140 * Math.sin(t * 0.35)}px, ${-420 + 90 * Math.cos(t * 0.3)}px)`;
+  $("#glowO").style.transform = `translate(${1200 + 120 * Math.cos(t * 0.32)}px, ${380 + 100 * Math.sin(t * 0.4)}px)`;
+  $("#bar").style.transform = `scaleX(${Math.min(1, t / T_END)})`;
+  const idx = t < 6.5 ? 1 : t < 9.95 ? 2 : t < 12.9 ? 3 : 4;
+  $("#hudIdx").innerHTML = `<b>0${idx}</b> / 04`;
+});
+gsap.set("#bar", { opacity: 0.9 });
+gsap.set("#wipe", { skewX: -18 });
+tl.to("#hud", { opacity: 1, duration: 0.5, ease: "power2.out" }, 3.1);
+tl.to("#hud", { opacity: 0, duration: 0.4, ease: "power2.in" }, 15.1);
+
+/* ---------------- S0: ignition + title (0 – 3.1) ---------------- */
+showScene("#s0", 0, 3.1);
+// arena outline in game proportions, centred
+(function buildArena() {
+  const g = $("#arena"), W = 1500, H = W / 1.944, X = 960 - W / 2, Y = 540 - H / 2;
+  const L = X + 0.108 * W, R = X + 0.892 * W, Tp = Y + 0.09 * H, Bt = Y + 0.91 * H, r = 0.075 * W;
+  const halfR = `M960 ${Tp} H${R - r} Q${R} ${Tp} ${R} ${Tp + r} V${Bt - r} Q${R} ${Bt} ${R - r} ${Bt} H960`;
+  const halfL = `M960 ${Tp} H${L + r} Q${L} ${Tp} ${L} ${Tp + r} V${Bt - r} Q${L} ${Bt} ${L + r} ${Bt} H960`;
+  const gy0 = Y + 0.38 * H, gy1 = Y + 0.675 * H, gw = 0.09 * W, gr = 26;
+  const goalR = `M${R} ${gy0} H${R + gw - gr} Q${R + gw} ${gy0} ${R + gw} ${gy0 + gr} V${gy1 - gr} Q${R + gw} ${gy1} ${R + gw - gr} ${gy1} H${R}`;
+  const goalL = `M${L} ${gy0} H${L - gw + gr} Q${L - gw} ${gy0} ${L - gw} ${gy0 + gr} V${gy1 - gr} Q${L - gw} ${gy1} ${L - gw + gr} ${gy1} H${L}`;
+  const wall = { stroke: "#56637d", "stroke-width": 4 };
+  const pR = svgEl("path", { d: halfR, ...wall }, g), pL = svgEl("path", { d: halfL, ...wall }, g);
+  const fR = svgEl("path", { d: goalR + "Z", fill: "url(#netO)", stroke: "none", opacity: 0 }, g);
+  const fL = svgEl("path", { d: goalL + "Z", fill: "url(#netB)", stroke: "none", opacity: 0 }, g);
+  const oR = svgEl("path", { d: goalR, stroke: "#ff8a3d", "stroke-width": 4 }, g);
+  const oL = svgEl("path", { d: goalL, stroke: "#4aa3ff", "stroke-width": 4 }, g);
+  const mid = svgEl("path", { d: `M960 ${Tp} V${Bt}`, stroke: "#2a3346", "stroke-width": 2 }, g);
+  const cc = svgEl("circle", { cx: 960, cy: 540, r: 0.1 * W, stroke: "#2a3346", "stroke-width": 2, transform: "rotate(-90 960 540)" }, g);
+  drawOn(pR, 0.86, 0.95, "power3.inOut"); drawOn(pL, 0.86, 0.95, "power3.inOut");
+  drawOn(oR, 1.45, 0.55, "power2.out"); drawOn(oL, 1.45, 0.55, "power2.out");
+  drawOn(mid, 1.15, 0.7, "power2.inOut"); drawOn(cc, 1.05, 0.9, "power2.inOut");
+  tl.to([fR, fL], { opacity: 1, duration: 0.6, ease: "power2.out" }, 1.75);
+  tl.to(g, { opacity: 0.55, duration: 0.6, ease: "power2.inOut" }, 1.6);
+})();
+// ball pops in, two comets collide on it
+tl.to("#ball", { attr: { transform: "translate(960 540) scale(1)" }, duration: 0.5, ease: "back.out(2.2)" }, 0.1);
+const comet = { b: -60, o: 1980, tb: 0, to: 0, head: 1 };
+tl.to(comet, { b: 930, o: 990, duration: 0.62, ease: "power2.in" }, 0.18);
+tl.to(comet, { tb: 1, to: 1, duration: 0.5, ease: "power1.out" }, 0.18);
+tl.to(comet, { tb: 0, to: 0, duration: 0.32, ease: "power3.out" }, 0.8);
+tl.to(comet, { head: 0, duration: 0.18, ease: "power2.out" }, 0.8);
+live.push(() => {
+  const LB = 760 * comet.tb, LO = 760 * comet.to;
+  for (const id of ["#stB", "#stBg"]) { const e = $(id); e.setAttribute("x", comet.b - LB); e.setAttribute("width", Math.max(0, LB)); }
+  for (const id of ["#stO", "#stOg"]) { const e = $(id); e.setAttribute("x", comet.o); e.setAttribute("width", Math.max(0, LO)); }
+  [["#hdB", comet.b, 9], ["#hdBg", comet.b, 22], ["#hdO", comet.o, 9], ["#hdOg", comet.o, 22]].forEach(([id, x, r]) => { const e = $(id); e.setAttribute("cx", x); e.setAttribute("r", r * comet.head); });
+});
+tl.to("#flash", { opacity: 0.32, duration: 0.05, ease: "none" }, 0.8);
+tl.to("#flash", { opacity: 0, duration: 0.45, ease: "power2.out" }, 0.85);
+[["#ring1", 760, 0.8, 0.9], ["#ring2", 620, 0.84, 1.0], ["#ring3", 520, 0.88, 1.05]].forEach(([id, r, at, d]) => {
+  tl.set(id, { opacity: 1 }, at);
+  tl.to(id, { attr: { r }, opacity: 0, duration: d, ease: "expo.out" }, at);
+});
+tl.to("#ball", { attr: { transform: "translate(960 540) scale(1.5)" }, duration: 0.12, ease: "power2.out" }, 0.8);
+tl.to("#ball", { attr: { transform: "translate(960 540) scale(0)" }, duration: 0.35, ease: "back.in(2)" }, 0.95);
+// title
+gsap.set("#s0kick", { opacity: 0, letterSpacing: "0.6em" });
+tl.to("#s0kick", { opacity: 1, letterSpacing: "0.22em", duration: 1.0, ease: "expo.out" }, 1.15);
+const carChars = riseIn($("#s0car"), 1.2, { stagger: 0.035, dur: 1.0 });
+gsap.set("#s0two", { scale: 2.4, opacity: 0, transformOrigin: "50% 60%" });
+tl.to("#s0two", { scale: 1, opacity: 1, duration: 0.55, ease: "back.out(2.4)" }, 1.62);
+gsap.set("#s0sub", { opacity: 0, y: 24 });
+tl.to("#s0sub", { opacity: 1, y: 0, duration: 0.8, ease: "expo.out" }, 1.85);
+// exit: title breaks apart upward just before the wipe
+riseOut(carChars, 2.62, { stagger: 0.012, dur: 0.4 });
+tl.to("#s0two", { yPercent: -115, duration: 0.4, ease: "power3.in" }, 2.72);
+tl.to(["#s0kick", "#s0sub"], { opacity: 0, y: -20, duration: 0.35, ease: "power2.in" }, 2.66);
+tl.to("#arena", { scale: 1.12, svgOrigin: "960 540", opacity: 0, duration: 0.5, ease: "power2.in" }, 2.62);
+
+/* ---------------- S1: the world (3.1 – 6.5) ---------------- */
+wipe(2.74, +1, (t) => { showScene("#s1", t, 6.52); });
+(function s1() {
+  const T0 = 3.12;
+  gsap.set("#s1lab", { opacity: 0, x: -20 });
+  tl.to("#s1lab", { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" }, T0);
+  const h1 = riseIn($("#s1h1"), T0 + 0.02, { stagger: 0.018 }), h2 = riseIn($("#s1h2"), T0 + 0.14, { stagger: 0.014 });
+  ["#st0", "#st1", "#st2"].forEach((id, i) => {
+    const at = T0 + 0.35 + i * 0.22;
+    gsap.set(id, { opacity: 0, y: 40 }); gsap.set(`${id} .rule`, { scaleX: 0 });
+    tl.to(id, { opacity: 1, y: 0, duration: 0.8, ease: "expo.out" }, at);
+    tl.to(`${id} .rule`, { scaleX: 1, duration: 1.0, ease: "expo.out" }, at + 0.1);
+    const n = $(`${id} [data-count]`); counter(n, +n.dataset.count, at, 1.3);
+  });
+  // schematic: arena corner, car drops in, raycasts fire
+  const box = $("#s1box");
+  const bx0 = 1010, bx1 = 1790, by0 = 250, by1 = 880, br = 90;
+  const boxPath = svgEl("path", { d: `M${bx0} ${by0 + 160} V${by1 - br} Q${bx0} ${by1} ${bx0 + br} ${by1} H${bx1 - br} Q${bx1} ${by1} ${bx1} ${by1 - br} V${by0 + br} Q${bx1} ${by0} ${bx1 - br} ${by0} H${bx0 + 160}` }, box);
+  drawOn(boxPath, T0 + 0.1, 0.9, "power3.inOut");
+  const car = $("#car"), cx = 1330, floor = by1 - 3;
+  const carY = { y: -260, tilt: -14 };
+  tl.to(carY, { y: floor - 28, duration: 0.75, ease: "bounce.out" }, T0 + 0.3);
+  tl.to(carY, { tilt: 0, duration: 0.9, ease: "elastic.out(1, 0.45)" }, T0 + 0.55);
+  const drive = { x: 0 };
+  tl.to(drive, { x: 90, duration: 0.65, ease: "power2.inOut" }, T0 + 0.95);
+  live.push((t) => {
+    const bob = t > T0 + 1.6 ? 1.6 * Math.sin((t - T0) * 9) * Math.exp(-(t - T0 - 1.6) * 1.5) : 0;
+    car.setAttribute("transform", `translate(${cx + drive.x} ${carY.y + bob}) rotate(${carY.tilt})`);
+    const on = t > T0 + 0.95 && t < T0 + 1.55;
+    const fl = on ? 0.75 + 0.25 * Math.sin(t * 61) : 0;
+    $("#flame").setAttribute("opacity", fl); $("#flameCore").setAttribute("opacity", fl);
+    $("#flame").setAttribute("transform", `scale(${1 + 0.18 * Math.sin(t * 47)} 1) translate(${-6 * Math.sin(t * 31)} 0)`);
+    const spin = (drive.x / 24) * (180 / Math.PI);
+    $("#wheelL").setAttribute("transform", `translate(-72 4) rotate(${spin})`);
+    $("#wheelR").setAttribute("transform", `translate(76 4) rotate(${spin})`);
+  });
+  // rays (drawn from where the car sits once it has landed and driven)
+  const rays = $("#rays"), ox = cx + 90, oy = floor - 58;
+  const rect = { x0: bx0, x1: bx1, y0: by0, y1: by1 };
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4, dx = Math.cos(a), dy = -Math.sin(a);
+    let s = Infinity;
+    if (dx > 1e-6) s = Math.min(s, (rect.x1 - ox) / dx); if (dx < -1e-6) s = Math.min(s, (rect.x0 - ox) / dx);
+    if (dy > 1e-6) s = Math.min(s, (rect.y1 - oy) / dy); if (dy < -1e-6) s = Math.min(s, (rect.y0 - oy) / dy);
+    const hx = ox + dx * s, hy = oy + dy * s;
+    const ln = svgEl("line", { x1: ox, y1: oy, x2: hx, y2: hy, stroke: "#5cc8ff", "stroke-width": 2, opacity: 0.85 }, rays);
+    const dot = svgEl("circle", { cx: hx, cy: hy, r: 0, fill: "#fff" }, rays);
+    const at = T0 + 1.62 + k * 0.05;
+    drawOn(ln, at, 0.45, "expo.out");
+    tl.to(dot, { attr: { r: 6 }, duration: 0.35, ease: "back.out(3)" }, at + 0.3);
+  }
+  gsap.set(rays, { opacity: 1 });
+  tl.to("#lbRays", { opacity: 1, duration: 0.4 }, T0 + 1.9);
+  // ball + relation vector
+  const ball = { x: 1600, y: 520 };
+  tl.to("#s1ballg", { opacity: 1, duration: 0.5, ease: "power2.out" }, T0 + 0.9);
+  live.push((t) => {
+    const by = ball.y + 16 * Math.sin((t - T0) * 2.4);
+    $("#s1ball").setAttribute("transform", `translate(${ball.x} ${by}) rotate(${(t - T0) * 40})`);
+    const c2b = $("#c2b"); c2b.setAttribute("x1", cx + drive.x + 20); c2b.setAttribute("y1", carY.y - 40);
+    c2b.setAttribute("x2", ball.x); c2b.setAttribute("y2", by);
+    c2b.style.strokeDashoffset = -((t * 60) % 18);
+  });
+  tl.to("#lbBall", { opacity: 1, duration: 0.4 }, T0 + 1.3);
+    // exit
+  riseOut([...h1, ...h2], T0 + 2.95, { stagger: 0.006, dur: 0.35 });
+})();
+
+/* ---------------- S2: the learners (6.5 – 10.0) ---------------- */
+wipe(6.16, -1, (t) => { showScene("#s2", t, 10.0); });
+const netNodes = {};
+(function s2() {
+  const T0 = 6.55, net = $("#net");
+  riseIn($("#s2h1"), T0, { stagger: 0.02 }); riseIn($("#s2h2"), T0 + 0.12, { stagger: 0.016 });
+  ["#cardA", "#cardB"].forEach((id, i) => {
+    gsap.set(id, { opacity: 0, x: -60 });
+    tl.to(id, { opacity: 1, x: 0, duration: 0.8, ease: "expo.out" }, T0 + 0.35 + i * 0.15);
+  });
+  gsap.set("#s2stat", { opacity: 0, y: 30 });
+  tl.to("#s2stat", { opacity: 1, y: 0, duration: 0.8, ease: "expo.out" }, T0 + 0.75);
+  counter($("#pcount"), 150, T0 + 0.75, 1.4);
+  const cols = [
+    { x: 920, ys: [330, 410, 490, 570, 650, 730, 810], c: "#a9b3c6" },
+    { x: 1100, ys: [290, 360, 430, 500, 570, 640, 710, 780, 850], c: "#a9b3c6" },
+    { x: 1280, ys: [290, 360, 430, 500, 570, 640, 710, 780, 850], c: "#a9b3c6" },
+    { x: 1460, ys: [340, 400, 460, 680, 740, 800], c: null },
+  ];
+  const headColor = (i) => (i < 3 ? "#22a77a" : "#9085e9");
+  const edges = svgEl("g", {}, net), sig = svgEl("g", {}, net), nodes = svgEl("g", {}, net);
+  const edgeEls = [[], [], [], []];
+  for (let c = 0; c < 3; c++) {
+    cols[c].ys.forEach((y0) => cols[c + 1].ys.forEach((y1, j) => {
+      const col = c === 2 ? headColor(j) : "#8a96ad";
+      if (c === 2 && ((j < 3 && y0 > 640) || (j >= 3 && y0 < 500))) return; // keep the fork readable
+      edgeEls[c].push(svgEl("line", { x1: cols[c].x, y1: y0, x2: cols[c + 1].x, y2: y1, stroke: col, "stroke-width": 1.2, opacity: c === 2 ? 0.45 : 0.22 }, edges));
+    }));
+  }
+  const pills = [{ y: 400, t: "Q(s,a)", c: "#22a77a" }, { y: 740, t: "π(a|s) · V(s)", c: "#9085e9" }];
+  cols[3].ys.forEach((y0, j) => {
+    const p = pills[j < 3 ? 0 : 1];
+    edgeEls[3].push(svgEl("line", { x1: 1460, y1: y0, x2: 1572, y2: p.y, stroke: p.c, "stroke-width": 1.4, opacity: 0.6 }, edges));
+  });
+  edgeEls.forEach((list, c) => list.forEach((e, k) => drawOn(e, T0 + 0.35 + c * 0.22 + (k % 9) * 0.012, 0.5, "power2.out")));
+  cols.forEach((col, c) => col.ys.forEach((y, j) => {
+    const fill = c === 3 ? headColor(j) : "#0d1017", stroke = c === 3 ? headColor(j) : "#d5dbe6";
+    const n = svgEl("circle", { cx: col.x, cy: y, r: 0, fill, stroke, "stroke-width": 2.5 }, nodes);
+    tl.to(n, { attr: { r: 10 }, duration: 0.5, ease: "back.out(3)" }, T0 + 0.25 + c * 0.22 + j * 0.025);
+    netNodes[`${c}-${j}`] = n;
+  }));
+  pills.forEach((p, i) => {
+    const g = svgEl("g", { opacity: 0 }, nodes);
+    const w = i ? 236 : 150;
+    svgEl("rect", { x: 1572, y: p.y - 28, width: w, height: 56, rx: 28, fill: "#0d1017", stroke: p.c, "stroke-width": 2.5 }, g);
+    const tx = svgEl("text", { x: 1572 + w / 2, y: p.y + 9, "text-anchor": "middle", "font-family": "JetBrains Mono", "font-size": 23, "font-weight": 700, fill: "#f2f4f8" }, g);
+    tx.textContent = p.t;
+    tl.to(g, { opacity: 1, duration: 0.5, ease: "power2.out" }, T0 + 1.15 + i * 0.1);
+  });
+  ["52", "256", "256", "128 + 128"].forEach((t, c) => {
+    const tx = svgEl("text", { x: cols[c].x, y: 912, "text-anchor": "middle", "font-family": "JetBrains Mono", "font-size": 18, fill: "#6c7890", opacity: 0 }, nodes);
+    tx.textContent = t; tl.to(tx, { opacity: 1, duration: 0.4 }, T0 + 0.6 + c * 0.15);
+  });
+  // signals flowing input -> heads -> outputs
+  for (let k = 0; k < 34; k++) {
+    const a = cols[0].ys[Math.floor(rnd() * 7)], b = cols[1].ys[Math.floor(rnd() * 9)], c = cols[2].ys[Math.floor(rnd() * 9)];
+    const hj = Math.floor(rnd() * 6), h = cols[3].ys[hj], p = pills[hj < 3 ? 0 : 1];
+    const pts = `${cols[0].x},${a} ${cols[1].x},${b} ${cols[2].x},${c} 1460,${h} 1572,${p.y}`;
+    const pl = svgEl("polyline", { points: pts, fill: "none", stroke: hj < 3 ? "#7ff0c8" : "#c9c2ff", "stroke-width": 3, "stroke-linecap": "round", opacity: 0.95 }, sig);
+    const L = pl.getTotalLength(); pl.style.strokeDasharray = `46 ${L + 60}`; pl.style.strokeDashoffset = 46;
+    const at = T0 + 1.0 + rnd() * 1.6;
+    tl.to(pl, { strokeDashoffset: -L, duration: 1.0 + rnd() * 0.3, ease: "power1.inOut" }, at);
+  }
+  // exit: everything recedes except three hidden-layer nodes, which travel on to become the curriculum stages
+  tl.to(["#s2 .label", "#s2 .h", "#cardA", "#cardB", "#s2stat"], { opacity: 0, x: -40, duration: 0.3, ease: "power2.in", stagger: 0.025 }, 9.42);
+  tl.to([edges, sig], { opacity: 0, duration: 0.35, ease: "power2.in" }, 9.45);
+  tl.to(nodes, { opacity: 0, duration: 0.3, ease: "power2.in" }, 9.5);
+})();
+
+/* ---------------- S3: curriculum (9.95 – 12.9) ---------------- */
+showScene("#s3", 9.9, null);
+const PLOT = { x0: 240, x1: 1780, y0: 450, y1: 800 };
+const STAGE_X = [];
+(function s3() {
+  const T0 = 9.95, P = PLOT, bw = (P.x1 - P.x0) / 4, svg = $("#curv");
+  const bandX = (i) => P.x0 + i * bw;
+  STAGE_X.push(bandX(0) + bw / 2, bandX(1) + bw / 2, bandX(2) + bw);
+  const axisY = 872;
+  // morph: three nodes fly from the network to the stage axis
+  const morph = $("#morph");
+  const src = [netNodes["2-2"], netNodes["2-4"], netNodes["2-6"]];
+  src.forEach((n, i) => {
+    const m = svgEl("circle", { cx: n.getAttribute("cx"), cy: n.getAttribute("cy"), r: 10, fill: "#0d1017", stroke: "#d5dbe6", "stroke-width": 2.5, opacity: 0 }, morph);
+    tl.set(m, { opacity: 1 }, 9.5);
+    tl.to(m, { attr: { cx: STAGE_X[i], cy: axisY, r: 16 }, duration: 0.75, ease: "expo.inOut", delay: i * 0.04 }, 9.5);
+    tl.set(m, { opacity: 0 }, 10.36);
+  });
+  riseIn($("#s3h"), T0, { stagger: 0.018 });
+  [0, 1, 2].forEach((i) => { gsap.set(`#ch${i}`, { opacity: 0, y: 24 }); tl.to(`#ch${i}`, { opacity: 1, y: 0, duration: 0.7, ease: "expo.out" }, T0 + 0.2 + i * 0.08); });
+  gsap.set("#leg", { opacity: 0 }); tl.to("#leg", { opacity: 1, duration: 0.5 }, T0 + 0.4);
+  // grid + bands
+  const grid = svgEl("g", { opacity: 0 }, svg);
+  [0, 50, 100].forEach((v) => {
+    const y = P.y1 - (P.y1 - P.y0) * v / 100;
+    svgEl("line", { x1: P.x0, x2: P.x1, y1: y, y2: y, stroke: "#222a3a", "stroke-width": 1.5 }, grid);
+    const tx = svgEl("text", { x: P.x0 - 18, y: y + 7, "text-anchor": "end", "font-family": "JetBrains Mono", "font-size": 19, fill: "#6c7890" }, grid); tx.textContent = `${v}%`;
+  });
+  const yl = svgEl("text", { x: 0, y: 0, "text-anchor": "middle", "font-family": "Inter", "font-size": 19, fill: "#6c7890", transform: `translate(150 ${(P.y0 + P.y1) / 2}) rotate(-90)` }, grid); yl.textContent = "episodes ending in a goal";
+  for (let i = 1; i < 4; i++) svgEl("line", { x1: bandX(i), x2: bandX(i), y1: P.y0 - 70, y2: P.y1, stroke: "#2a3346", "stroke-width": 1.5 }, grid);
+  tl.to(grid, { opacity: 1, duration: 0.5, ease: "power2.out" }, T0 + 0.15);
+  const heads = [["STAGE 1", "Empty pitch"], ["STAGE 2", "vs heuristic bot"], ["STAGE 3a", "Self-play r1"], ["STAGE 3b", "Self-play r2"]];
+  const headEls = heads.map(([a, b], i) => {
+    const g = svgEl("g", { opacity: 0 }, svg);
+    const t1 = svgEl("text", { x: bandX(i) + 20, y: P.y0 - 44, "font-family": "JetBrains Mono", "font-size": 17, "font-weight": 700, fill: "#6c7890", "letter-spacing": 2 }, g); t1.textContent = a;
+    const t2 = svgEl("text", { x: bandX(i) + 20, y: P.y0 - 12, "font-family": "Space Grotesk", "font-size": 30, "font-weight": 700, fill: "#f2f4f8" }, g); t2.textContent = b;
+    return g;
+  });
+  // curves revealed by a playhead
+  const clip = svgEl("clipPath", { id: "ph" }, svg), clipR = svgEl("rect", { x: P.x0 - 10, y: P.y0 - 20, width: 0, height: P.y1 - P.y0 + 40 }, clip);
+  const curves = svgEl("g", { "clip-path": "url(#ph)" }, svg);
+  const yOf = (v) => P.y1 - (P.y1 - P.y0) * v / 100;
+  const series = {};
+  for (const algo of ["ddqn", "ppo"]) {
+    const color = algo === "ddqn" ? "#22a77a" : "#9085e9";
+    series[algo] = [];
+    DATA.curves[algo].forEach((stage, i) => {
+      const pts = stage.points, s0 = pts[0][1], s1 = pts[pts.length - 1][1];
+      const xy = pts.map((p) => [bandX(i) + 10 + (bw - 20) * (p[1] - s0) / (s1 - s0), yOf(p[2])]);
+      series[algo].push(xy);
+      svgEl("path", { d: xy.map((q, k) => `${k ? "L" : "M"}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(""), fill: "none", stroke: color, "stroke-width": 4, "stroke-linejoin": "round", "stroke-linecap": "round" }, curves);
+    });
+  }
+  const phLine = svgEl("line", { x1: P.x0, x2: P.x0, y1: P.y0 - 20, y2: axisY, stroke: "#f2f4f8", "stroke-width": 2, opacity: 0 }, svg);
+  const dots = ["ddqn", "ppo"].map((a) => svgEl("circle", { r: 8, fill: a === "ddqn" ? "#22a77a" : "#9085e9", stroke: "#f2f4f8", "stroke-width": 3, opacity: 0 }, svg));
+  // stage axis
+  const axis = svgEl("line", { x1: STAGE_X[0], x2: STAGE_X[2], y1: axisY, y2: axisY, stroke: "#33405a", "stroke-width": 3 }, svg);
+  const axisOn = svgEl("line", { x1: STAGE_X[0], x2: STAGE_X[0], y1: axisY, y2: axisY, stroke: "#f2f4f8", "stroke-width": 3 }, svg);
+  gsap.set(axis, { opacity: 0 }); tl.to(axis, { opacity: 1, duration: 0.3 }, T0 + 0.25);
+  const stageNodes = STAGE_X.map((x) => svgEl("circle", { cx: x, cy: axisY, r: 16, fill: "#0d1017", stroke: "#d5dbe6", "stroke-width": 2.5, opacity: 0 }, svg));
+  stageNodes.forEach((n) => tl.set(n, { opacity: 1 }, 10.36));
+  const nlab = ["Empty pitch", "Heuristic bot", "Self-play ×2"].map((s, i) => {
+    const tx = svgEl("text", { x: STAGE_X[i], y: axisY + 52, "text-anchor": "middle", "font-family": "Inter", "font-size": 22, "font-weight": 600, fill: "#a9b3c6", opacity: 0 }, svg); tx.textContent = s; return tx;
+  });
+  const ph = { p: 0 };
+  const PH_AT = T0 + 0.45, PH_DUR = 2.05;
+  tl.set([phLine, ...dots], { opacity: 1 }, PH_AT);
+  tl.to(ph, { p: 1, duration: PH_DUR, ease: "power1.inOut" }, PH_AT);
+  const inv = (p) => (p < 0.5 ? Math.sqrt(p / 2) : 1 - Math.sqrt((1 - p) / 2));
+  heads.forEach((_, i) => tl.to(headEls[i], { opacity: 1, duration: 0.35, ease: "power2.out" }, PH_AT + inv(i / 4) * PH_DUR));
+  [0, 1 / 4, 2 / 4].forEach((p, i) => {
+    const at = PH_AT + inv(p) * PH_DUR;
+    tl.to(stageNodes[i], { attr: { fill: "#f2f4f8", r: 13 }, duration: 0.4, ease: "back.out(3)" }, at);
+    tl.to(nlab[i], { opacity: 1, duration: 0.35 }, at);
+  });
+  tl.to([phLine, ...dots], { opacity: 0, duration: 0.3 }, PH_AT + PH_DUR + 0.05);
+  const TOT = { ep: 108.4, dec: 10.97, hrs: 203 };
+  live.push(() => {
+    const x = P.x0 + ph.p * (P.x1 - P.x0);
+    clipR.setAttribute("width", x - P.x0 + 10);
+    phLine.setAttribute("x1", x); phLine.setAttribute("x2", x);
+    const band = Math.min(3, Math.floor(ph.p * 4));
+    ["ddqn", "ppo"].forEach((a, k) => {
+      const xy = series[a][band]; let q = xy[0];
+      for (const pt of xy) { if (pt[0] <= x) q = pt; else break; }
+      dots[k].setAttribute("cx", Math.min(x, q[0])); dots[k].setAttribute("cy", q[1]);
+    });
+    const ax = Math.min(STAGE_X[2], Math.max(STAGE_X[0], x));
+    axisOn.setAttribute("x2", ax);
+    $("#cv0").textContent = `${Math.round(TOT.ep * ph.p)}k`;
+    $("#cv1").textContent = `${Math.round(TOT.dec * ph.p)}M`;
+    $("#cv2").textContent = `≈${Math.round(TOT.hrs * ph.p)} h`;
+  });
+})();
+
+/* ---------------- S4: results (12.9 – 15.4), iris reveal ---------------- */
+(function s4() {
+  const T0 = 12.9, cx = STAGE_X[2], cy = 872;
+  const iris = { r: 0 };
+  tl.set("#s4", { autoAlpha: 1 }, 12.5);
+  tl.to(iris, { r: 2300, duration: 0.85, ease: "expo.inOut" }, 12.5);
+  tl.set(["#ir1", "#ir2"], { opacity: 1 }, 12.5);
+  tl.to(["#ir1", "#ir2"], { opacity: 0, duration: 0.3 }, 13.1);
+  tl.set("#s3", { autoAlpha: 0 }, 13.4);
+  tl.set("#s4", { clipPath: "none" }, 13.4);
+  live.push((t) => {
+    if (t >= 12.5 && t < 13.4) {
+      $("#s4").style.clipPath = `circle(${iris.r}px at ${cx}px ${cy}px)`;
+      const m = `radial-gradient(circle at ${cx}px ${cy}px, transparent ${iris.r - 30}px, #000 ${iris.r - 29}px)`;
+      $("#s3").style.webkitMaskImage = m; $("#s3").style.maskImage = m;
+      ["#ir1", "#ir2"].forEach((id, k) => { const e = $(id); e.setAttribute("cx", cx); e.setAttribute("cy", cy); e.setAttribute("r", Math.max(0, iris.r - k * 26)); });
+    }
+  });
+  gsap.set("#s4", { clipPath: "circle(0px at 0px 0px)" });
+  gsap.set("#s4 .label", { opacity: 0 }); tl.to("#s4 .label", { opacity: 1, duration: 0.5 }, T0 - 0.1);
+  gsap.set("#bigN", { opacity: 0, y: 40 });
+  tl.to("#bigN", { opacity: 1, y: 0, duration: 0.8, ease: "expo.out" }, T0 - 0.15);
+  counter($("#bigN"), 62500, T0 - 0.15, 1.5);
+  gsap.set("#s4sub", { opacity: 0, y: 20 }); tl.to("#s4sub", { opacity: 1, y: 0, duration: 0.7, ease: "expo.out" }, T0 + 0.15);
+  gsap.set("#s4foot", { opacity: 0 }); tl.to("#s4foot", { opacity: 1, duration: 0.6 }, T0 + 0.8);
+  const vals = [80.5, 66.3, 22.0];
+  ["#r0", "#r1", "#r2"].forEach((id, i) => {
+    const at = T0 + 0.3 + i * 0.14;
+    gsap.set(`${id} .nm, ${id} .rk`, { opacity: 0, x: -30 });
+    tl.to(`${id} .nm, ${id} .rk`, { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" }, at);
+    gsap.set(`${id} .fill`, { scaleX: 0 }); gsap.set(`${id} .track`, { scaleX: 0, transformOrigin: "left" });
+    tl.to(`${id} .track`, { scaleX: 1, duration: 0.7, ease: "expo.out" }, at);
+    tl.to(`${id} .fill`, { scaleX: 1, duration: 1.2, ease: "expo.out" }, at + 0.1);
+    const o = { v: 0 }, val = $(`${id} .val`), fill = $(`${id} .fill`);
+    tl.to(o, { v: 1, duration: 1.2, ease: "expo.out" }, at + 0.1);
+    gsap.set(val, { opacity: 0 }); tl.to(val, { opacity: 1, duration: 0.3 }, at + 0.15);
+    live.push(() => { val.textContent = `${(vals[i] * o.v).toFixed(1)}%`; val.style.left = `${400 + 1160 * vals[i] / 100 * o.v + 22}px`; });
+    void fill;
+  });
+  // exit: everything but the D3QN bar leaves; that bar becomes the gameplay window
+  tl.to(["#s4 .label", "#bigN", "#s4sub", "#s4foot", "#r1", "#r2", "#r0 .nm", "#r0 .rk", "#r0 .val", "#r0 .track"], { opacity: 0, y: -30, duration: 0.4, ease: "power2.in", stagger: 0.02 }, 15.0);
+})();
+
+/* ---------------- S5: hand-off to gameplay (15.25 – 18.5) ---------------- */
+const frames = [];
+(function s5() {
+  const win = $("#win"), canvas = $("#gp"), ctx = canvas.getContext("2d");
+  const R = { x: 540, y: 520, w: 933.8, h: 64, r: 14, c: 0, img: 0 };
+  tl.set("#r0 .fill", { opacity: 0 }, 15.3);
+  tl.set(win, { visibility: "visible" }, 15.3);
+  tl.set("#s4", { autoAlpha: 0 }, 15.6);
+  // bar -> centred window -> full frame
+  tl.to(R, { x: 370, y: 330, w: 1180, h: 606, r: 26, duration: 0.8, ease: "expo.inOut" }, 15.3);
+  tl.to(R, { c: 1, duration: 0.45, ease: "power2.inOut" }, 15.45);
+  tl.to(R, { img: 1, duration: 0.5, ease: "power2.out" }, 15.6);
+  tl.to(R, { x: 0, y: 47, w: 1920, h: 986, r: 0, duration: 0.85, ease: "expo.inOut" }, 16.75);
+  showScene("#s5", 15.4, null);
+  gsap.set("#s5kick", { opacity: 0 }); tl.to("#s5kick", { opacity: 1, duration: 0.5 }, 15.55);
+  const tc = riseIn($("#s5h"), 15.55, { stagger: 0.02 });
+  riseOut(tc, 16.65, { stagger: 0.008, dur: 0.35 });
+  tl.to("#s5kick", { opacity: 0, duration: 0.3 }, 16.65);
+  gsap.set("#tags", { y: 40 });
+  tl.to("#tags", { opacity: 1, y: 0, duration: 0.7, ease: "expo.out" }, 15.95);
+  tl.to("#tags", { y: 4, duration: 0.85, ease: "expo.inOut" }, 16.75);
+  // goal accent synced to the recording
+  const GX = 0.935 * 1920, GY = 47 + 0.525 * 986;
+  ["#gr1", "#gr2"].forEach((id, k) => {
+    gsap.set(id, { attr: { cx: GX, cy: GY } });
+    tl.set(id, { opacity: 1 }, T_GOAL - 0.02 + k * 0.05);
+    tl.to(id, { attr: { r: 260 - k * 60 }, opacity: 0, duration: 0.8, ease: "expo.out" }, T_GOAL - 0.02 + k * 0.05);
+  });
+  gsap.set("#goalTag", { scale: 0.6, transformOrigin: "50% 50%" });
+  tl.to("#goalTag", { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2.5)" }, T_GOAL);
+  tl.to("#goalTag", { opacity: 0, y: -10, duration: 0.25, ease: "power2.in" }, T_GOAL + 0.5);
+  // clean exit so the cut into the raw gameplay clip (continue it from 0:53.0) is invisible
+  tl.to(["#tags", "#bar"], { opacity: 0, duration: 0.3, ease: "power2.in" }, T_END - 0.32);
+  const ddqn = [34, 167, 122], bg = [13, 16, 23];
+  live.push((t) => {
+    if (t < 15.3) return;
+    win.style.left = `${R.x}px`; win.style.top = `${R.y}px`; win.style.width = `${R.w}px`; win.style.height = `${R.h}px`;
+    win.style.borderRadius = `${R.r}px`;
+    const mix = ddqn.map((v, k) => Math.round(v + (bg[k] - v) * R.c));
+    win.style.background = `rgb(${mix.join(",")})`;
+    win.style.boxShadow = R.w < 1919 ? `0 0 0 2px rgba(74,163,255,${0.45 * R.c}), 0 40px 120px rgba(0,0,0,0.55)` : "none";
+    const s = Math.max(R.w / 1920, R.h / 986);
+    canvas.style.transform = `translate(${(R.w - 1920 * s) / 2}px, ${(R.h - 986 * s) / 2}px) scale(${s})`;
+    canvas.style.opacity = R.img;
+    const idx = Math.max(0, Math.min(frames.length - 1, Math.floor((t - T_GP) * 30 + 1e-6)));
+    if (frames[idx]) ctx.drawImage(frames[idx], 0, 0, 1920, 986);
+  });
+})();
+
+/* ---------------- driver ---------------- */
+tl.to({}, { duration: 0 }, T_END);
+window.render = (t) => { tl.seek(t, false); for (const f of live) f(t); };
+async function boot() {
+  await document.fonts.ready;
+  await Promise.all([...Array(90)].map((_, i) => new Promise((res) => {
+    const im = new Image(); im.onload = res; im.onerror = res; im.src = `gp/gp_${String(i + 1).padStart(3, "0")}.jpg`; frames[i] = im;
+  })));
+  await Promise.all(frames.map((im) => im.decode().catch(() => {})));
+  window.render(0);
+  window.READY = true;
+  if (location.search.includes("play")) {
+    const t0 = performance.now();
+    const loop = () => { const t = ((performance.now() - t0) / 1000) % T_END; window.render(t); requestAnimationFrame(loop); };
+    loop();
+  }
+  const m = location.search.match(/t=([\d.]+)/); if (m) window.render(parseFloat(m[1]));
+}
+boot();
+</script>
+</body>
+</html>

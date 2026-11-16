@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Car Soccer Intro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Video intro slides: one 1920x1080 frame per <section>. Open with ?s=N to show only slide N
+     (that is what render_slides.sh screenshots); without it every slide is stacked for preview. */
+  :root {
+    --bg: #0f1219;            /* the game's own background colour */
+    --surface: #151a25;
+    --surface-2: #1b2130;
+    --line: #262d3d;
+    --line-strong: #364056;
+    --text: #edf0f6;
+    --text-2: #aab3c5;
+    --muted: #748098;
+    --team-blue: #4299e1;     /* game team colours: decoration only, never data */
+    --team-orange: #ed8936;
+    --ddqn: #22a77a;          /* chart series, validated on --surface (dataviz validator, dark) */
+    --ppo: #9085e9;
+    --baseline: #8b93a7;
+    --display: "Space Grotesk", "Ubuntu Sans", sans-serif;
+    --body: "Inter", "Ubuntu Sans", "Open Sans", sans-serif;
+    --mono: "JetBrains Mono", "Ubuntu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: var(--body); }
+  body { -webkit-font-smoothing: antialiased; }
+  body:not(.single) { padding: 40px 0; display: grid; gap: 40px; justify-content: center; background: #05070b; }
+  body.single section:not(.on) { display: none; }
+
+  section {
+    position: relative; width: 1920px; height: 1080px; overflow: hidden;
+    background: var(--bg); padding: 84px 112px 72px;
+    display: flex; flex-direction: column;
+  }
+  /* Thin blue | orange rule along the top: the two teams */
+  section::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+    background: linear-gradient(90deg, var(--team-blue) 0 50%, var(--team-orange) 50% 100%);
+  }
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 20px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 44px;
+  }
+  .topbar b { color: var(--text-2); font-weight: 700; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: 76px; line-height: 1.04; letter-spacing: -0.02em; }
+  h1 .soft { color: var(--text-2); font-weight: 500; }
+  .lede { margin-top: 18px; font-size: 32px; line-height: 1.4; color: var(--text-2); max-width: 1500px; }
+  .mono { font-family: var(--mono); }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+  }
+  .label {
+    font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .swatch { display: inline-block; width: 18px; height: 18px; border-radius: 4px; vertical-align: -2px; margin-right: 12px; }
+  .foot { margin-top: auto; font-size: 22px; color: var(--muted); line-height: 1.45; }
+
+  /* ---------- 1. Title ---------- */
+  .s-title { padding: 0; }
+  .s-title .bg {
+    position: absolute; inset: 0; background: url(img/hero_wallshot.png) 88% 75% / auto 125% no-repeat;
+  }
+  .s-title .shade {
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, var(--bg) 0%, var(--bg) 34%, rgba(15,18,25,0.82) 52%, rgba(15,18,25,0.0) 78%);
+  }
+  .s-title .content { position: relative; height: 100%; padding: 96px 112px 84px; display: flex; flex-direction: column; }
+  .s-title .kicker { font-family: var(--mono); font-size: 24px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-2); }
+  .s-title h1 { margin-top: 140px; font-size: 168px; line-height: 0.95; letter-spacing: -0.035em; }
+  .s-title h1 .two { color: var(--team-orange); }
+  .s-title .sub { margin-top: 34px; font-size: 44px; line-height: 1.3; color: var(--text); max-width: 900px; font-weight: 500; }
+  .s-title .inspired { margin-top: 14px; font-size: 24px; color: var(--muted); }
+  .chips { display: flex; gap: 14px; margin-top: 44px; flex-wrap: wrap; max-width: 980px; }
+  .chip {
+    font-size: 24px; font-weight: 600; padding: 12px 22px; border-radius: 999px;
+    background: rgba(27,33,48,0.9); border: 1px solid var(--line-strong); color: var(--text);
+  }
+  .s-title .names { margin-top: auto; font-size: 28px; color: var(--text-2); }
+  .s-title .names b { color: var(--text); font-weight: 600; }
+  .s-title .caption {
+    position: absolute; right: 320px; top: 100px; font-size: 20px; color: var(--muted);
+    font-family: var(--mono); letter-spacing: 0.04em;
+  }
+
+  /* ---------- 2. Environment ---------- */
+  .env-grid { display: grid; grid-template-columns: 1060px 1fr; gap: 44px; margin-top: 44px; align-items: stretch; }
+  .arena { position: relative; align-self: start; border-radius: 20px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); }
+  .arena img { width: 100%; height: auto; display: block; }
+  .arena .tag {
+    position: absolute; left: 24px; bottom: 22px; font-family: var(--mono); font-size: 19px; color: var(--text-2);
+    background: rgba(15,18,25,0.85); padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line);
+  }
+  .mdp { display: flex; flex-direction: column; gap: 18px; height: 100%; }
+  .mdp .card { flex: 1; padding: 22px 30px; display: grid; grid-template-columns: 178px 1fr; column-gap: 22px; align-items: center; }
+  .mdp .big { font-family: var(--display); font-weight: 700; font-size: 70px; line-height: 1; letter-spacing: -0.02em; margin-top: 10px; }
+  .mdp .big small { display: block; font-size: 22px; font-weight: 600; color: var(--text-2); margin-top: 6px; letter-spacing: 0; }
+  .mdp .what { font-size: 27px; font-weight: 600; margin-bottom: 6px; line-height: 1.25; }
+  .mdp .why { font-size: 22px; line-height: 1.4; color: var(--text-2); }
+  .mdp .label { font-size: 19px; }
+
+  /* ---------- 3. Agents ---------- */
+  .arch { display: grid; grid-template-columns: 430px 1fr; grid-template-rows: minmax(0, 1fr); gap: 40px; margin-top: 44px; flex: 1; min-height: 0; }
+  .trunk { padding: 28px 32px; display: flex; flex-direction: column; min-height: 0; }
+  .layer {
+    border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 14px;
+    padding: 11px 20px; font-size: 24px; font-weight: 600; text-align: center;
+  }
+  .layer small { display: block; font-family: var(--mono); font-size: 18px; color: var(--text-2); font-weight: 500; margin-top: 2px; }
+  .arrow { height: 20px; display: flex; justify-content: center; }
+  .arrow::before { content: ""; width: 2px; background: var(--line-strong); }
+  .params { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--line); }
+  .params .n { font-family: var(--display); font-size: 60px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+  .params .t { font-size: 22px; color: var(--text-2); margin-top: 8px; line-height: 1.38; }
+  .algos { display: grid; grid-template-rows: 1fr 1fr; gap: 24px; min-height: 0; }
+  .algo { padding: 28px 40px; display: grid; grid-template-columns: 1fr 540px; gap: 32px; align-items: center; position: relative; overflow: hidden; }
+  .algo::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--c); }
+  .algo h2 { font-family: var(--display); font-size: 46px; font-weight: 700; letter-spacing: -0.01em; }
+  .algo .kind { font-family: var(--mono); font-size: 20px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); margin-top: 8px; }
+  .algo .heads { margin-top: 20px; font-size: 26px; line-height: 1.45; }
+  .algo .heads .mono { font-size: 25px; color: var(--text); }
+  .algo ul { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+  .algo li { font-size: 24px; color: var(--text-2); padding-left: 26px; position: relative; line-height: 1.35; }
+  .algo li::before { content: ""; position: absolute; left: 0; top: 13px; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+
+  /* ---------- 4. Curriculum ---------- */
+  .stats { display: flex; gap: 18px; margin-top: 30px; }
+  .stat { padding: 16px 24px; display: flex; align-items: baseline; gap: 12px; }
+  .stat b { font-family: var(--display); font-size: 40px; font-weight: 700; }
+  .stat span { font-size: 22px; color: var(--text-2); }
+  .chart { margin-top: 26px; flex: 1; min-height: 0; padding: 0; }
+  .chart svg { display: block; width: 100%; height: 100%; }
+  .legend { display: flex; gap: 34px; font-size: 24px; color: var(--text-2); align-items: center; }
+  .legend .line { display: inline-block; width: 34px; height: 4px; border-radius: 2px; vertical-align: 6px; margin-right: 12px; }
+  .legend .dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--surface); vertical-align: -1px; margin-right: 12px; }
+
+  /* ---------- 5. Loopholes ---------- */
+  .holes { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: auto auto 1fr auto; column-gap: 24px; margin-top: 56px; flex: 1; min-height: 0; }
+  .hole { padding: 36px 34px; display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; }
+  .hole .num { font-family: var(--mono); font-size: 22px; color: var(--muted); font-weight: 700; }
+  .hole .ex { margin-top: 20px; font-family: var(--display); font-size: 44px; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; }
+  .hole .exd { margin-top: 18px; font-size: 27px; line-height: 1.45; color: var(--text-2); }
+  .hole .fix { padding-top: 28px; border-top: 1px solid var(--line); }
+  .hole .fix .label { color: var(--team-blue); font-size: 20px; }
+  .hole .fix p { margin-top: 12px; font-size: 28px; line-height: 1.38; font-weight: 500; min-height: 3em; }
+
+  /* ---------- 6. Results ---------- */
+  .res { display: grid; grid-template-columns: 1fr 430px; grid-template-rows: minmax(0, 1fr); gap: 36px; margin-top: 36px; flex: 1; min-height: 0; }
+  .res .chart { margin-top: 0; padding: 28px 32px 18px; display: flex; flex-direction: column; }
+  .res .chart .legend { margin-bottom: 8px; }
+  .res .chart svg { flex: 1; min-height: 0; }
+  .tiles { display: flex; flex-direction: column; gap: 20px; }
+  .tile { padding: 22px 32px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .tile .n { font-family: var(--display); font-size: 68px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+  .tile .t { margin-top: 10px; font-size: 24px; line-height: 1.38; color: var(--text-2); }
+  .tile .t b { color: var(--text); font-weight: 600; }
+  .tile .who { display: flex; align-items: center; font-size: 20px; font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+
+  /* ---------- 7. Hand-off ---------- */
+  .s-next { padding: 0; }
+  .s-next .bg { position: absolute; inset: 0; background: url(img/boost_race.png) 50% 70% / cover no-repeat; opacity: 0.55; }
+  .s-next .shade { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 55% at 50% 42%, rgba(15,18,25,0.92) 0%, rgba(15,18,25,0.75) 55%, rgba(15,18,25,0.2) 100%); }
+  .s-next .content { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-bottom: 140px; }
+  .s-next .kicker { font-family: var(--mono); font-size: 26px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--text-2); }
+  .s-next h1 { margin-top: 26px; font-size: 128px; letter-spacing: -0.03em; line-height: 1; }
+  .s-next .vs { margin-top: 44px; display: flex; gap: 28px; align-items: center; font-family: var(--display); font-size: 44px; font-weight: 700; }
+  .s-next .vs .b { color: var(--team-blue); }
+  .s-next .vs .o { color: var(--team-orange); }
+  .s-next .vs i { font-style: normal; font-family: var(--mono); font-size: 26px; color: var(--muted); }
+  .s-next .sub { margin-top: 26px; font-size: 30px; color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<!-- 1 ─ Title -->
+<section class="s-title">
+  <div class="bg"></div><div class="shade"></div>
+  <div class="content">
+    <div class="kicker">ME5418 Final Project · Group 41</div>
+    <h1>Car Soccer<span class="two"> 2D</span></h1>
+    <div class="sub">Teaching rocket-powered cars to play soccer with deep reinforcement learning</div>
+    <div class="inspired">Inspired by Rocket League Sideswipe</div>
+    <div class="chips">
+      <span class="chip">Physics sim built from scratch</span>
+      <span class="chip">Dueling Double DQN</span>
+      <span class="chip">PPO</span>
+      <span class="chip">Curriculum + self-play</span>
+    </div>
+    <div class="names"><b>Lu Jia Yih Jensen</b> · <b>Benjamin Teh Jhen Hing</b> · <b>Wee Fook Choon</b></div>
+  </div>
+  <div class="caption">Real match frame · Dueling DDQN (blue) vs PPO (orange)</div>
+</section>
+
+<!-- 2 ─ Environment -->
+<section>
+  <div class="topbar"><span><b>01</b> · The environment</span><span>ME5418 · Group 41</span></div>
+  <h1>A 2D car-soccer world we built</h1>
+  <div class="lede">Pymunk physics at 240 Hz (suspension, tyre grip, jumps, flips, boost, aerials) as a Gymnasium env.</div>
+  <div class="env-grid">
+    <div class="arena">
+      <img src="img/aerial_save.png" alt="Arena with blue car in goal and orange car in the air">
+      <div class="tag">Orange sees a mirrored view, so one policy can play either side</div>
+    </div>
+    <div class="mdp">
+      <div class="card">
+        <div><div class="label">Sees</div><div class="big">52<small>inputs</small></div></div>
+        <div><div class="what">Car, ball and opponent state</div><div class="why">plus 8 wall raycasts and car→ball, ball→goal vectors</div></div>
+      </div>
+      <div class="card">
+        <div><div class="label">Does</div><div class="big">36<small>actions</small></div></div>
+        <div><div class="what">9 directions × jump × boost</div><div class="why">each held for 4 frames: 15 decisions per second</div></div>
+      </div>
+      <div class="card">
+        <div><div class="label">Wants</div><div class="big">±20<small>per goal</small></div></div>
+        <div><div class="what">Score +20 · concede −20</div><div class="why">small shaping for pushing the ball goal-ward and closing in on it</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot" style="font-size:24px;color:var(--text-2)">An episode ends on a goal or after 60 s. Kickoff positions are randomised every episode.</div>
+</section>
+
+<!-- 3 ─ Agents -->
+<section>
+  <div class="topbar"><span><b>02</b> · The learners</span><span>ME5418 · Group 41</span></div>
+  <h1>Two learners, <span class="soft">same-sized brain</span></h1>
+  <div class="arch">
+    <div class="card trunk">
+      <div class="label" style="margin-bottom:16px">Shared trunk</div>
+      <div class="layer">State<small>52 numbers</small></div>
+      <div class="arrow"></div>
+      <div class="layer">Dense 256<small>LayerNorm · ReLU</small></div>
+      <div class="arrow"></div>
+      <div class="layer">Dense 256<small>LayerNorm · ReLU</small></div>
+      <div class="arrow"></div>
+      <div class="layer">Two 128-wide heads<small>see right</small></div>
+      <div class="params">
+        <div class="n">~150k</div>
+        <div class="t">trainable parameters in each network, so the comparison is fair</div>
+      </div>
+    </div>
+    <div class="algos">
+      <div class="card algo" style="--c: var(--ddqn)">
+        <div>
+          <h2>Dueling Double DQN</h2>
+          <div class="kind">Off-policy · value-based</div>
+          <div class="heads">Heads: <span class="mono">V(s)</span> + <span class="mono">A(s,a)</span> → <span class="mono">Q(s,a)</span><br>acts greedily on the best Q</div>
+        </div>
+        <ul>
+          <li>100k-step replay buffer, Huber loss</li>
+          <li>Double-DQN targets, periodic target sync</li>
+          <li>ε-greedy exploration, 1.0 → 0.05</li>
+        </ul>
+      </div>
+      <div class="card algo" style="--c: var(--ppo)">
+        <div>
+          <h2>PPO Actor–Critic</h2>
+          <div class="kind">On-policy · policy gradient</div>
+          <div class="heads">Heads: policy <span class="mono">π(a|s)</span> + critic <span class="mono">V(s)</span><br>samples while training, greedy at test</div>
+        </div>
+        <ul>
+          <li>4,096-step rollouts, 6 update epochs</li>
+          <li>GAE (λ = 0.95), clipped objective (ε = 0.2)</li>
+          <li>Early stop when KL divergence &gt; 0.02</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 ─ Curriculum -->
+<section>
+  <div class="topbar"><span><b>03</b> · How we trained</span><span>ME5418 · Group 41</span></div>
+  <h1>A three-stage curriculum</h1>
+  <div class="lede">Each stage starts from the previous best weights and ends when the return plateaus.</div>
+  <div class="stats">
+    <div class="card stat"><b>108k</b><span>episodes</span></div>
+    <div class="card stat"><b>11M</b><span>agent decisions</span></div>
+    <div class="card stat"><b>≈200 h</b><span>of simulated play</span></div>
+    <div class="legend" style="margin-left:auto">
+      <span><span class="line" style="background:var(--ddqn)"></span>Dueling DDQN</span>
+      <span><span class="line" style="background:var(--ppo)"></span>PPO</span>
+    </div>
+  </div>
+  <div class="card chart" id="curve"></div>
+  <div class="foot" style="margin-top:18px">One teammate's runs shown (each teammate trained their own). Each point = share of episodes scored over 1/40 of a stage; stage widths equalised.</div>
+</section>
+
+<!-- 5 ─ Loopholes -->
+<section>
+  <div class="topbar"><span><b>04</b> · Lessons learned</span><span>ME5418 · Group 41</span></div>
+  <h1>The agents found loopholes. <span class="soft">We closed them.</span></h1>
+  <div class="holes">
+    <div class="card hole">
+      <div class="num">01</div>
+      <div class="ex">Parked as a ramp</div>
+      <div class="exd">Pitched its nose into the floor so rolling balls rode up the car and into the net.</div>
+      <div class="fix"><div class="label">Fix</div><p>Rebuilt the chassis with a vertical front bumper.</p></div>
+    </div>
+    <div class="card hole">
+      <div class="num">02</div>
+      <div class="ex">Farmed the corner</div>
+      <div class="exd">Nudged the ball up a curved corner wall over and over to collect "progress" reward.</div>
+      <div class="fix"><div class="label">Fix</div><p>Progress reward is weighted by ball height, so floor rolls earn far less.</p></div>
+    </div>
+    <div class="card hole">
+      <div class="num">03</div>
+      <div class="ex">Waited for mistakes</div>
+      <div class="exd">Hung back and let the scripted bot knock the ball into its own goal.</div>
+      <div class="fix"><div class="label">Fix</div><p>A goal the opponent touched last pays +2, not +20.</p></div>
+    </div>
+    <div class="card hole">
+      <div class="num">04</div>
+      <div class="ex">Camped in goal</div>
+      <div class="exd">Sat in its own goal mouth to avoid conceding and never crossed midfield.</div>
+      <div class="fix"><div class="label">Fix</div><p>A small penalty every step for distance to the ball.</p></div>
+    </div>
+  </div>
+  <div class="foot" style="margin-top:30px;font-size:26px;color:var(--text-2)">Every fix went into the physics or the reward, not the learning algorithm.</div>
+</section>
+
+<!-- 6 ─ Results -->
+<section>
+  <div class="topbar"><span><b>05</b> · Results</span><span>ME5418 · Group 41</span></div>
+  <h1>62,500-match round robin</h1>
+  <div class="lede">24 trained models + heuristic bot · every pairing, both sides · first goal wins (60 s limit)</div>
+  <div class="res">
+    <div class="card chart">
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--ddqn)"></span>Dueling DDQN (mean)</span>
+        <span><span class="swatch" style="background:var(--ppo)"></span>PPO (mean)</span>
+        <span><span class="dot"></span>one teammate's model</span>
+        <span><span class="line" style="background:var(--text)"></span>Heuristic bot (22%)</span>
+      </div>
+      <div id="bars" style="flex:1;min-height:0"></div>
+    </div>
+    <div class="tiles">
+      <div class="card tile">
+        <div class="who"><span class="swatch" style="background:var(--ddqn)"></span>Best overall · rank 1</div>
+        <div class="n">80.5%</div>
+        <div class="t"><b>Dueling DDQN</b> after self-play</div>
+      </div>
+      <div class="card tile">
+        <div class="who"><span class="swatch" style="background:var(--ppo)"></span>Best PPO · rank 7</div>
+        <div class="n">66.3%</div>
+        <div class="t"><b>PPO</b> after self-play</div>
+      </div>
+      <div class="card tile">
+        <div class="who"><span class="swatch" style="background:var(--baseline)"></span>Baseline · rank 21</div>
+        <div class="n">22.0%</div>
+        <div class="t"><b>Heuristic bot</b>. All 12 DDQN models beat it.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 ─ Hand-off to gameplay -->
+<section class="s-next">
+  <div class="bg"></div><div class="shade"></div>
+  <div class="content">
+    <div class="kicker">Up next</div>
+    <h1>Watch them play</h1>
+    <div class="vs"><span class="b">Blue</span><i>vs</i><span class="o">Orange</span></div>
+    <div class="sub">Trained agents, head to head · no human input</div>
+  </div>
+</section>
+
+<script src="data.js"></script>
+<script>
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function text(parent, x, y, str, attrs = {}) {
+  const t = el("text", { x, y, fill: css("--text-2"), "font-family": css("--body"), "font-size": 22, ...attrs }, parent);
+  t.textContent = str;
+  return t;
+}
+
+/* Learning curves: rolling-100 goal rate, each stage drawn in its own equal-width band. */
+function drawCurves(host) {
+  const W = host.clientWidth, H = host.clientHeight;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}` }, host);
+  const m = { l: 104, r: 110, t: 112, b: 40 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const bands = [
+    { n: "1", title: "Empty pitch", desc: "drive, hit, score" },
+    { n: "2", title: "vs heuristic bot", desc: "scripted attacker + keeper" },
+    { n: "3a", title: "Self-play, round 1", desc: "vs frozen best self" },
+    { n: "3b", title: "Self-play, round 2", desc: "opponent refreshed" },
+  ];
+  const bw = pw / bands.length;
+  const y = (v) => m.t + ph * (1 - v / 100);
+
+  bands.forEach((b, i) => {
+    const x0 = m.l + i * bw;
+    if (i % 2 === 1) el("rect", { x: x0, y: m.t, width: bw, height: ph, fill: "#ffffff", "fill-opacity": 0.022 }, svg);
+    if (i > 0) el("line", { x1: x0, x2: x0, y1: m.t - 92, y2: m.t + ph, stroke: css("--line-strong"), "stroke-width": 1 }, svg);
+    text(svg, x0 + 22, m.t - 62, `STAGE ${b.n}`, { "font-family": css("--mono"), "font-size": 18, fill: css("--muted"), "font-weight": 700, "letter-spacing": "0.12em" });
+    text(svg, x0 + 22, m.t - 30, b.title, { "font-family": css("--display"), "font-size": 29, "font-weight": 700, fill: css("--text") });
+    text(svg, x0 + 22, m.t - 4, b.desc, { "font-size": 21 });
+  });
+
+  [0, 25, 50, 75, 100].forEach((v) => {
+    el("line", { x1: m.l, x2: m.l + pw, y1: y(v), y2: y(v), stroke: css("--line"), "stroke-width": 1 }, svg);
+    text(svg, m.l - 16, y(v) + 8, `${v}%`, { "text-anchor": "end", "font-family": css("--mono"), "font-size": 20, fill: css("--muted") });
+  });
+  const yl = text(svg, 0, 0, "Episodes ending in a goal", { "font-size": 20, fill: css("--muted"), "text-anchor": "middle" });
+  yl.setAttribute("transform", `translate(28 ${m.t + ph / 2}) rotate(-90)`);
+
+  // 50% in self-play = an even match against its own past self
+  const x50 = m.l + 2 * bw;
+  el("line", { x1: x50, x2: m.l + pw, y1: y(50), y2: y(50), stroke: css("--baseline"), "stroke-width": 1.5, "stroke-opacity": 0.8 }, svg);
+  text(svg, x50 + bw - 14, y(50) + 36, "50% = even match", { "font-size": 20, fill: css("--text-2"), "text-anchor": "end" });
+
+  const ends = [];
+  for (const algo of ["ddqn", "ppo"]) {
+    const color = css(algo === "ddqn" ? "--ddqn" : "--ppo");
+    DATA.curves[algo].forEach((stage, i) => {
+      const pts = stage.points;
+      const s0 = pts[0][1], s1 = pts[pts.length - 1][1];
+      const d = pts.map((p, k) => `${k ? "L" : "M"}${(m.l + i * bw + 10 + (bw - 20) * (p[1] - s0) / (s1 - s0)).toFixed(1)},${y(p[2]).toFixed(1)}`).join("");
+      el("path", { d, fill: "none", stroke: color, "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    });
+    const last = DATA.curves[algo].at(-1).points.at(-1);
+    ends.push({ algo, color, v: last[2], name: algo === "ddqn" ? "DDQN" : "PPO" });
+  }
+  // Direct end labels, nudged apart so they never collide
+  ends.sort((a, b) => b.v - a.v);
+  let prevY = -Infinity;
+  ends.forEach((e) => {
+    let ly = y(e.v) + 8;
+    if (ly - prevY < 34) ly = prevY + 34;
+    prevY = ly;
+    el("circle", { cx: m.l + pw - 10, cy: y(e.v), r: 6, fill: e.color, stroke: css("--surface"), "stroke-width": 2 }, svg);
+    text(svg, m.l + pw + 14, ly, e.name, { "font-size": 22, "font-weight": 600, fill: css("--text") });
+  });
+}
+
+/* Round-robin win rate by curriculum stage: mean bar per algorithm + one dot per teammate's model. */
+function drawBars(host) {
+  const W = host.clientWidth, H = host.clientHeight;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}` }, host);
+  const m = { l: 84, r: 24, t: 44, b: 88 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const stages = [
+    ["s1_none", "Stage 1", "empty pitch"],
+    ["s2_heuristic", "Stage 2", "vs bot"],
+    ["s3_self_r1", "Stage 3a", "self-play r1"],
+    ["s3_self_r2", "Stage 3b", "self-play r2"],
+  ];
+  const y = (v) => m.t + ph * (1 - v / 100);
+  [0, 25, 50, 75, 100].forEach((v) => {
+    el("line", { x1: m.l, x2: m.l + pw, y1: y(v), y2: y(v), stroke: css("--line"), "stroke-width": 1 }, svg);
+    text(svg, m.l - 14, y(v) + 7, `${v}%`, { "text-anchor": "end", "font-family": css("--mono"), "font-size": 19, fill: css("--muted") });
+  });
+  const yl = text(svg, 0, 0, "Win rate (excl. mirror matches)", { "font-size": 19, fill: css("--muted"), "text-anchor": "middle" });
+  yl.setAttribute("transform", `translate(18 ${m.t + ph / 2}) rotate(-90)`);
+
+  const gw = pw / stages.length, barW = 88, gap = 4;
+  const heur = DATA.round_robin.find((b) => b.algo === "heuristic").win;
+  stages.forEach(([key, a, b], i) => {
+    const cx = m.l + gw * (i + 0.5);
+    ["ddqn", "ppo"].forEach((algo, j) => {
+      const s = DATA.rr_summary[`${algo}/${key}`];
+      const x = algo === "ddqn" ? cx - gap / 2 - barW : cx + gap / 2;
+      const top = y(s.mean), r = 4;
+      el("path", {
+        d: `M${x},${y(0)} V${top + r} Q${x},${top} ${x + r},${top} H${x + barW - r} Q${x + barW},${top} ${x + barW},${top + r} V${y(0)} Z`,
+        fill: css(algo === "ddqn" ? "--ddqn" : "--ppo"),
+      }, svg);
+      s.runs.forEach((v) => el("circle", { cx: x + barW / 2, cy: y(v), r: 7, fill: css("--text"), stroke: css("--surface"), "stroke-width": 2.5 }, svg));
+      const hi = Math.max(s.mean, ...s.runs);
+      text(svg, x + barW / 2, y(hi) - 16, `${Math.round(s.mean)}%`, { "text-anchor": "middle", "font-family": css("--mono"), "font-size": 22, "font-weight": 700, fill: css("--text") });
+    });
+    text(svg, cx, y(0) + 38, a, { "text-anchor": "middle", "font-family": css("--display"), "font-size": 25, "font-weight": 700, fill: css("--text") });
+    text(svg, cx, y(0) + 68, b, { "text-anchor": "middle", "font-size": 21 });
+  });
+  // Heuristic-bot reference line, drawn above the bars
+  el("line", { x1: m.l, x2: m.l + pw, y1: y(heur), y2: y(heur), stroke: css("--text"), "stroke-width": 2, "stroke-opacity": 0.85 }, svg);
+}
+
+function init() {
+  const s = new URLSearchParams(location.search).get("s");
+  const sections = [...document.querySelectorAll("section")];
+  if (s) { document.body.classList.add("single"); sections[Number(s) - 1].classList.add("on"); }
+  drawCurves(document.getElementById("curve"));
+  drawBars(document.getElementById("bars"));
+  document.body.dataset.ready = "1";
+}
+document.fonts.ready.then(init);
+</script>
+</body>
+</html>
