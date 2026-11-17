@@ -24,10 +24,13 @@ class CurriculumConfig:
     latest_self_prob: float = 0.70  # Probability of facing the latest self-play checkpoint
     past_self_prob: float = 0.15  # Probability of facing an earlier self-play checkpoint (when >= 2 exist)
     heuristic_prob: float = 0.15  # Probability of facing the scripted heuristic bot to prevent forgetting
+    # Probability of facing a frozen league checkpoint (`--league`, e.g. other algorithms' models); the
+    # remaining probability is split between latest / past self as above. Unused without a league.
+    league_prob: float = 0.35
 
-    # Plateau detection (ends a stage / self-play round)
-    patience: int = 3000  # Episodes without a new best rolling mean return before the stage ends (D3QN / PPO v1)
-    ppo_v2_patience: int = 4000  # Higher patience for 8-env PPO v2 (parallel burst variance + separate critic)
+    # Plateau detection (ends a stage / self-play round). PPO v2 ends stages on evaluation instead
+    # (`PPOv2Config.eval_patience` / `min_train_steps`), so `patience` only applies to D3QN / PPO v1.
+    patience: int = 3000  # Episodes without a new best rolling mean return before the stage ends
     reward_window: int = 100  # Episodes in the rolling mean return (matches the agents' best-model metric)
     min_episodes: int = 20  # Warm-up before a stage can set a best / plateau (matches TrainingLogger)
     max_stage_episodes: int | None = None  # Hard cap on episodes per stage / round (None: until plateau)

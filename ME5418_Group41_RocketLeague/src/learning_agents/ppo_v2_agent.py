@@ -1,22 +1,36 @@
 """
 PPO v2 Learning Agent: separate-network Actor-Critic with factored MultiDiscrete heads and parallel envs.
 
-Differs from `src/learning_agents/ppo_agent.py` in four ways:
+Differs from `src/learning_agents/ppo_agent.py` in five ways:
 1. Architecture (`SeparateActorCritic` in `src/neural_nets/ppo_v2_torch.py`): completely independent
    policy and value MLPs (no shared trunk parameters; 164,366 trainable parameters for width 256,
-   NOT parameter-matched to Dueling DDQN's 150,949 parameters).
+   NOT parameter-matched to Dueling DDQN's 150,949 parameters). With a shared trunk the critic's
+   gradient alone moved the policy past the KL stop, so most of each trust region went to critic noise.
 2. Action space: factored `MultiDiscrete([9, 2, 2])` heads (`pi_heads.0/1/2`).
-3. Parallel rollouts: collects `rollout_steps` across `num_envs` vectorized environments in either
-   `"subproc"` (one worker process per env) or `"sync"` mode via `step_with_autoreset`.
-4. Periodic fixed-seed greedy evaluation: writes `eval_<name>.csv` in the run directory alongside
-   standard `metrics_<name>.csv`, best/periodic checkpoints, and `graph_<name>.png`.
+3. Parallel rollouts: collects `rollout_steps` across `num_envs` vectorized environments (default: one
+   per logical CPU minus two) in either `"subproc"` (one worker process per env, each with its own random
+   streams) or `"sync"` mode via `step_with_autoreset`, and updates on large batches (~8,192 samples
+   whatever `num_envs` is, 1,024-sample minibatches) under a loose KL safety stop. The learner keeps
+   `rollout_threads` torch threads while the workers step and `update_threads` during the update.
+4. Evaluation-based model selection: every `eval_interval_steps` the greedy policy plays fixed-seed
+   games against each evaluation opponent (no opponent, the heuristic bot, or frozen checkpoints),
+   in parallel on the env workers. Each evaluated model is saved to `checkpoints/`; the best score
+   (win rate - loss rate) is saved as `model_<name>.pt`. Results go to `eval_<name>.csv` and
+   `eval_<name>_opponents.csv`.
+5. Training length in env steps: training stops after `eval_patience` evaluations without a new best
+   score (once `min_train_steps` have been collected), at `max_train_steps`, or after `num_episodes`.
 """
 
+import contextlib
+import io
 import multiprocessing as mp
 import os
+import random
 import signal
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace
+from datetime import datetime
 from multiprocessing.connection import Connection
 from pathlib import Path
 
@@ -25,18 +39,25 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from src.config.curriculum_learning import CurriculumConfig
+from src.config.gym_config import GymConfig
 from src.config.nn_config import PPOv2Config
 from src.learning_agents.dashboard import metric_panel, save_training_dashboard
 from src.learning_agents.env_factory import device, make_env, normalize_control_car, obs_to_tensor, scored_goal
 from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
 from src.learning_agents.ppo_agent import compute_gae
 from src.learning_agents.run_dirs import RunPaths, latest_model_path, save_periodic_checkpoint
-from src.learning_agents.training_logger import TrainingLogger
+from src.learning_agents.training_logger import DATE_FORMAT, TrainingLogger
 from src.neural_nets.checkpoint import infer_spec, load_state_dict
 from src.neural_nets.policy import greedy_action
 from src.neural_nets.ppo_v2_torch import SeparateActorCritic
 
 EVAL_SEED_BASE = 10_000
+EVAL_NO_OPPONENT = "none"  # evaluation opponent: empty arena
+EVAL_HEURISTIC = "heuristic"  # evaluation opponent: the scripted HeuristicBot
+
+# (opponent, wins, losses, draws, summed return, summed decision steps)
+EvalResult = tuple[str, int, int, int, float, int]
 
 
 def step_with_autoreset(env, action) -> tuple[np.ndarray, float, bool, bool, bool, np.ndarray | None]:
@@ -58,6 +79,79 @@ def step_with_autoreset(env, action) -> tuple[np.ndarray, float, bool, bool, boo
     )
 
 
+def _seed_process_rngs(seed: int | None):
+    """Give this process its own Python / NumPy / torch random streams.
+
+    CPython reseeds `random` in forked children, but NumPy and torch keep the parent's state, so
+    without this every worker's stochastic self-play opponents (torch sampling) drew identical actions.
+    """
+    seed = int.from_bytes(os.urandom(4), "little") if seed is None else seed
+    random.seed(seed)
+    np.random.seed(seed % 2**32)
+    torch.manual_seed(seed)
+
+
+def _make_eval_env(opponent: str, random_spawn: bool, max_episode_steps: int | None, action_repeat: int):
+    """Env with a fixed Orange opponent: `EVAL_NO_OPPONENT`, `EVAL_HEURISTIC`, or a checkpoint path (greedy)."""
+    common = dict(
+        discrete_action=False,
+        control_car="blue",
+        random_spawn=random_spawn,
+        max_episode_steps=max_episode_steps,
+        action_repeat=action_repeat,
+    )
+    if opponent in (EVAL_NO_OPPONENT, EVAL_HEURISTIC):
+        bot_type = "none" if opponent == EVAL_NO_OPPONENT else "heuristic_bot"
+        return make_env(bot_type=bot_type, env_id=GymConfig.gym_id, **common)
+    with contextlib.redirect_stdout(io.StringIO()):  # PolicyController announces every checkpoint it loads
+        return make_env(
+            bot_type="heuristic_bot",
+            env_id=CurriculumConfig.env_id,
+            env_kwargs={"opponent_pool": [opponent], "heuristic_prob": 0.0, "league_prob": 0.0},
+            **common,
+        )
+
+
+def evaluate_policy(
+    state_dict: dict,
+    opponents: Sequence[str],
+    episodes: int,
+    random_spawn: bool,
+    max_episode_steps: int | None,
+    action_repeat: int,
+) -> list[EvalResult]:
+    """Greedy games of a `SeparateActorCritic` against each opponent on the fixed seeds
+    `EVAL_SEED_BASE + i`, so every evaluation (and every opponent) sees the same spawns."""
+    spec = infer_spec(state_dict)
+    net = SeparateActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim)
+    net.load_state_dict(state_dict)
+    net.eval()
+    results = []
+    for opponent in opponents:
+        env = _make_eval_env(opponent, random_spawn, max_episode_steps, action_repeat)
+        try:
+            wins = losses = draws = steps = 0
+            total_return = 0.0
+            for ep_idx in range(episodes):
+                obs, _ = env.reset(seed=EVAL_SEED_BASE + ep_idx)
+                terminated = truncated = goal = False
+                while not (terminated or truncated):
+                    obs, reward, terminated, truncated, info = env.step(greedy_action(net, obs_to_tensor(obs)))
+                    total_return += float(reward)
+                    steps += 1
+                    goal = goal or scored_goal(info, bool(terminated), float(reward))
+                if goal:
+                    wins += 1
+                elif terminated:
+                    losses += 1
+                else:
+                    draws += 1
+            results.append((opponent, wins, losses, draws, total_return, steps))
+        finally:
+            env.close()
+    return results
+
+
 def _worker_loop(
     conn: Connection,
     bot_type: str,
@@ -66,10 +160,12 @@ def _worker_loop(
     env_id: str,
     action_repeat: int,
     env_kwargs: dict | None = None,
+    worker_seed: int | None = None,
 ):
     """Subprocess env worker: ignores SIGINT so parent cleans up workers cleanly."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     torch.set_num_threads(1)
+    _seed_process_rngs(worker_seed)
     env = make_env(
         bot_type=bot_type,
         discrete_action=False,
@@ -90,6 +186,8 @@ def _worker_loop(
                 conn.send(np.asarray(obs, dtype=np.float32))
             elif cmd == "step":
                 conn.send(step_with_autoreset(env, payload))
+            elif cmd == "eval":
+                conn.send(evaluate_policy(*payload))
             elif cmd == "close":
                 conn.send(None)
                 break
@@ -133,6 +231,10 @@ class _SyncEnvPool:
     def step(self, actions: list[list[int]]) -> list[tuple[np.ndarray, float, bool, bool, bool, np.ndarray | None]]:
         return [step_with_autoreset(env, act) for env, act in zip(self.envs, actions, strict=True)]
 
+    def evaluate(self, state_dict: dict, opponents: Sequence[str], *eval_args) -> list[EvalResult]:
+        """`evaluate_policy` in this process."""
+        return evaluate_policy(state_dict, opponents, *eval_args)
+
     def close(self):
         for env in self.envs:
             env.close()
@@ -150,7 +252,7 @@ class _SubprocEnvPool:
         self._procs: list[mp.Process] = []
         start_method = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
         ctx = mp.get_context(start_method)
-        for _ in range(cfg.num_envs):
+        for idx in range(cfg.num_envs):
             parent_conn, child_conn = ctx.Pipe()
             proc = ctx.Process(
                 target=_worker_loop,
@@ -162,6 +264,7 @@ class _SubprocEnvPool:
                     cfg.env_id,
                     cfg.action_repeat,
                     env_kwargs,
+                    None if cfg.seed is None else cfg.seed + 1 + idx,
                 ),
                 daemon=True,
             )
@@ -180,6 +283,15 @@ class _SubprocEnvPool:
         for conn, act in zip(self._parent_conns, actions, strict=True):
             conn.send(("step", act))
         return [conn.recv() for conn in self._parent_conns]
+
+    def evaluate(self, state_dict: dict, opponents: Sequence[str], *eval_args) -> list[EvalResult]:
+        """`evaluate_policy` with the opponents spread over the (otherwise idle) env workers."""
+        n = len(self._parent_conns)
+        jobs = [(conn, list(opponents[i::n])) for i, conn in enumerate(self._parent_conns) if opponents[i::n]]
+        for conn, chunk in jobs:
+            conn.send(("eval", (state_dict, chunk, *eval_args)))
+        by_opponent = {result[0]: result for conn, _ in jobs for result in conn.recv()}
+        return [by_opponent[opponent] for opponent in opponents]
 
     def close(self):
         if self._closed:
@@ -214,6 +326,10 @@ def _make_env_pool(
     if cfg.num_envs == 1 or cfg.env_workers == "sync":
         return _SyncEnvPool(cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
     return _SubprocEnvPool(cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
+
+
+def _opponent_label(opponent: str) -> str:
+    return opponent if opponent in (EVAL_NO_OPPONENT, EVAL_HEURISTIC) else Path(opponent).stem
 
 
 class PPOv2Agent:
@@ -306,75 +422,60 @@ class PPOv2Agent:
         denom = max(num_mb, 1)
         return total_loss_sum / denom, entropy_sum / denom, value_loss_sum / denom, kl_sum / denom
 
-    def _run_periodic_eval(
+    def _evaluate(
         self,
-        eval_env,
-        policy_net: SeparateActorCritic,
+        pool,
         paths: RunPaths,
         step_count: int,
-    ) -> dict[str, float]:
-        """Run `periodic_eval_episodes` greedy episodes on fixed seeds and append to `eval_<name>.csv`."""
-        was_training = policy_net.training
-        policy_net.eval()
-        goals = 0
-        concedes = 0
-        timeouts = 0
-        returns: list[float] = []
-        lengths: list[int] = []
-        try:
-            for ep_idx in range(self.cfg.periodic_eval_episodes):
-                obs, _ = eval_env.reset(seed=EVAL_SEED_BASE + ep_idx)
-                terminated = False
-                truncated = False
-                ep_ret = 0.0
-                ep_len = 0
-                ep_goal = False
-                while not (terminated or truncated):
-                    act = greedy_action(policy_net, obs_to_tensor(obs))
-                    obs, reward, terminated, truncated, info = eval_env.step(act)
-                    ep_ret += float(reward)
-                    ep_len += 1
-                    if scored_goal(info, bool(terminated), float(reward)):
-                        ep_goal = True
-                if ep_goal:
-                    goals += 1
-                elif terminated:
-                    concedes += 1
-                else:
-                    timeouts += 1
-                returns.append(ep_ret)
-                lengths.append(ep_len)
-        finally:
-            policy_net.train(was_training)
+        opponents: Sequence[str],
+        eval_args: tuple,
+        best_score: float,
+    ) -> float:
+        """Greedy fixed-seed games against every opponent; appends to the eval CSVs and returns the
+        score (win rate - loss rate over all games, in [-1, 1])."""
+        start = time.perf_counter()
+        state_dict = {k: v.detach().cpu() for k, v in self.model.state_dict().items()}
+        results = pool.evaluate(state_dict, opponents, *eval_args)
 
-        n = max(len(returns), 1)
-        goal_rate = (goals / n) * 100.0
-        concede_rate = (concedes / n) * 100.0
-        timeout_rate = (timeouts / n) * 100.0
-        mean_return = float(np.mean(returns)) if returns else 0.0
-        mean_length = float(np.mean(lengths)) if lengths else 0.0
+        wins, losses, draws = (sum(r[i] for r in results) for i in (1, 2, 3))
+        games = max(wins + losses + draws, 1)
+        score = (wins - losses) / games
+        mean_return = sum(r[4] for r in results) / games
+        mean_length = sum(r[5] for r in results) / games
 
         write_header = not paths.eval_file.exists() or os.path.getsize(paths.eval_file) == 0
-        with open(paths.eval_file, "a", newline="", encoding="utf-8") as f:
+        with open(paths.eval_file, "a", encoding="utf-8") as f:
             if write_header:
-                f.write("step,goal_rate,concede_rate,timeout_rate,mean_return,mean_length\n")
+                f.write("step,score,goal_rate,concede_rate,timeout_rate,mean_return,mean_length,is_best\n")
             f.write(
-                f"{step_count},{goal_rate:.2f},{concede_rate:.2f},{timeout_rate:.2f},"
-                f"{mean_return:.4f},{mean_length:.2f}\n"
+                f"{step_count},{score:.4f},{100 * wins / games:.2f},{100 * losses / games:.2f},"
+                f"{100 * draws / games:.2f},{mean_return:.4f},{mean_length:.2f},{int(score > best_score)}\n"
             )
+        opponents_file = paths.eval_file.with_name(f"eval_{paths.model_name}_opponents.csv")
+        write_header = not opponents_file.exists() or os.path.getsize(opponents_file) == 0
+        with open(opponents_file, "a", encoding="utf-8") as f:
+            if write_header:
+                f.write("step,opponent,games,wins,losses,draws,score\n")
+            for opponent, w, l, d, _, _ in results:
+                n = max(w + l + d, 1)
+                f.write(f"{step_count},{_opponent_label(opponent)},{n},{w},{l},{d},{(w - l) / n:.4f}\n")
 
+        per_opponent = sorted(((r[1] - r[2]) / max(r[1] + r[2] + r[3], 1), _opponent_label(r[0])) for r in results)
+        hardest = ", ".join(f"{name} {s:+.2f}" for s, name in per_opponent[:3])
         print(
-            f"[PPO v2 Eval @ step {step_count}] Goal={goal_rate:.1f}% | Concede={concede_rate:.1f}% | "
-            f"Timeout={timeout_rate:.1f}% | Return={mean_return:.2f} | Len={mean_length:.1f}"
+            f"[PPO v2 Eval @ step {step_count}] Score={score:+.3f} (best {max(score, best_score):+.3f}) | "
+            f"Goal={100 * wins / games:.1f}% Concede={100 * losses / games:.1f}% Timeout={100 * draws / games:.1f}% | "
+            f"{len(opponents)} opponent(s) x {eval_args[0]} games | hardest: {hardest} | "
+            f"{time.perf_counter() - start:.1f}s"
         )
-        return {
-            "step": step_count,
-            "goal_rate": goal_rate,
-            "concede_rate": concede_rate,
-            "timeout_rate": timeout_rate,
-            "mean_return": mean_return,
-            "mean_length": mean_length,
-        }
+        return score
+
+    def _log(self, paths: RunPaths, message: str):
+        """Print `message` and append it to the run's `.log` file."""
+        line = f"{datetime.now().strftime(DATE_FORMAT)} - {message}"
+        print(line)
+        with open(paths.log_file, "a") as log_file:
+            log_file.write(line + "\n")
 
     def train(
         self,
@@ -384,9 +485,14 @@ class PPOv2Agent:
         random_spawn: bool = True,
         stop_fn: Callable[[float], bool] | None = None,
         env_kwargs: dict | None = None,
-        eval_env_id: str | None = None,
+        eval_opponents: Sequence[str] | None = None,
     ) -> dict[str, float]:
-        """Parallel on-policy training across `num_envs` workers."""
+        """Parallel on-policy training across `num_envs` workers.
+
+        `eval_opponents` lists the evaluation opponents (`"none"`, `"heuristic"` or checkpoint paths);
+        by default the env's own opponent (`"heuristic"` when `bot_type="heuristic_bot"`, else `"none"`).
+        `stop_fn(episode_return) -> bool` can end training early from outside.
+        """
         state_dict = load_state_dict(str(model_path), device) if model_path is not None else None
         spec_action_dims = list(self.cfg.action_dims)
         hidden_dim = self.cfg.hidden_size
@@ -396,24 +502,15 @@ class PPOv2Agent:
                 spec_action_dims = spec.action_dim
             hidden_dim = spec.hidden_dim
 
-        pool = _make_env_pool(self.cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
-        eval_enabled = self.cfg.eval_interval_steps > 0 and self.cfg.periodic_eval_episodes > 0
-        eval_env = (
-            make_env(
-                bot_type=self.cfg.bot_type,
-                discrete_action=False,
-                control_car="blue",
-                render=False,
-                save_gif=False,
-                random_spawn=random_spawn,
-                max_episode_steps=max_episode_steps,
-                env_id=eval_env_id or self.cfg.env_id,
-                action_repeat=self.cfg.action_repeat,
-            )
-            if eval_enabled
-            else None
-        )
+        if eval_opponents is None:
+            eval_opponents = [EVAL_HEURISTIC if self.cfg.bot_type == "heuristic_bot" else EVAL_NO_OPPONENT]
+        eval_opponents = list(eval_opponents)
+        eval_enabled = bool(eval_opponents) and self.cfg.eval_interval_steps > 0 and self.cfg.eval_episodes_per_opponent > 0
+        eval_args = (self.cfg.eval_episodes_per_opponent, random_spawn, max_episode_steps, self.cfg.action_repeat)
 
+        pool = _make_env_pool(self.cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
+        previous_threads = torch.get_num_threads()
+        torch.set_num_threads(self.cfg.rollout_threads)
         try:
             obs_np = pool.reset(base_seed=self.cfg.seed)
             obs_dim = int(obs_np.shape[1])
@@ -427,12 +524,21 @@ class PPOv2Agent:
                 print(f"[PPO v2 Train] Warning: Checkpoint '{model_path}' not found; training from scratch.")
 
             paths = RunPaths.new(self.cfg.hyperparameter_set)
+            paths.checkpoint_dir.mkdir(parents=True, exist_ok=True)
             print(f"[PPO v2 Train] Saving outputs to: {paths.run_dir}")
             print(
                 f"[PPO v2 Train] Device={device} | Envs={self.cfg.num_envs} ({self.cfg.env_workers}) | "
                 f"Rollout={self.cfg.rollout_steps}x{self.cfg.num_envs} | Epochs={self.cfg.update_epochs} | "
-                f"Minibatch={self.cfg.minibatch_size} | Bot={self.cfg.bot_type} | Model={paths.model_file}"
+                f"Minibatch={self.cfg.minibatch_size} | TargetKL={self.cfg.target_kl} | Bot={self.cfg.bot_type} | "
+                f"Model={paths.model_file}"
             )
+            if eval_enabled:
+                print(
+                    f"[PPO v2 Train] Evaluation every {self.cfg.eval_interval_steps} steps vs "
+                    f"{len(eval_opponents)} opponent(s) [{', '.join(_opponent_label(o) for o in eval_opponents)}]; "
+                    f"stop after {self.cfg.eval_patience} evaluations without a new best "
+                    f"(min {self.cfg.min_train_steps} steps, max {self.cfg.max_train_steps} steps)"
+                )
 
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
             self.current_entropy = float(sum(np.log(d) for d in spec_action_dims))
@@ -461,8 +567,33 @@ class PPOv2Agent:
             total_steps = 0
             episodes_done = 0
             stopped_early = False
-            next_eval_step = self.cfg.eval_interval_steps if eval_enabled else 0
+            best_score = float("-inf")
+            evals_since_best = 0
+            next_eval_step = 0  # the starting weights are evaluated first: a stage keeps them unless it beats them
             last_eval_step = -1
+
+            def run_eval():
+                """Evaluate, checkpoint the evaluated model, and keep it as the best model if it scored best."""
+                nonlocal best_score, evals_since_best, last_eval_step
+                score = self._evaluate(pool, paths, total_steps, eval_opponents, eval_args, best_score)
+                last_eval_step = total_steps
+                torch.save(self.model.state_dict(), paths.checkpoint_dir / f"model_{paths.model_name}_step{total_steps:09d}.pt")
+                if score > best_score:
+                    best_score = score
+                    evals_since_best = 0
+                    torch.save(self.model.state_dict(), paths.model_file)
+                    self._log(paths, f"New best evaluation score {score:+.4f} at step {total_steps}. Saving model.")
+                else:
+                    evals_since_best += 1
+
+            def budget_reason() -> str | None:
+                """Why training should stop now (env-step budget / evaluation plateau), or None."""
+                if self.cfg.max_train_steps is not None and total_steps >= self.cfg.max_train_steps:
+                    return f"reached max_train_steps={self.cfg.max_train_steps}"
+                plateau = eval_enabled and self.cfg.eval_patience > 0 and evals_since_best >= self.cfg.eval_patience
+                if plateau and total_steps >= self.cfg.min_train_steps:
+                    return f"{evals_since_best} evaluations without a new best (best {best_score:+.4f})"
+                return None
 
             obs_buf = torch.zeros((T, n_envs, obs_dim), dtype=torch.float32, device=device)
             act_buf = torch.zeros((T, n_envs, len(spec_action_dims)), dtype=torch.long, device=device)
@@ -476,6 +607,14 @@ class PPOv2Agent:
 
             try:
                 while not stopped_early and (num_episodes is None or episodes_done < num_episodes):
+                    if eval_enabled and total_steps >= next_eval_step:
+                        run_eval()
+                        next_eval_step = total_steps + self.cfg.eval_interval_steps
+                    reason = budget_reason()
+                    if reason is not None:
+                        self._log(paths, f"Stopping at step {total_steps}: {reason}.")
+                        break
+
                     steps_collected = 0
                     for t in range(T):
                         obs_t = torch.tensor(obs_np, dtype=torch.float32, device=device)
@@ -528,17 +667,19 @@ class PPOv2Agent:
                                         values.append(value)
                                     logger.write_metrics(episode_idx, total_steps, extras=extras)
 
-                                    if logger.is_new_best(episode_idx, num_episodes):
-                                        logger.log_new_best(episode_idx, total_steps)
-                                        torch.save(self.model.state_dict(), paths.model_file)
-
-                                    save_periodic_checkpoint(
-                                        self.model,
-                                        paths.checkpoint_dir,
-                                        paths.model_name,
-                                        episode_idx,
-                                        self.cfg.checkpoint_interval,
-                                    )
+                                    # Without evaluation, fall back to the training-return best model and
+                                    # episode-based periodic checkpoints
+                                    if not eval_enabled:
+                                        if logger.is_new_best(episode_idx, num_episodes):
+                                            logger.log_new_best(episode_idx, total_steps)
+                                            torch.save(self.model.state_dict(), paths.model_file)
+                                        save_periodic_checkpoint(
+                                            self.model,
+                                            paths.checkpoint_dir,
+                                            paths.model_name,
+                                            episode_idx,
+                                            self.cfg.checkpoint_interval,
+                                        )
                                     if logger.graph_due():
                                         save_graph(dpi=100)
 
@@ -549,12 +690,6 @@ class PPOv2Agent:
                                 ep_goals[env_idx] = 0
 
                         obs_np = np.stack(next_obs_list, axis=0)
-
-                        if eval_enabled and total_steps >= next_eval_step:
-                            self._run_periodic_eval(eval_env, self.model, paths, total_steps)
-                            last_eval_step = total_steps
-                            while next_eval_step <= total_steps:
-                                next_eval_step += self.cfg.eval_interval_steps
 
                         if stopped_early or (num_episodes is not None and episodes_done >= num_episodes):
                             break
@@ -577,6 +712,7 @@ class PPOv2Agent:
                         self.cfg.discount_factor,
                         self.cfg.gae_lambda,
                     )
+                    torch.set_num_threads(self.cfg.update_threads)
                     _, ent, v_loss, _ = self.optimize(
                         obs_buf[s_slice].reshape(-1, obs_dim),
                         act_buf[s_slice].reshape(-1, len(spec_action_dims)),
@@ -585,11 +721,14 @@ class PPOv2Agent:
                         adv.reshape(-1),
                         self.model,
                     )
+                    torch.set_num_threads(self.cfg.rollout_threads)
                     self.current_entropy = ent
                     self.current_v_loss = v_loss / (self.cfg.reward_scale**2)
 
                 if eval_enabled and total_steps > 0 and total_steps != last_eval_step:
-                    self._run_periodic_eval(eval_env, self.model, paths, total_steps)
+                    run_eval()
+                if not paths.model_file.exists():
+                    torch.save(self.model.state_dict(), paths.model_file)
             finally:
                 if logger.rewards:
                     save_graph()
@@ -597,15 +736,16 @@ class PPOv2Agent:
             total_goals = int(sum(logger.goals))
             return {
                 "episodes": len(logger.rewards),
+                "steps": total_steps,
                 "mean_reward": float(np.mean(logger.rewards)) if logger.rewards else 0.0,
                 "goal_rate": float(np.mean(logger.goals)) * 100.0 if logger.goals else 0.0,
+                "best_eval_score": best_score,
                 "score_blue": total_goals,
                 "score_orange": len(logger.goals) - total_goals,
             }
         finally:
             pool.close()
-            if eval_env is not None:
-                eval_env.close()
+            torch.set_num_threads(previous_threads)
 
     def evaluate(
         self,

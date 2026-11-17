@@ -410,6 +410,11 @@ class Car:
     def _drive_angle_to(self, target_angle: float, dt: float, omega_max: float, alpha_max: float):
         """Rate- and acceleration-limited attitude controller (cannot overshoot or ring)."""
         diff = _wrap_angle(target_angle - self.body.angle)
+        if abs(abs(diff) - math.pi) < 1e-6:
+            # Target opposite the heading (e.g. reverse input from a level kickoff spawn): the turn direction
+            # was decided by float noise in the angle and did not mirror between Blue and Orange. Always turn
+            # nose-down in the car's own frame (what a level Blue car did), so Orange mirrors Blue.
+            diff = -math.pi * self.facing_x
         omega_target = _clamp(diff * CAR_STEER_RATE_GAIN, -omega_max, omega_max)
         alpha = _clamp((omega_target - self.body.angular_velocity) / dt, -alpha_max, alpha_max)
         self.body.torque += self.body.moment * alpha

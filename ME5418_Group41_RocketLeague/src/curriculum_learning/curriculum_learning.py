@@ -5,20 +5,23 @@ Stages:
     1. "none"      - no opponent; learn to drive to the ball and score.
     2. "heuristic" - against the scripted HeuristicBot.
     3. "self"      - adversarial self-play against a mixed pool of frozen self checkpoints
-                     (latest + past checkpoints) and the HeuristicBot, with stochastic
-                     opponent actions to prevent cycling/overfitting.
+                     (latest + past checkpoints), the HeuristicBot and, optionally, a frozen
+                     "league" of other checkpoints (`--league`, e.g. Dueling DDQN models).
 
 Each stage (and each self-play round) is one ordinary training run of `PPOAgent`, `PPOv2Agent`,
-or `DuelingDDQNAgent`, started from the previous stage's best weights (or a supplied `--model_path`),
-and stopped once the 100-episode rolling mean return has not improved for `patience` episodes.
+or `DuelingDDQNAgent`, started from the previous stage's best weights (or a supplied `--model_path`).
+D3QN / PPO stages stop once the 100-episode rolling mean return has not improved for `patience`
+episodes. PPO v2 stages instead evaluate the greedy policy every `PPOv2Config.eval_interval_steps`
+against the stage's opponents (none / HeuristicBot / HeuristicBot + league + self pool), keep the
+best-scoring model, and stop after `PPOv2Config.eval_patience` evaluations without improvement.
 
 The agents are steered through their config (`bot_type`, `env_id`, `hyperparameter_set`), and the
 opponent pool / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv`
-registered under its own gym id (for `PPOv2Agent`, plateau detection runs in the parent loop across
-all parallel workers while each worker loads `CurriculumEnv`).
+registered under its own gym id (PPO v2's parallel workers each build their own `CurriculumEnv`).
 
 Usage:
     python -m src --curriculum --ppo|--ppo_v2|--dueling_ddqn|--double_dqn|--dqn [--model_path PATH] [--start_stage self]
+        [--league DIR_OR_PT ...]
     python -m src.curriculum_learning.curriculum_learning --agent ppo --model_path PATH --start_stage self
 """
 
@@ -40,7 +43,7 @@ from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
 from src.learning_agents.env_factory import make_env
 from src.learning_agents.ppo_agent import PPOAgent
-from src.learning_agents.ppo_v2_agent import PPOv2Agent
+from src.learning_agents.ppo_v2_agent import EVAL_HEURISTIC, EVAL_NO_OPPONENT, PPOv2Agent
 from src.learning_agents.run_dirs import latest_model_path, make_run_dir
 from src.neural_nets.ppo_torch import ActorCritic
 from src.neural_nets.ppo_v2_torch import SeparateActorCritic
@@ -55,12 +58,30 @@ if CURRICULUM_ENV_ID not in gym.envs.registry:
     )
 
 
+def resolve_league(paths: Sequence[str | Path]) -> list[Path]:
+    """League checkpoints from `.pt` files and/or folders of `.pt` files (sorted, duplicates removed)."""
+    league: list[Path] = []
+    for entry in map(Path, paths):
+        if entry.is_dir():
+            found = sorted(entry.glob("*.pt"))
+            if not found:
+                raise FileNotFoundError(f"League folder has no .pt checkpoints: {entry}")
+            league.extend(found)
+        elif entry.is_file():
+            league.append(entry)
+        else:
+            raise FileNotFoundError(f"League checkpoint or folder not found: {entry}")
+    return list(dict.fromkeys(p.resolve() for p in league))
+
+
 class CurriculumEnv(RocketLeagueEnv):
     """`RocketLeagueEnv` with two curriculum hooks.
 
-    - `opponent_path` / `opponent_pool`: during self-play, each episode samples Orange's controller
-      from a mixed pool of the HeuristicBot and frozen self-play checkpoints (`PolicyController`,
-      mirrored so a blue-trained model can play orange, optionally with stochastic sampling).
+    - `opponent_path` / `opponent_pool` / `league_pool`: during self-play, each episode samples Orange's
+      controller from the HeuristicBot (`heuristic_prob`), a frozen league checkpoint (`league_prob`,
+      greedy, when a league is given) or a frozen self-play checkpoint (latest / past). Policies are
+      `PolicyController`s, mirrored so a blue-trained model can play orange; self-play checkpoints can
+      sample stochastically.
     - `on_episode_end(episode_return) -> bool`: called with each finished episode's return. When it
       returns True the env marks itself closed (`isopen = False`), which ends the agent's training
       loop through its existing "window closed" path (dashboard is still saved, run returns normally).
@@ -80,6 +101,8 @@ class CurriculumEnv(RocketLeagueEnv):
         latest_self_prob: float = CurriculumConfig.latest_self_prob,
         past_self_prob: float = CurriculumConfig.past_self_prob,
         heuristic_prob: float = CurriculumConfig.heuristic_prob,
+        league_pool: Sequence[str | Path] | None = None,
+        league_prob: float = CurriculumConfig.league_prob,
         **kwargs,
     ):
         self.on_episode_end = on_episode_end
@@ -88,8 +111,10 @@ class CurriculumEnv(RocketLeagueEnv):
         self._latest_self_prob = latest_self_prob
         self._past_self_prob = past_self_prob
         self._heuristic_prob = heuristic_prob
+        self._league_prob = league_prob
         self._heuristic_opponent = None
         self._policy_opponents: list[PolicyController] = []
+        self._league_opponents: list[PolicyController] = []
         super().__init__(*args, **kwargs)
 
         raw_pool = list(opponent_pool) if opponent_pool else ([opponent_path] if opponent_path is not None else [])
@@ -115,14 +140,22 @@ class CurriculumEnv(RocketLeagueEnv):
                 )
                 for p in unique_paths
             ]
+            # League opponents always play greedily, as in the round robin they are compared in
+            self._league_opponents = [
+                PolicyController("orange", self.sim, p, action_repeat=opponent_action_repeat)
+                for p in dict.fromkeys(Path(p) for p in league_pool or ())
+            ]
             self._sample_opponent()
 
     def _sample_opponent(self) -> None:
         """Select Orange's opponent for the upcoming episode from the mixed pool."""
         if not self._policy_opponents:
             return
-        if self._heuristic_opponent is not None and random.random() < self._heuristic_prob:
+        draw = random.random()
+        if self._heuristic_opponent is not None and draw < self._heuristic_prob:
             self.orange_control = self._heuristic_opponent
+        elif self._league_opponents and draw < self._heuristic_prob + self._league_prob:
+            self.orange_control = random.choice(self._league_opponents)
         elif len(self._policy_opponents) == 1:
             self.orange_control = self._policy_opponents[0]
         else:
@@ -169,6 +202,7 @@ class Curriculum:
         model_path: str | Path | None = None,
         start_stage: str = "none",
         stochastic_opponent: bool = CurriculumConfig.stochastic_opponent,
+        league: Sequence[str | Path] = (),
     ) -> None:
         all_stages = [stage for stage, _ in CurriculumConfig.stages]
         if start_stage not in all_stages:
@@ -176,8 +210,9 @@ class Curriculum:
         self.stages = all_stages[all_stages.index(start_stage) :]
         self.agent = agent  # PPOAgent, PPOv2Agent or DuelingDDQNAgent (the class)
         is_ppo_v2 = issubclass(self.agent, PPOv2Agent)
-        default_patience = CurriculumConfig.ppo_v2_patience if is_ppo_v2 else CurriculumConfig.patience
-        self.patience = default_patience if patience is None else patience
+        if is_ppo_v2 and patience is not None:
+            raise ValueError("PPO v2 stages end on evaluation (PPOv2Config.eval_patience), not on --patience.")
+        self.patience = CurriculumConfig.patience if patience is None else patience
         self.config = config if config is not None else self.CONFIGS[agent]()  # e.g. a DQN ablation variant
         self.self_play_rounds = self_play_rounds
         self.max_stage_episodes = max_stage_episodes
@@ -185,6 +220,7 @@ class Curriculum:
         self.model_path = Path(model_path) if model_path is not None else None
         self.start_stage = start_stage
         self.stochastic_opponent = stochastic_opponent
+        self.league = resolve_league(league)
         self.highest_reward = [float("-inf"), 0]  # [highest_reward, episode]
 
         self.run_path: Path | None = None
@@ -219,6 +255,7 @@ class Curriculum:
             opponent_pool=self._stage_opponent_pool,
             opponent_action_repeat=self._opponent_action_repeat,
             stochastic_opponent=self.stochastic_opponent,
+            league_pool=self.league if self._stage_opponent_pool else None,
             **kwargs,
         )
 
@@ -275,6 +312,16 @@ class Curriculum:
         torch.save(net.state_dict(), self.weights_path)
         print(f"[Curriculum] Saved initial weights to: {self.weights_path}")
 
+    def _eval_opponents(self, stage: str) -> list[str]:
+        """PPO v2 evaluation opponents for `stage`: the empty arena, the heuristic bot, or (self-play)
+        the heuristic bot + the league + every frozen self-play checkpoint so far."""
+        if stage == "none":
+            return [EVAL_NO_OPPONENT]
+        if stage == "heuristic":
+            return [EVAL_HEURISTIC]
+        opponents = [str(p) for p in dict.fromkeys([*self.league, *self._stage_opponent_pool])]
+        return [EVAL_HEURISTIC, *opponents]
+
     def check_plateu(self, average_reward, episode):
         """
         1. if average_reward > highest_reward[0] update highest_reward and return False
@@ -317,6 +364,8 @@ class Curriculum:
         if self._stage_opponent_pool:
             names = ", ".join(p.name for p in self._stage_opponent_pool)
             pool_desc = f" vs pool=[{names}] + heuristic (stochastic={self.stochastic_opponent})"
+            if self.league:
+                pool_desc += f" + league of {len(self.league)}"
         elif opponent_path is not None:
             pool_desc = f" vs {opponent_path}"
         print(f"\n[Curriculum] ===== Stage '{label}'{pool_desc} | start weights: {self.weights_path} =====")
@@ -328,13 +377,13 @@ class Curriculum:
                     "opponent_pool": [str(p) for p in self._stage_opponent_pool],
                     "opponent_action_repeat": cfg.action_repeat,
                     "stochastic_opponent": self.stochastic_opponent,
+                    "league_pool": [str(p) for p in self.league],
                 }
             summary = agent.train(
                 num_episodes=self.max_stage_episodes,
                 model_path=self.weights_path,
-                stop_fn=self._on_episode_end,
                 env_kwargs=env_kwargs or None,
-                eval_env_id=GymConfig.gym_id,
+                eval_opponents=self._eval_opponents(stage),
             )
         else:
             summary = agent.train(num_episodes=self.max_stage_episodes, model_path=self.weights_path)
@@ -346,10 +395,14 @@ class Curriculum:
         else:
             print(f"[Curriculum] Warning: stage '{label}' saved no model; keeping {self.weights_path}")
 
+        best = (
+            f"steps={summary['steps']} best_eval_score={summary['best_eval_score']:+.4f}"
+            if "best_eval_score" in summary
+            else f"best_mean_100={self.highest_reward[0]:.2f}"
+        )
         message = (
             f"{label}: episodes={summary['episodes']} mean_reward={summary['mean_reward']:.2f} "
-            f"goal_rate={summary['goal_rate']:.1f}% best_mean_100={self.highest_reward[0]:.2f} "
-            f"weights={self.weights_path}"
+            f"goal_rate={summary['goal_rate']:.1f}% {best} weights={self.weights_path}"
         )
         print(f"[Curriculum] {message}")
         with open(self.run_path / "curriculum.log", "a") as log_file:
@@ -387,7 +440,7 @@ if __name__ == "__main__":
         "--patience",
         type=int,
         default=None,
-        help=f"Episodes without a new best before a stage ends (default: {CurriculumConfig.patience}, or {CurriculumConfig.ppo_v2_patience} for ppo_v2)",
+        help=f"Episodes without a new best before a stage ends (default: {CurriculumConfig.patience}; not for ppo_v2)",
     )
     parser.add_argument(
         "--self_play_rounds",
@@ -412,6 +465,9 @@ if __name__ == "__main__":
         default=None,
         help="Stage to start from (default: 'self' when --model_path is given, else 'none')",
     )
+    parser.add_argument(
+        "--league", nargs="+", default=(), help="Frozen .pt checkpoints and/or folders mixed into self-play"
+    )
     args = parser.parse_args()
 
     agent_cls = {"ppo": PPOAgent, "ppo_v2": PPOv2Agent, "dqn": DuelingDDQNAgent}[args.agent]
@@ -425,4 +481,5 @@ if __name__ == "__main__":
         config=cfg,
         model_path=args.model_path,
         start_stage=args.start_stage or ("self" if args.model_path is not None else "none"),
+        league=args.league,
     ).learn()

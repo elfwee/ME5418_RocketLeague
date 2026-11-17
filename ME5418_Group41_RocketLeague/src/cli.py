@@ -15,13 +15,13 @@ USAGE = f"""Usage:
   {PROG} --play [--blue|--orange|--bot-vs-bot] [--no-orange]  # Play interactively (default: control Blue car)
   {PROG} --play --headless                     # Run headless physics benchmark
   {PROG} --head_to_head [--headless] [--random_spawn] [--seed N] [--max_goals N] [--max_seconds S] [--blue PATH|none] [--orange PATH|none]  # Continuous agent vs agent
-  {PROG} --round_robin [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
+  {PROG} --round_robin [--continuous | --rounds N] [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
   {PROG} --best_checkpoint RUN_DIR [--threshold N] [--max_seconds S] [--max_goals N] [--random_spawn] [--seed N]  # Pick the strongest model in a training run
   {PROG} --demo --gym                          # Demo Gymnasium environment
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
   {PROG} --demo --ppo                          # Test PPO Actor-Critic network
   {PROG} --train --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--episodes N] [--num_envs N] [--model_path PATH]  # Train an agent
-  {PROG} --curriculum --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--model_path PATH] [--start_stage none|heuristic|self] [--patience N] [--self_play_rounds N] [--max_stage_episodes N] [--num_envs N]  # Curriculum: none -> heuristic bot -> self-play
+  {PROG} --curriculum --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--model_path PATH] [--start_stage none|heuristic|self] [--league DIR_OR_PT ...] [--patience N] [--self_play_rounds N] [--max_stage_episodes N] [--num_envs N]  # Curriculum: none -> heuristic bot -> self-play
   {PROG} --eval --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] [--gif] [--gif_path PATH]  # Evaluate agent
   {PROG} --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...] [--no_random_spawn]  # Mixed policy match
   {PROG} --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard
@@ -160,6 +160,8 @@ def round_robin_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no_heuristic", action="store_true", help="exclude HeuristicBot from the tournament")
     parser.add_argument("--no_mirrors", action="store_true", help="skip Bot-vs-Bot mirror pairings")
     parser.add_argument("--workers", type=int, default=None, help="parallel CPU workers (default: cpu_count - 1)")
+    parser.add_argument("--rounds", type=int, default=1, help="number of round-robin passes to run (0 runs continuously until stopped; default: 1)")
+    parser.add_argument("--continuous", action="store_true", help="run unlimited round-robin passes with advancing seeds until Ctrl+C (same as --rounds 0)")
     return parser
 
 
@@ -206,7 +208,7 @@ def curriculum_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             f"episodes without a new best rolling mean return before a stage ends "
-            f"(default: {CurriculumConfig.patience}, or {CurriculumConfig.ppo_v2_patience} for --ppo_v2)"
+            f"(default: {CurriculumConfig.patience}; not for --ppo_v2, whose stages end on evaluation)"
         ),
     )
     parser.add_argument(
@@ -233,6 +235,16 @@ def curriculum_parser() -> argparse.ArgumentParser:
         choices=("none", "heuristic", "self"),
         default=None,
         help="curriculum stage to start from (default: 'self' when --model_path is given, else 'none')",
+    )
+    parser.add_argument(
+        "--league",
+        nargs="+",
+        default=(),
+        metavar="DIR_OR_PT",
+        help=(
+            "frozen checkpoints (.pt files and/or folders of them, e.g. other algorithms' models) mixed into "
+            f"self-play with probability {CurriculumConfig.league_prob}; PPO v2 also evaluates against them"
+        ),
     )
     return parser
 
@@ -331,6 +343,8 @@ def run_round_robin(args: argparse.Namespace):
         include_heuristic=not args.no_heuristic,
         include_mirrors=not args.no_mirrors,
         workers=args.workers,
+        rounds=args.rounds,
+        continuous=args.continuous,
     )
 
 
@@ -423,7 +437,7 @@ CURRICULUM_HELP = f"""Please specify a learning agent for the curriculum:
   {PROG} --curriculum --double_dqn   [--model_path PATH] # Double DQN
   {PROG} --curriculum --dqn          [--model_path PATH] # Vanilla DQN
   {PROG} --curriculum --ppo          [--model_path PATH] # PPO
-  {PROG} --curriculum --ppo_v2       [--model_path PATH] [--num_envs N] # PPO v2"""
+  {PROG} --curriculum --ppo_v2       [--model_path PATH] [--num_envs N] [--league DIR_OR_PT ...] # PPO v2 (stages end on evaluation)"""
 
 
 def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
@@ -436,10 +450,12 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
             parser.error("--num_envs is only supported with --ppo_v2")
         if args.num_envs < 1:
             parser.error("--num_envs must be at least 1")
+    if name == "ppo_v2" and args.patience is not None:
+        parser.error("--patience does not apply to --ppo_v2 (its stages end on evaluation: PPOv2Config.eval_patience)")
     from dataclasses import replace
 
     from src.config.nn_config import DQNConfig, PPOConfig, PPOv2Config
-    from src.curriculum_learning.curriculum_learning import Curriculum
+    from src.curriculum_learning.curriculum_learning import Curriculum, resolve_league
     from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
     from src.learning_agents.ppo_agent import PPOAgent
     from src.learning_agents.ppo_v2_agent import PPOv2Agent
@@ -458,6 +474,10 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
             DQNConfig(), hyperparameter_set=name, enable_dueling_dqn=algo.dueling, enable_double_dqn=algo.double
         )
     start_stage = args.start_stage or ("self" if args.model_path is not None else "none")
+    try:
+        league = resolve_league(args.league)
+    except FileNotFoundError as err:
+        parser.error(str(err))
     Curriculum(
         agent,
         patience=args.patience,
@@ -467,6 +487,7 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
         config=config,
         model_path=args.model_path,
         start_stage=start_stage,
+        league=league,
     ).learn()
 
 
