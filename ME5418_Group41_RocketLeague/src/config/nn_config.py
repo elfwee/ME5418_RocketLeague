@@ -60,7 +60,7 @@ class DQNConfig(AgentConfig):
 @dataclass(frozen=True)
 class PPOConfig(AgentConfig):
     # Architecture (150,949 trainable parameters when factored_action=False)
-    factored_action: bool = True  # Discrete(36) matching DDQN; factored checkpoints auto-detect
+    factored_action: bool = False  # Discrete(36) matching DDQN; factored checkpoints auto-detect
     action_dims: tuple[int, int, int] = (9, 2, 2)  # (direction: 9, jump: 2, boost: 2)
 
     # Optimization & Returns
@@ -116,8 +116,10 @@ class PPOv2Config(AgentConfig):
 
     # Evaluation-based model selection and training length (steps = decision steps summed over all envs).
     # Every `eval_interval_steps` the greedy policy plays `eval_episodes_per_opponent` fixed-seed games
-    # against each evaluation opponent; the best score (win rate - loss rate) is saved as the best model,
-    # and training stops after `eval_patience` evaluations without a new best (once `min_train_steps`).
+    # against each evaluation opponent; the best score (win rate - loss rate) is saved as the best model
+    # (an equal score counts as better when games are >= 5% shorter, i.e. faster scoring, so stage 1 keeps
+    # improving after it wins every game), and training stops after `eval_patience` evaluations without a
+    # new best (once `min_train_steps`).
     # 20 games per opponent gave a +-0.2 standard error per opponent, so the plateau stop fired on noise.
     # Curriculum self-play rounds use a fixed budget instead (`CurriculumConfig.ppo_v2_self_play_steps`).
     eval_interval_steps: int = 500_000  # 0 disables evaluation (best model then = best training return)

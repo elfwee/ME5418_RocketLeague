@@ -3,8 +3,8 @@ PPO v2 Learning Agent: separate-network Actor-Critic with factored MultiDiscrete
 
 Differs from `src/learning_agents/ppo_agent.py` in five ways:
 1. Architecture (`SeparateActorCritic` in `src/neural_nets/ppo_v2_torch.py`): completely independent
-   policy and value MLPs (no shared trunk parameters; 164,366 trainable parameters for width 256,
-   NOT parameter-matched to Dueling DDQN's 150,949 parameters). With a shared trunk the critic's
+   policy and value MLPs (no shared trunk parameters; 170,277 trainable parameters for width 256 with
+   the flat head, NOT parameter-matched to Dueling DDQN's 150,949 parameters). With a shared trunk the critic's
    gradient alone moved the policy past the KL stop, so most of each trust region went to critic noise.
 2. Action space: one flat `Discrete(36)` softmax by default (`pi_heads.0`, like the DQN), or factored
    `MultiDiscrete([9, 2, 2])` heads (`pi_heads.0/1/2`) with `factored_action=True`.
@@ -15,7 +15,8 @@ Differs from `src/learning_agents/ppo_agent.py` in five ways:
    `rollout_threads` torch threads while the workers step and `update_threads` during the update.
 4. Evaluation-based model selection: every `eval_interval_steps` the greedy policy plays fixed-seed
    games against each evaluation opponent (no opponent, the heuristic bot, or frozen checkpoints),
-   split into small (opponent, seed range) tasks that run in parallel on the env workers. Each evaluated model is saved to `checkpoints/`; the best score
+   split into small (opponent, seed range) tasks that run in parallel on the env workers. Each
+   evaluated model is saved to `checkpoints/`; the best score
    (win rate - loss rate) is saved as `model_<name>.pt`. Results go to `eval_<name>.csv` and
    `eval_<name>_opponents.csv`.
 5. Training length in env steps: training stops after `eval_patience` evaluations without a new best
@@ -57,6 +58,7 @@ from src.neural_nets.ppo_v2_torch import SeparateActorCritic
 EVAL_SEED_BASE = 10_000
 EVAL_NO_OPPONENT = "none"  # evaluation opponent: empty arena
 EVAL_HEURISTIC = "heuristic"  # evaluation opponent: the scripted HeuristicBot
+SPEED_TIE_MARGIN = 0.05  # an equal evaluation score counts as better when games are >= 5% shorter
 
 # (opponent, first episode index, number of episodes): one evaluation task
 EvalTask = tuple[str, int, int]
@@ -356,6 +358,16 @@ def _eval_tasks(opponents: Sequence[str], episodes: int, num_workers: int) -> li
     ]
 
 
+def _beats(score: float, mean_length: float, best_score: float, best_length: float) -> bool:
+    """A higher evaluation score wins; an equal score wins with clearly shorter games (faster scoring,
+    at least `SPEED_TIE_MARGIN` shorter on average).
+
+    Without the tie-break, stage 1 (empty arena) kept its first 100%-win checkpoint (16.4 s per goal in
+    run 1) and discarded later ones that scored 5x faster, because the score saturates at +1.
+    """
+    return score > best_score or (score == best_score and mean_length < best_length * (1.0 - SPEED_TIE_MARGIN))
+
+
 def _opponent_label(opponent: str) -> str:
     return opponent if opponent in (EVAL_NO_OPPONENT, EVAL_HEURISTIC) else Path(opponent).stem
 
@@ -457,10 +469,11 @@ class PPOv2Agent:
         step_count: int,
         opponents: Sequence[str],
         eval_args: tuple,
-        best_score: float,
-    ) -> float:
-        """Greedy fixed-seed games against every opponent; appends to the eval CSVs and returns the
-        score (win rate - loss rate over all games, in [-1, 1])."""
+        best: tuple[float, float],
+    ) -> tuple[float, float]:
+        """Greedy fixed-seed games against every opponent; appends to the eval CSVs and returns
+        (score, mean game length in decisions). The score is win rate - loss rate, in [-1, 1];
+        `best` is the (score, mean length) of the best model so far."""
         start = time.perf_counter()
         state_dict = {k: v.detach().cpu() for k, v in self.model.state_dict().items()}
         episodes = self.cfg.eval_episodes_per_opponent
@@ -482,7 +495,7 @@ class PPOv2Agent:
                 f.write("step,score,goal_rate,concede_rate,timeout_rate,mean_return,mean_length,is_best\n")
             f.write(
                 f"{step_count},{score:.4f},{100 * wins / games:.2f},{100 * losses / games:.2f},"
-                f"{100 * draws / games:.2f},{mean_return:.4f},{mean_length:.2f},{int(score > best_score)}\n"
+                f"{100 * draws / games:.2f},{mean_return:.4f},{mean_length:.2f},{int(_beats(score, mean_length, *best))}\n"
             )
         opponents_file = paths.eval_file.with_name(f"eval_{paths.model_name}_opponents.csv")
         write_header = not opponents_file.exists() or os.path.getsize(opponents_file) == 0
@@ -496,12 +509,12 @@ class PPOv2Agent:
         per_opponent = sorted(((r[1] - r[2]) / max(r[1] + r[2] + r[3], 1), _opponent_label(r[0])) for r in results)
         hardest = ", ".join(f"{name} {s:+.2f}" for s, name in per_opponent[:3])
         print(
-            f"[PPO v2 Eval @ step {step_count}] Score={score:+.3f} (best {max(score, best_score):+.3f}) | "
+            f"[PPO v2 Eval @ step {step_count}] Score={score:+.3f} (best {max(score, best[0]):+.3f}) | "
             f"Goal={100 * wins / games:.1f}% Concede={100 * losses / games:.1f}% Timeout={100 * draws / games:.1f}% | "
-            f"{len(opponents)} opponent(s) x {episodes} games | hardest: {hardest} | "
+            f"MeanLen={mean_length:.1f} | {len(opponents)} opponent(s) x {episodes} games | hardest: {hardest} | "
             f"{time.perf_counter() - start:.1f}s"
         )
-        return score
+        return score, mean_length
 
     def _log(self, paths: RunPaths, message: str):
         """Print `message` and append it to the run's `.log` file."""
@@ -604,23 +617,28 @@ class PPOv2Agent:
             episodes_done = 0
             stopped_early = False
             best_score = float("-inf")
+            best_length = float("inf")
             evals_since_best = 0
             next_eval_step = 0  # the starting weights are evaluated first: a stage keeps them unless it beats them
             last_eval_step = -1
 
             def run_eval():
-                """Evaluate, checkpoint the evaluated model, and keep it as the best model if it scored best."""
-                nonlocal best_score, evals_since_best, last_eval_step
-                score = self._evaluate(pool, paths, total_steps, eval_opponents, eval_args, best_score)
+                """Evaluate, checkpoint the evaluated model, and keep it as the best model if it beats the best
+                (a higher score, or the same score with clearly shorter games); that also resets the patience."""
+                nonlocal best_score, best_length, evals_since_best, last_eval_step
+                best = (best_score, best_length)
+                score, mean_length = self._evaluate(pool, paths, total_steps, eval_opponents, eval_args, best)
                 last_eval_step = total_steps
                 torch.save(self.model.state_dict(), paths.checkpoint_dir / f"model_{paths.model_name}_step{total_steps:09d}.pt")
-                if score > best_score:
-                    best_score = score
-                    evals_since_best = 0
+                evals_since_best += 1
+                if _beats(score, mean_length, *best):
+                    best_score, best_length, evals_since_best = score, mean_length, 0
                     torch.save(self.model.state_dict(), paths.model_file)
-                    self._log(paths, f"New best evaluation score {score:+.4f} at step {total_steps}. Saving model.")
-                else:
-                    evals_since_best += 1
+                    self._log(
+                        paths,
+                        f"New best evaluation score {score:+.4f} (mean game {mean_length:.1f} decisions) "
+                        f"at step {total_steps}. Saving model.",
+                    )
 
             def budget_reason() -> str | None:
                 """Why training should stop now (env-step budget / evaluation plateau), or None."""
