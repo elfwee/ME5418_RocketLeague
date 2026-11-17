@@ -30,7 +30,7 @@ src/
 ├── neural_nets/                 # PyTorch networks (import only torch)
 │   ├── dueling_ddqn_torch.py    # DQN / Double DQN / Dueling Double DQN
 │   ├── ppo_torch.py             # PPO Actor-Critic (flat or factored policy heads + value head)
-│   ├── ppo_v2_torch.py          # PPO v2 SeparateActorCritic (independent actor & critic MLPs, factored heads)
+│   ├── ppo_v2_torch.py          # PPO v2 SeparateActorCritic (independent actor & critic MLPs, flat or factored heads)
 │   ├── checkpoint.py            # load_policy(path): rebuilds any saved network from its state_dict
 │   ├── policy.py                # greedy_action(net, obs) for every network type
 │   └── demos.py                 # --demo --dqn/--double_dqn/--dueling_ddqn/--ppo forward/backward passes
@@ -98,7 +98,7 @@ Both learning agents run in the same episode loop (`trainer.py`) and share an id
 - **Proximal Policy Optimization (`learning_agents/ppo_agent.py`)**:
   - **On-Policy Rollouts & GAE**: Collects fixed-horizon trajectories ($T = 4,096$ macro-steps) with learner-internal reward scaling ($1/20 = 0.05$; `value_loss` is logged in env-reward units), bootstrapping value tails on episode timeouts (`truncated=True`) while zeroing terminal goals (`terminated=True`), and computes Generalized Advantage Estimation ($\text{GAE}(\gamma=0.99, \lambda=0.95)$).
   - **Clipped Surrogate Optimization**: Normalizes advantages across the entire $4,096$-sample rollout batch and performs $K = 6$ epochs of shuffled minibatch ($256$) updates using the clipped surrogate objective ($\epsilon = 0.2$), KL early stopping (`target_kl = 0.02`), MSE critic loss ($c_1 = 0.5$), entropy bonus ($c_2 = 0.001$), and global gradient clipping ($0.5$).
-- **PPO v2 (`learning_agents/ppo_v2_agent.py`)**: An independent, non-parameter-matched PPO variant ($164,366$ parameters in `SeparateActorCritic` with separate actor and critic MLPs and factored `[9, 2, 2]` heads) that collects about $8,192$ steps per update across parallel env workers (`--ppo_v2`; one per logical CPU minus two by default, learner limited to 1 torch thread while they step; 1,024-sample minibatches, 4 epochs, loose `target_kl = 0.05`). Every 200k steps it plays fixed-seed greedy games against its evaluation opponents (`eval_<name>.csv`, per opponent in `eval_<name>_opponents.csv`), saves each evaluated model to `checkpoints/`, keeps the best-scoring one (win rate - loss rate) as `model_<name>.pt`, and stops after `eval_patience` evaluations without a new best.
+- **PPO v2 (`learning_agents/ppo_v2_agent.py`)**: An independent, non-parameter-matched PPO variant ($170,277$ parameters in `SeparateActorCritic` with separate actor and critic MLPs and one flat `Discrete(36)` head like the DQN; `factored_action=True` gives independent `[9, 2, 2]` heads, 164,366 parameters) that collects about $8,192$ steps per update across parallel env workers (`--ppo_v2`; one per logical CPU minus two by default, learner limited to 1 torch thread while they step; 1,024-sample minibatches, 4 epochs, loose `target_kl = 0.05`). Every 500k steps it plays 50 fixed-seed greedy games per evaluation opponent, spread over the env workers, (`eval_<name>.csv`, per opponent in `eval_<name>_opponents.csv`), saves each evaluated model to `checkpoints/`, keeps the best-scoring one (win rate - loss rate) as `model_<name>.pt`, and stops after `eval_patience` evaluations without a new best (curriculum self-play rounds run a fixed step budget instead).
 
 ---
 

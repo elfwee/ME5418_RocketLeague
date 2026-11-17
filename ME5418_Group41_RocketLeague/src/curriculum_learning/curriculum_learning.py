@@ -12,8 +12,9 @@ Each stage (and each self-play round) is one ordinary training run of `PPOAgent`
 or `DuelingDDQNAgent`, started from the previous stage's best weights (or a supplied `--model_path`).
 D3QN / PPO stages stop once the 100-episode rolling mean return has not improved for `patience`
 episodes. PPO v2 stages instead evaluate the greedy policy every `PPOv2Config.eval_interval_steps`
-against the stage's opponents (none / HeuristicBot / HeuristicBot + league + self pool), keep the
-best-scoring model, and stop after `PPOv2Config.eval_patience` evaluations without improvement.
+against the stage's opponents (none / HeuristicBot / HeuristicBot + league + self pool) and keep the
+best-scoring model; stages 1-2 stop after `PPOv2Config.eval_patience` evaluations without improvement,
+self-play rounds run a fixed `self_play_steps` env steps.
 
 The agents are steered through their config (`bot_type`, `env_id`, `hyperparameter_set`), and the
 opponent pool / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv`
@@ -203,6 +204,7 @@ class Curriculum:
         start_stage: str = "none",
         stochastic_opponent: bool = CurriculumConfig.stochastic_opponent,
         league: Sequence[str | Path] = (),
+        self_play_steps: int = CurriculumConfig.ppo_v2_self_play_steps,
     ) -> None:
         all_stages = [stage for stage, _ in CurriculumConfig.stages]
         if start_stage not in all_stages:
@@ -221,6 +223,7 @@ class Curriculum:
         self.start_stage = start_stage
         self.stochastic_opponent = stochastic_opponent
         self.league = resolve_league(league)
+        self.self_play_steps = self_play_steps  # PPO v2 only: fixed env-step budget per self-play round
         self.highest_reward = [float("-inf"), 0]  # [highest_reward, episode]
 
         self.run_path: Path | None = None
@@ -295,12 +298,12 @@ class Curriculum:
 
         is_ppo_v2 = issubclass(self.agent, PPOv2Agent)
         is_ppo = issubclass(self.agent, PPOAgent)
-        factored = is_ppo_v2 or (is_ppo and self.config.factored_action)
+        factored = (is_ppo_v2 or is_ppo) and self.config.factored_action
         env = make_env(bot_type="none", discrete_action=not factored, control_car="blue")
         try:
             obs_dim = env.observation_space.shape[0]
             if is_ppo_v2:
-                net = SeparateActorCritic(obs_dim, list(self.config.action_dims), self.config.hidden_size)
+                net = SeparateActorCritic(obs_dim, list(self.config.policy_action_dims), self.config.hidden_size)
             elif is_ppo:
                 action_dim = [int(n) for n in env.action_space.nvec] if factored else env.action_space.n
                 net = ActorCritic(obs_dim, action_dim, self.config.hidden_size)
@@ -357,6 +360,9 @@ class Curriculum:
         if first and self.model_path is None and isinstance(cfg, DQNConfig):
             # DQN drops to epsilon_finetune when given a checkpoint; the init weights are untrained
             cfg = replace(cfg, epsilon_finetune=cfg.epsilon_init)
+        if stage == "self" and isinstance(cfg, PPOv2Config):
+            # Fixed budget: the evaluation plateau is too noisy to end a round against strong opponents
+            cfg = replace(cfg, min_train_steps=self.self_play_steps, max_train_steps=self.self_play_steps)
         self._opponent_action_repeat = cfg.action_repeat
         agent = self.agent(cfg)
 
@@ -468,6 +474,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--league", nargs="+", default=(), help="Frozen .pt checkpoints and/or folders mixed into self-play"
     )
+    parser.add_argument(
+        "--self_play_steps",
+        type=int,
+        default=CurriculumConfig.ppo_v2_self_play_steps,
+        help="Env steps per self-play round (ppo_v2 only)",
+    )
     args = parser.parse_args()
 
     agent_cls = {"ppo": PPOAgent, "ppo_v2": PPOv2Agent, "dqn": DuelingDDQNAgent}[args.agent]
@@ -482,4 +494,5 @@ if __name__ == "__main__":
         model_path=args.model_path,
         start_stage=args.start_stage or ("self" if args.model_path is not None else "none"),
         league=args.league,
+        self_play_steps=args.self_play_steps,
     ).learn()

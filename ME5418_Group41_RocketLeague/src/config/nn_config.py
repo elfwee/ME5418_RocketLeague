@@ -84,7 +84,11 @@ class PPOConfig(AgentConfig):
 
 @dataclass(frozen=True)
 class PPOv2Config(AgentConfig):
-    # Architecture (164,366 trainable parameters: separate actor & critic MLPs, factored heads)
+    # Architecture: separate actor & critic MLPs (not parameter-matched to DDQN). Flat by default: one
+    # softmax over all 36 (direction, jump, boost) combinations, like the DQN. A flat-36 PPO policy relies
+    # on direction x jump x boost dependencies (0.37 nats total correlation, >0.1 in 74% of states), which
+    # independent factored heads cannot represent (they explore e.g. dodges in random directions).
+    factored_action: bool = False  # True: independent [9, 2, 2] heads (old v2 checkpoints load either way)
     action_dims: tuple[int, int, int] = (9, 2, 2)
 
     # Optimization & Returns
@@ -114,14 +118,21 @@ class PPOv2Config(AgentConfig):
     # Every `eval_interval_steps` the greedy policy plays `eval_episodes_per_opponent` fixed-seed games
     # against each evaluation opponent; the best score (win rate - loss rate) is saved as the best model,
     # and training stops after `eval_patience` evaluations without a new best (once `min_train_steps`).
-    eval_interval_steps: int = 200_000  # 0 disables evaluation (best model then = best training return)
-    eval_episodes_per_opponent: int = 20
-    eval_patience: int = 8  # 0: never stop on a plateau
+    # 20 games per opponent gave a +-0.2 standard error per opponent, so the plateau stop fired on noise.
+    # Curriculum self-play rounds use a fixed budget instead (`CurriculumConfig.ppo_v2_self_play_steps`).
+    eval_interval_steps: int = 500_000  # 0 disables evaluation (best model then = best training return)
+    eval_episodes_per_opponent: int = 50
+    eval_patience: int = 4  # 0: never stop on a plateau
     min_train_steps: int = 1_000_000
     max_train_steps: int | None = None
 
     # Checkpointing
     hyperparameter_set: str = "ppo_v2"
+
+    @property
+    def policy_action_dims(self) -> tuple[int, ...]:
+        """Policy head sizes: `(36,)` for the flat head, `action_dims` when factored."""
+        return self.action_dims if self.factored_action else (math.prod(self.action_dims),)
 
     @property
     def rollout_steps(self) -> int:

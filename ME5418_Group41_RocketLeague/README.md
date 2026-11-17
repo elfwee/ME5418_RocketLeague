@@ -84,12 +84,12 @@ python -m src --train --ppo --episodes 2000
 
 Trains one agent through three stages, each starting from the previous stage's best model: no opponent, then the heuristic bot, then self-play rounds against a frozen copy of the last best model (refreshed every round). A stage ends when the 100-episode mean reward has not improved for `--patience` episodes. Each stage / round gets its own run folder (`runs/<ts>_<name>_s1_none/`, ...), and the final model is copied to `runs/<ts>_<name>_curriculum/model_<name>.pt`.
 
-`--ppo_v2` stages instead evaluate the greedy policy every 200k steps against the stage's opponents (empty arena / heuristic bot / heuristic bot + league + earlier self-play models), keep the best-scoring model, and end after 8 evaluations without improvement (at least 1M steps per stage; see `PPOv2Config`). `--league` adds frozen checkpoints (files or folders, e.g. Dueling DDQN models) to the self-play opponents (35% of episodes) and, for PPO v2, to its evaluation opponents.
+`--ppo_v2` stages instead evaluate the greedy policy every 500k steps (50 fixed-seed games per opponent) against the stage's opponents (empty arena / heuristic bot / heuristic bot + league + earlier self-play models) and keep the best-scoring model. Stages 1-2 end after 4 evaluations without improvement (at least 1M steps); each self-play round runs a fixed `--self_play_steps` env steps (default 20M; see `PPOv2Config` / `CurriculumConfig`). `--league` adds frozen checkpoints (files or folders, e.g. Dueling DDQN models) to the self-play opponents (35% of episodes) and, for PPO v2, to its evaluation opponents.
 
 ```bash
 python -m src --curriculum --ppo [--patience 1000] [--self_play_rounds 5] [--max_stage_episodes N]
 python -m src --curriculum --dueling_ddqn   # also --double_dqn / --dqn
-python -m src --curriculum --ppo_v2 [--num_envs N] [--league eval_model/all_models_v1]
+python -m src --curriculum --ppo_v2 [--num_envs N] [--league eval_model/all_models_v1] [--self_play_steps 20000000]
 ```
 
 #### Evaluate a Trained Learning Agent

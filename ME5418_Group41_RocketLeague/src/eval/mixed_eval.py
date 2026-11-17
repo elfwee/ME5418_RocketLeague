@@ -35,7 +35,7 @@ def _normalize_policy_name(name: str) -> str:
 def _default_spec(policy_type: str, num_states: int) -> PolicySpec:
     """The architecture `policy_type` trains with, used when its checkpoint does not exist."""
     if policy_type == "ppo_v2":
-        return PolicySpec(PPO_V2, num_states, PPOv2Config.hidden_size, list(PPOv2Config.action_dims))
+        return PolicySpec(PPO_V2, num_states, PPOv2Config.hidden_size, list(PPOv2Config().policy_action_dims))
     if policy_type == "ppo":
         action_dim = list(PPOConfig.action_dims) if PPOConfig.factored_action else NUM_DISCRETE_ACTIONS
         return PolicySpec(PPO, num_states, PPOConfig.hidden_size, action_dim)

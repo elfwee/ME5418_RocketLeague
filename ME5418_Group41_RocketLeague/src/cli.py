@@ -246,6 +246,12 @@ def curriculum_parser() -> argparse.ArgumentParser:
             f"self-play with probability {CurriculumConfig.league_prob}; PPO v2 also evaluates against them"
         ),
     )
+    parser.add_argument(
+        "--self_play_steps",
+        type=int,
+        default=None,
+        help=f"env steps per self-play round (only for --ppo_v2; default: {CurriculumConfig.ppo_v2_self_play_steps:,})",
+    )
     return parser
 
 
@@ -437,7 +443,7 @@ CURRICULUM_HELP = f"""Please specify a learning agent for the curriculum:
   {PROG} --curriculum --double_dqn   [--model_path PATH] # Double DQN
   {PROG} --curriculum --dqn          [--model_path PATH] # Vanilla DQN
   {PROG} --curriculum --ppo          [--model_path PATH] # PPO
-  {PROG} --curriculum --ppo_v2       [--model_path PATH] [--num_envs N] [--league DIR_OR_PT ...] # PPO v2 (stages end on evaluation)"""
+  {PROG} --curriculum --ppo_v2       [--model_path PATH] [--num_envs N] [--league DIR_OR_PT ...] [--self_play_steps N] # PPO v2"""
 
 
 def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
@@ -452,6 +458,8 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
             parser.error("--num_envs must be at least 1")
     if name == "ppo_v2" and args.patience is not None:
         parser.error("--patience does not apply to --ppo_v2 (its stages end on evaluation: PPOv2Config.eval_patience)")
+    if args.self_play_steps is not None and (name != "ppo_v2" or args.self_play_steps < 1):
+        parser.error("--self_play_steps needs --ppo_v2 and a positive number of steps")
     from dataclasses import replace
 
     from src.config.nn_config import DQNConfig, PPOConfig, PPOv2Config
@@ -488,6 +496,7 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
         model_path=args.model_path,
         start_stage=start_stage,
         league=league,
+        **({"self_play_steps": args.self_play_steps} if args.self_play_steps is not None else {}),
     ).learn()
 
 

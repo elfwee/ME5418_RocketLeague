@@ -6,7 +6,8 @@ Differs from `src/learning_agents/ppo_agent.py` in five ways:
    policy and value MLPs (no shared trunk parameters; 164,366 trainable parameters for width 256,
    NOT parameter-matched to Dueling DDQN's 150,949 parameters). With a shared trunk the critic's
    gradient alone moved the policy past the KL stop, so most of each trust region went to critic noise.
-2. Action space: factored `MultiDiscrete([9, 2, 2])` heads (`pi_heads.0/1/2`).
+2. Action space: one flat `Discrete(36)` softmax by default (`pi_heads.0`, like the DQN), or factored
+   `MultiDiscrete([9, 2, 2])` heads (`pi_heads.0/1/2`) with `factored_action=True`.
 3. Parallel rollouts: collects `rollout_steps` across `num_envs` vectorized environments (default: one
    per logical CPU minus two) in either `"subproc"` (one worker process per env, each with its own random
    streams) or `"sync"` mode via `step_with_autoreset`, and updates on large batches (~8,192 samples
@@ -14,7 +15,7 @@ Differs from `src/learning_agents/ppo_agent.py` in five ways:
    `rollout_threads` torch threads while the workers step and `update_threads` during the update.
 4. Evaluation-based model selection: every `eval_interval_steps` the greedy policy plays fixed-seed
    games against each evaluation opponent (no opponent, the heuristic bot, or frozen checkpoints),
-   in parallel on the env workers. Each evaluated model is saved to `checkpoints/`; the best score
+   split into small (opponent, seed range) tasks that run in parallel on the env workers. Each evaluated model is saved to `checkpoints/`; the best score
    (win rate - loss rate) is saved as `model_<name>.pt`. Results go to `eval_<name>.csv` and
    `eval_<name>_opponents.csv`.
 5. Training length in env steps: training stops after `eval_patience` evaluations without a new best
@@ -23,6 +24,7 @@ Differs from `src/learning_agents/ppo_agent.py` in five ways:
 
 import contextlib
 import io
+import math
 import multiprocessing as mp
 import os
 import random
@@ -56,6 +58,8 @@ EVAL_SEED_BASE = 10_000
 EVAL_NO_OPPONENT = "none"  # evaluation opponent: empty arena
 EVAL_HEURISTIC = "heuristic"  # evaluation opponent: the scripted HeuristicBot
 
+# (opponent, first episode index, number of episodes): one evaluation task
+EvalTask = tuple[str, int, int]
 # (opponent, wins, losses, draws, summed return, summed decision steps)
 EvalResult = tuple[str, int, int, int, float, int]
 
@@ -91,10 +95,12 @@ def _seed_process_rngs(seed: int | None):
     torch.manual_seed(seed)
 
 
-def _make_eval_env(opponent: str, random_spawn: bool, max_episode_steps: int | None, action_repeat: int):
+def _make_eval_env(
+    opponent: str, discrete_action: bool, random_spawn: bool, max_episode_steps: int | None, action_repeat: int
+):
     """Env with a fixed Orange opponent: `EVAL_NO_OPPONENT`, `EVAL_HEURISTIC`, or a checkpoint path (greedy)."""
     common = dict(
-        discrete_action=False,
+        discrete_action=discrete_action,
         control_car="blue",
         random_spawn=random_spawn,
         max_episode_steps=max_episode_steps,
@@ -114,25 +120,25 @@ def _make_eval_env(opponent: str, random_spawn: bool, max_episode_steps: int | N
 
 def evaluate_policy(
     state_dict: dict,
-    opponents: Sequence[str],
-    episodes: int,
+    tasks: Sequence[EvalTask],
     random_spawn: bool,
     max_episode_steps: int | None,
     action_repeat: int,
 ) -> list[EvalResult]:
-    """Greedy games of a `SeparateActorCritic` against each opponent on the fixed seeds
-    `EVAL_SEED_BASE + i`, so every evaluation (and every opponent) sees the same spawns."""
+    """Greedy games of a `SeparateActorCritic`, one result per (opponent, first episode, count) task.
+    Episode `i` always uses seed `EVAL_SEED_BASE + i`, so every evaluation (and every opponent) sees the
+    same spawns."""
     spec = infer_spec(state_dict)
     net = SeparateActorCritic(spec.state_dim, spec.action_dim, spec.hidden_dim)
     net.load_state_dict(state_dict)
     net.eval()
     results = []
-    for opponent in opponents:
-        env = _make_eval_env(opponent, random_spawn, max_episode_steps, action_repeat)
+    for opponent, first_episode, episodes in tasks:
+        env = _make_eval_env(opponent, not net.is_factored, random_spawn, max_episode_steps, action_repeat)
         try:
             wins = losses = draws = steps = 0
             total_return = 0.0
-            for ep_idx in range(episodes):
+            for ep_idx in range(first_episode, first_episode + episodes):
                 obs, _ = env.reset(seed=EVAL_SEED_BASE + ep_idx)
                 terminated = truncated = goal = False
                 while not (terminated or truncated):
@@ -161,6 +167,7 @@ def _worker_loop(
     action_repeat: int,
     env_kwargs: dict | None = None,
     worker_seed: int | None = None,
+    discrete_action: bool = True,
 ):
     """Subprocess env worker: ignores SIGINT so parent cleans up workers cleanly."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -168,7 +175,7 @@ def _worker_loop(
     _seed_process_rngs(worker_seed)
     env = make_env(
         bot_type=bot_type,
-        discrete_action=False,
+        discrete_action=discrete_action,
         control_car="blue",
         render=False,
         save_gif=False,
@@ -202,12 +209,17 @@ class _SyncEnvPool:
     """In-process vectorized wrapper over a list of `num_envs` environments."""
 
     def __init__(
-        self, cfg: PPOv2Config, random_spawn: bool, max_episode_steps: int | None, env_kwargs: dict | None = None
+        self,
+        cfg: PPOv2Config,
+        random_spawn: bool,
+        max_episode_steps: int | None,
+        env_kwargs: dict | None = None,
+        discrete_action: bool = True,
     ):
         self.envs = [
             make_env(
                 bot_type=cfg.bot_type,
-                discrete_action=False,
+                discrete_action=discrete_action,
                 control_car="blue",
                 render=False,
                 save_gif=False,
@@ -231,9 +243,9 @@ class _SyncEnvPool:
     def step(self, actions: list[list[int]]) -> list[tuple[np.ndarray, float, bool, bool, bool, np.ndarray | None]]:
         return [step_with_autoreset(env, act) for env, act in zip(self.envs, actions, strict=True)]
 
-    def evaluate(self, state_dict: dict, opponents: Sequence[str], *eval_args) -> list[EvalResult]:
+    def evaluate(self, state_dict: dict, tasks: Sequence[EvalTask], *eval_args) -> list[EvalResult]:
         """`evaluate_policy` in this process."""
-        return evaluate_policy(state_dict, opponents, *eval_args)
+        return evaluate_policy(state_dict, tasks, *eval_args)
 
     def close(self):
         for env in self.envs:
@@ -245,7 +257,12 @@ class _SubprocEnvPool:
     """Multiprocessing vectorized wrapper: one daemon process per environment."""
 
     def __init__(
-        self, cfg: PPOv2Config, random_spawn: bool, max_episode_steps: int | None, env_kwargs: dict | None = None
+        self,
+        cfg: PPOv2Config,
+        random_spawn: bool,
+        max_episode_steps: int | None,
+        env_kwargs: dict | None = None,
+        discrete_action: bool = True,
     ):
         self._closed = False
         self._parent_conns: list[Connection] = []
@@ -265,6 +282,7 @@ class _SubprocEnvPool:
                     cfg.action_repeat,
                     env_kwargs,
                     None if cfg.seed is None else cfg.seed + 1 + idx,
+                    discrete_action,
                 ),
                 daemon=True,
             )
@@ -284,14 +302,13 @@ class _SubprocEnvPool:
             conn.send(("step", act))
         return [conn.recv() for conn in self._parent_conns]
 
-    def evaluate(self, state_dict: dict, opponents: Sequence[str], *eval_args) -> list[EvalResult]:
-        """`evaluate_policy` with the opponents spread over the (otherwise idle) env workers."""
+    def evaluate(self, state_dict: dict, tasks: Sequence[EvalTask], *eval_args) -> list[EvalResult]:
+        """`evaluate_policy` with the tasks spread over the (otherwise idle) env workers."""
         n = len(self._parent_conns)
-        jobs = [(conn, list(opponents[i::n])) for i, conn in enumerate(self._parent_conns) if opponents[i::n]]
+        jobs = [(conn, list(tasks[i::n])) for i, conn in enumerate(self._parent_conns) if tasks[i::n]]
         for conn, chunk in jobs:
             conn.send(("eval", (state_dict, chunk, *eval_args)))
-        by_opponent = {result[0]: result for conn, _ in jobs for result in conn.recv()}
-        return [by_opponent[opponent] for opponent in opponents]
+        return [result for conn, _ in jobs for result in conn.recv()]
 
     def close(self):
         if self._closed:
@@ -319,13 +336,24 @@ class _SubprocEnvPool:
 
 
 def _make_env_pool(
-    cfg: PPOv2Config, random_spawn: bool, max_episode_steps: int | None, env_kwargs: dict | None = None
+    cfg: PPOv2Config,
+    random_spawn: bool,
+    max_episode_steps: int | None,
+    env_kwargs: dict | None = None,
+    discrete_action: bool = True,
 ):
     if cfg.env_workers not in ("subproc", "sync"):
         raise ValueError(f"Invalid env_workers: '{cfg.env_workers}'. Must be 'subproc' or 'sync'.")
-    if cfg.num_envs == 1 or cfg.env_workers == "sync":
-        return _SyncEnvPool(cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
-    return _SubprocEnvPool(cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
+    pool_cls = _SyncEnvPool if cfg.num_envs == 1 or cfg.env_workers == "sync" else _SubprocEnvPool
+    return pool_cls(cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs, discrete_action=discrete_action)
+
+
+def _eval_tasks(opponents: Sequence[str], episodes: int, num_workers: int) -> list[EvalTask]:
+    """Split `episodes` games per opponent into about `num_workers` similar-sized (opponent, start, count) tasks."""
+    chunk = max(1, math.ceil(len(opponents) * episodes / max(num_workers, 1)))
+    return [
+        (opponent, start, min(chunk, episodes - start)) for opponent in opponents for start in range(0, episodes, chunk)
+    ]
 
 
 def _opponent_label(opponent: str) -> str:
@@ -341,7 +369,7 @@ class PPOv2Agent:
         self.cfg = config or PPOv2Config()
         self.optimizer: torch.optim.Optimizer | None = None
         self.model: SeparateActorCritic | None = None
-        self.current_entropy = float(sum(np.log(d) for d in self.cfg.action_dims))
+        self.current_entropy = float(sum(np.log(d) for d in self.cfg.policy_action_dims))
         self.current_v_loss = 0.0
 
     @property
@@ -435,7 +463,12 @@ class PPOv2Agent:
         score (win rate - loss rate over all games, in [-1, 1])."""
         start = time.perf_counter()
         state_dict = {k: v.detach().cpu() for k, v in self.model.state_dict().items()}
-        results = pool.evaluate(state_dict, opponents, *eval_args)
+        episodes = self.cfg.eval_episodes_per_opponent
+        totals = {opponent: [opponent, 0, 0, 0, 0.0, 0] for opponent in opponents}
+        for opponent, *counts in pool.evaluate(state_dict, _eval_tasks(opponents, episodes, self.cfg.num_envs), *eval_args):
+            for i, count in enumerate(counts, start=1):
+                totals[opponent][i] += count
+        results = [tuple(totals[opponent]) for opponent in opponents]
 
         wins, losses, draws = (sum(r[i] for r in results) for i in (1, 2, 3))
         games = max(wins + losses + draws, 1)
@@ -465,7 +498,7 @@ class PPOv2Agent:
         print(
             f"[PPO v2 Eval @ step {step_count}] Score={score:+.3f} (best {max(score, best_score):+.3f}) | "
             f"Goal={100 * wins / games:.1f}% Concede={100 * losses / games:.1f}% Timeout={100 * draws / games:.1f}% | "
-            f"{len(opponents)} opponent(s) x {eval_args[0]} games | hardest: {hardest} | "
+            f"{len(opponents)} opponent(s) x {episodes} games | hardest: {hardest} | "
             f"{time.perf_counter() - start:.1f}s"
         )
         return score
@@ -494,7 +527,7 @@ class PPOv2Agent:
         `stop_fn(episode_return) -> bool` can end training early from outside.
         """
         state_dict = load_state_dict(str(model_path), device) if model_path is not None else None
-        spec_action_dims = list(self.cfg.action_dims)
+        spec_action_dims = list(self.cfg.policy_action_dims)
         hidden_dim = self.cfg.hidden_size
         if state_dict is not None:
             spec = infer_spec(state_dict)
@@ -506,9 +539,12 @@ class PPOv2Agent:
             eval_opponents = [EVAL_HEURISTIC if self.cfg.bot_type == "heuristic_bot" else EVAL_NO_OPPONENT]
         eval_opponents = list(eval_opponents)
         eval_enabled = bool(eval_opponents) and self.cfg.eval_interval_steps > 0 and self.cfg.eval_episodes_per_opponent > 0
-        eval_args = (self.cfg.eval_episodes_per_opponent, random_spawn, max_episode_steps, self.cfg.action_repeat)
+        eval_args = (random_spawn, max_episode_steps, self.cfg.action_repeat)
+        factored = len(spec_action_dims) > 1  # a checkpoint's head layout wins over `factored_action`
 
-        pool = _make_env_pool(self.cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs)
+        pool = _make_env_pool(
+            self.cfg, random_spawn, max_episode_steps, env_kwargs=env_kwargs, discrete_action=not factored
+        )
         previous_threads = torch.get_num_threads()
         torch.set_num_threads(self.cfg.rollout_threads)
         try:
@@ -596,7 +632,8 @@ class PPOv2Agent:
                 return None
 
             obs_buf = torch.zeros((T, n_envs, obs_dim), dtype=torch.float32, device=device)
-            act_buf = torch.zeros((T, n_envs, len(spec_action_dims)), dtype=torch.long, device=device)
+            act_shape = (T, n_envs, len(spec_action_dims)) if factored else (T, n_envs)
+            act_buf = torch.zeros(act_shape, dtype=torch.long, device=device)
             logp_buf = torch.zeros((T, n_envs), dtype=torch.float32, device=device)
             val_buf = torch.zeros((T, n_envs), dtype=torch.float32, device=device)
             rew_buf = torch.zeros((T, n_envs), dtype=torch.float32, device=device)
@@ -715,7 +752,7 @@ class PPOv2Agent:
                     torch.set_num_threads(self.cfg.update_threads)
                     _, ent, v_loss, _ = self.optimize(
                         obs_buf[s_slice].reshape(-1, obs_dim),
-                        act_buf[s_slice].reshape(-1, len(spec_action_dims)),
+                        act_buf[s_slice].reshape(-1, len(spec_action_dims)) if factored else act_buf[s_slice].reshape(-1),
                         logp_buf[s_slice].reshape(-1),
                         ret.reshape(-1),
                         adv.reshape(-1),
@@ -763,7 +800,7 @@ class PPOv2Agent:
         ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.cfg.hyperparameter_set))
         state_dict = load_state_dict(ckpt_file, device)
 
-        action_dims = list(self.cfg.action_dims)
+        action_dims = list(self.cfg.policy_action_dims)
         hidden_dim = self.cfg.hidden_size
         if state_dict is not None:
             spec = infer_spec(state_dict)
@@ -773,7 +810,7 @@ class PPOv2Agent:
 
         env = make_env(
             bot_type=self.cfg.bot_type,
-            discrete_action=False,
+            discrete_action=len(action_dims) == 1,
             control_car=control_car,
             render=render,
             save_gif=save_gif,
@@ -793,7 +830,7 @@ class PPOv2Agent:
                 gif_path = Path(ckpt_file).parent / f"eval_{self.cfg.hyperparameter_set}.gif"
             policy_net.eval()
 
-            def select(state: torch.Tensor) -> list[int]:
+            def select(state: torch.Tensor) -> int | list[int]:
                 return greedy_action(policy_net, state)
 
             return run_eval_episodes(
