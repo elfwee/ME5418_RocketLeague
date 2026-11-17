@@ -15,7 +15,7 @@ USAGE = f"""Usage:
   {PROG} --play [--blue|--orange|--bot-vs-bot] [--no-orange]  # Play interactively (default: control Blue car)
   {PROG} --play --headless                     # Run headless physics benchmark
   {PROG} --head_to_head [--headless] [--random_spawn] [--seed N] [--max_goals N] [--max_seconds S] [--blue PATH|none] [--orange PATH|none]  # Continuous agent vs agent
-  {PROG} --round_robin [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
+  {PROG} --round_robin [--continuous | --rounds N] [--models_dir DIR] [--out_dir DIR] [--matches N] [--max_goals N] [--max_seconds S] [--seed N] [--workers N]  # Headless round-robin across models + heuristic bot
   {PROG} --best_checkpoint RUN_DIR [--threshold N] [--max_seconds S] [--max_goals N] [--random_spawn] [--seed N]  # Pick the strongest model in a training run
   {PROG} --demo --gym                          # Demo Gymnasium environment
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
@@ -153,6 +153,8 @@ def round_robin_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_goals", type=int, default=1, help="goals to end each match (default: 1; 0 disables)")
     parser.add_argument("--max_seconds", type=float, default=60.0, help="sim time cap per match in seconds (default: 60)")
     parser.add_argument("--seed", type=int, default=50, help="base seed for repeatable random spawns (default: 50)")
+    parser.add_argument("--rounds", type=int, default=1, help="number of round-robin passes to run (0 runs continuously until stopped; default: 1)")
+    parser.add_argument("--continuous", action="store_true", help="run unlimited round-robin passes with advancing seeds until Ctrl+C (same as --rounds 0)")
     parser.add_argument("--no_random_spawn", action="store_true", help="use fixed kickoff spawns instead of random spawns")
     parser.add_argument("--no_heuristic", action="store_true", help="exclude HeuristicBot from the tournament")
     parser.add_argument("--no_mirrors", action="store_true", help="skip Bot-vs-Bot mirror pairings")
@@ -312,6 +314,8 @@ def run_round_robin(args: argparse.Namespace):
         include_heuristic=not args.no_heuristic,
         include_mirrors=not args.no_mirrors,
         workers=args.workers,
+        rounds=args.rounds,
+        continuous=args.continuous,
     )
 
 

@@ -204,12 +204,17 @@ python -m src --demo --ppo
 Run a headless side-swapped round-robin tournament across all `.pt` checkpoints placed in a folder (default: `eval_model/`) together with `HeuristicBot`, using the continuous simulation engine (`Simulation` + `PolicyController` / `HeuristicController`):
 
 ```bash
-# Default: evaluate all checkpoints in eval_model/ + HeuristicBot
+# Default: single-round evaluation of all checkpoints in eval_model/ + HeuristicBot
 # (100 matches per directed Blue-vs-Orange pairing, 1-goal / 60s cap, seed 50, random spawns)
 python -m src --round_robin
 
-# Custom folder, output directory, match budget, seed and worker count
+# Continuous mode: run unlimited rounds with advancing non-overlapping seeds until Ctrl+C
+# (Round 1 uses seeds 50..149, Round 2 uses 150..249, etc.; updates standings & 95% CIs live)
+python -m src --round_robin --continuous
+
+# Custom finite multi-round run (or pass --rounds 0 for continuous)
 python -m src --round_robin \
+  --rounds 5 \
   --models_dir eval_model \
   --out_dir eval_model/eval_report \
   --matches 100 \
@@ -225,10 +230,12 @@ python -m src --round_robin \
 | :--- | :--- | :--- |
 | `--models_dir DIR` | `eval_model` | Folder containing curated `.pt` checkpoints (architecture auto-inferred). |
 | `--out_dir DIR` | `eval_model/eval_report` | Output folder for CSVs, raw logs, and Markdown summary report. |
-| `--matches N` | `100` | Matches played per directed `(Blue, Orange)` pairing. |
+| `--matches N` | `100` | Matches played per directed `(Blue, Orange)` pairing per round. |
+| `--rounds N` | `1` | Number of round-robin passes (`0` runs continuously until stopped). |
+| `--continuous` | `False` | Run unlimited rounds with advancing seeds until `Ctrl+C` (same as `--rounds 0`). |
 | `--max_goals N` | `1` | Goals required to end a match (`0` disables goal cap). |
 | `--max_seconds S` | `60.0` | Simulation time limit per match in seconds (`0-0` timeout = Draw). |
-| `--seed N` | `50` | Base seed for repeatable random spawns (match `i` uses `seed + i`). |
+| `--seed N` | `50` | Base seed (`round r` uses `[seed + (r-1)*matches, ..., seed + r*matches - 1]`). |
 | `--no_random_spawn` | `False` | Use fixed kickoff spawns instead of random spawns. |
 | `--no_heuristic` | `False` | Exclude `HeuristicBot` from the tournament. |
 | `--no_mirrors` | `False` | Skip `Bot vs Bot` mirror pairings. |
@@ -236,13 +243,14 @@ python -m src --round_robin \
 
 ### Generated Artifacts (`--out_dir`)
 
-- `overall_standings.csv`: Ranked overall standings (non-mirror and all-match win rate, goal differential, and Blue/Orange splits).
-- `pairings_summary.csv`: Per-pairing statistics for all directed `(Blue, Orange)` matchups.
+- `overall_standings.csv`: Ranked standings with `rank`, `best_rank`, `best_rank_seed` (first round starting seed reaching `best_rank`), `raw_win_rate_pct`, cross-round `mean_win_rate_pct`, `std_error_pct`, `95% CI` (Student-$t$ across `>= 2` rounds, Wilson score on Round 1), goal differential, and Blue/Orange splits.
+- `round_samples.csv`: Per-round bot win-rate samples and seed blocks appended after each completed round.
+- `pairings_summary.csv`: Cumulative per-pairing statistics for all directed `(Blue, Orange)` matchups.
 - `matrix_score_b_o_d.csv`: $N \times N$ directed matrix (`BlueWins-OrangeWins-Draws`).
-- `matrix_combined_200_matches.csv`: $N \times N$ side-swapped combined matrix (`RowWins-ColWins-Draws`).
+- `matrix_combined_matches.csv`: $N \times N$ side-swapped combined matrix (`RowWins-ColWins-Draws`).
 - `matrix_blue_win_rate_pct.csv` & `matrix_blue_goal_diff.csv`: Blue win-rate and goal-differential matrices.
-- `raw_matches.csv` & `raw_matches.log`: Per-match logs (`pairing_id`, `seed`, `winner`, goals, `sim_seconds`, `steps`, `last_touch`).
-- `eval_report.md`: Markdown summary containing the standings and head-to-head matrices.
+- `raw_matches.csv` & `raw_matches.log`: Per-match logs across rounds (`round`, `pairing_id`, `seed`, `winner`, goals, `sim_seconds`, `steps`, `last_touch`).
+- `eval_report.md`: Live-updated Markdown summary containing Mean ± SE, 95% CIs, statistical leader note, round progression, and head-to-head matrices.
 
 ---
 
