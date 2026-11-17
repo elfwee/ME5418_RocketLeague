@@ -4,26 +4,28 @@ Curriculum learning: train one policy through a sequence of increasingly hard op
 Stages:
     1. "none"      - no opponent; learn to drive to the ball and score.
     2. "heuristic" - against the scripted HeuristicBot.
-    3. "self"      - self-play against a frozen copy of the last best model. Run as
-                     `self_play_rounds` rounds; after each round the opponent is refreshed to the
-                     newest best model.
+    3. "self"      - adversarial self-play against a mixed pool of frozen self checkpoints
+                     (latest + past checkpoints) and the HeuristicBot, with stochastic
+                     opponent actions to prevent cycling/overfitting.
 
-Each stage (and each self-play round) is one ordinary training run of `PPOAgent` or
-`DuelingDDQNAgent`, started from the previous stage's best weights, and stopped once the
-100-episode rolling mean return has not improved for `patience` episodes.
+Each stage (and each self-play round) is one ordinary training run of `PPOAgent`, `PPOv2Agent`,
+or `DuelingDDQNAgent`, started from the previous stage's best weights (or a supplied `--model_path`),
+and stopped once the 100-episode rolling mean return has not improved for `patience` episodes.
 
 The agents are steered through their config (`bot_type`, `env_id`, `hyperparameter_set`), and the
-opponent / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv` registered
-under its own gym id.
+opponent pool / plateau stop is provided by `CurriculumEnv`, a subclass of `RocketLeagueEnv`
+registered under its own gym id (for `PPOv2Agent`, plateau detection runs in the parent loop across
+all parallel workers while each worker loads `CurriculumEnv`).
 
 Usage:
-    python -m src --curriculum --ppo|--dueling_ddqn|--double_dqn|--dqn [--patience N] [--self_play_rounds N]
-    python -m src.curriculum_learning.curriculum_learning --agent ppo
-    python -m src.curriculum_learning.curriculum_learning --agent dqn --patience 500 --self_play_rounds 3
+    python -m src --curriculum --ppo|--ppo_v2|--dueling_ddqn|--double_dqn|--dqn [--model_path PATH] [--start_stage self]
+    python -m src.curriculum_learning.curriculum_learning --agent ppo --model_path PATH --start_stage self
 """
 
 import argparse
+import random
 import shutil
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,23 +35,32 @@ import torch
 
 from src.config.curriculum_learning import CurriculumConfig
 from src.config.gym_config import GymConfig
-from src.config.nn_config import DQNConfig, PPOConfig
+from src.config.nn_config import DQNConfig, PPOConfig, PPOv2Config
 from src.gym_env.rocket_league_env import RocketLeagueEnv
 from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
 from src.learning_agents.env_factory import make_env
 from src.learning_agents.ppo_agent import PPOAgent
+from src.learning_agents.ppo_v2_agent import PPOv2Agent
 from src.learning_agents.run_dirs import latest_model_path, make_run_dir
 from src.neural_nets.ppo_torch import ActorCritic
+from src.neural_nets.ppo_v2_torch import SeparateActorCritic
 from src.sim.control.policy import PolicyController
 
 CURRICULUM_ENV_ID = CurriculumConfig.env_id
+if CURRICULUM_ENV_ID not in gym.envs.registry:
+    gym.register(
+        id=CURRICULUM_ENV_ID,
+        entry_point="src.curriculum_learning.curriculum_learning:CurriculumEnv",
+        max_episode_steps=GymConfig.episode_max_steps,
+    )
 
 
 class CurriculumEnv(RocketLeagueEnv):
     """`RocketLeagueEnv` with two curriculum hooks.
 
-    - `opponent_path`: the orange car is driven by a frozen policy loaded from this checkpoint
-      (`PolicyController`, mirrored so a blue-trained model can play orange) instead of the heuristic bot.
+    - `opponent_path` / `opponent_pool`: during self-play, each episode samples Orange's controller
+      from a mixed pool of the HeuristicBot and frozen self-play checkpoints (`PolicyController`,
+      mirrored so a blue-trained model can play orange, optionally with stochastic sampling).
     - `on_episode_end(episode_return) -> bool`: called with each finished episode's return. When it
       returns True the env marks itself closed (`isopen = False`), which ends the agent's training
       loop through its existing "window closed" path (dashboard is still saved, run returns normally).
@@ -63,23 +74,65 @@ class CurriculumEnv(RocketLeagueEnv):
         *args,
         on_episode_end=None,
         opponent_path: str | Path | None = None,
+        opponent_pool: Sequence[str | Path] | None = None,
         opponent_action_repeat: int = PPOConfig.action_repeat,
+        stochastic_opponent: bool = CurriculumConfig.stochastic_opponent,
+        latest_self_prob: float = CurriculumConfig.latest_self_prob,
+        past_self_prob: float = CurriculumConfig.past_self_prob,
+        heuristic_prob: float = CurriculumConfig.heuristic_prob,
         **kwargs,
     ):
         self.on_episode_end = on_episode_end
         self._episode_return = 0.0
         self._episode_steps = 0
+        self._latest_self_prob = latest_self_prob
+        self._past_self_prob = past_self_prob
+        self._heuristic_prob = heuristic_prob
+        self._heuristic_opponent = None
+        self._policy_opponents: list[PolicyController] = []
         super().__init__(*args, **kwargs)
 
-        if opponent_path is not None:
+        raw_pool = list(opponent_pool) if opponent_pool else ([opponent_path] if opponent_path is not None else [])
+        # Keep unique checkpoint paths in chronological order with latest at the end
+        unique_paths: list[Path] = []
+        for p in raw_pool:
+            path = Path(p)
+            if path in unique_paths:
+                unique_paths.remove(path)
+            unique_paths.append(path)
+
+        if unique_paths:
             if self.orange_control is None:
                 raise ValueError("Self-play needs an orange car: create the env with bot_type='heuristic_bot'.")
-            self.orange_control = PolicyController(
-                "orange",
-                self.sim,
-                opponent_path,
-                action_repeat=opponent_action_repeat,
-            )
+            self._heuristic_opponent = self.orange_control
+            self._policy_opponents = [
+                PolicyController(
+                    "orange",
+                    self.sim,
+                    p,
+                    action_repeat=opponent_action_repeat,
+                    stochastic=stochastic_opponent,
+                )
+                for p in unique_paths
+            ]
+            self._sample_opponent()
+
+    def _sample_opponent(self) -> None:
+        """Select Orange's opponent for the upcoming episode from the mixed pool."""
+        if not self._policy_opponents:
+            return
+        if self._heuristic_opponent is not None and random.random() < self._heuristic_prob:
+            self.orange_control = self._heuristic_opponent
+        elif len(self._policy_opponents) == 1:
+            self.orange_control = self._policy_opponents[0]
+        else:
+            self_total = max(self._latest_self_prob + self._past_self_prob, 1e-8)
+            latest_weight = self._latest_self_prob / self_total
+            if random.random() < latest_weight:
+                self.orange_control = self._policy_opponents[-1]
+            else:
+                self.orange_control = random.choice(self._policy_opponents[:-1])
+        self.orange_control.reset()
 
     def step(self, action, action_orange=None):
         result = super().step(action, action_orange)
@@ -93,6 +146,7 @@ class CurriculumEnv(RocketLeagueEnv):
         self._episode_return = 0.0
         self._episode_steps = 0
 
+        self._sample_opponent()
         obs, info = super().reset(seed=seed, options=options)
         if finished and self.on_episode_end is not None and self.on_episode_end(episode_return):
             self.isopen = False
@@ -102,38 +156,54 @@ class CurriculumEnv(RocketLeagueEnv):
 class Curriculum:
     MIN_EPISODES = CurriculumConfig.min_episodes  # warm-up before a stage can set a best / plateau
     BOT_TYPES = dict(CurriculumConfig.stages)  # stage -> env bot_type
-    CONFIGS = {PPOAgent: PPOConfig, DuelingDDQNAgent: DQNConfig}
+    CONFIGS = {PPOAgent: PPOConfig, PPOv2Agent: PPOv2Config, DuelingDDQNAgent: DQNConfig}
 
     def __init__(
         self,
         agent,
-        patience: int = CurriculumConfig.patience,
+        patience: int | None = None,
         self_play_rounds: int = CurriculumConfig.self_play_rounds,
         max_stage_episodes: int | None = CurriculumConfig.max_stage_episodes,
         model_name: str | None = None,
-        config: PPOConfig | DQNConfig | None = None,
+        config: PPOConfig | PPOv2Config | DQNConfig | None = None,
+        model_path: str | Path | None = None,
+        start_stage: str = "none",
+        stochastic_opponent: bool = CurriculumConfig.stochastic_opponent,
     ) -> None:
-        self.stages = [stage for stage, _ in CurriculumConfig.stages]
-        self.patience = patience  # number of episodes to train for after last best model
-        self.agent = agent  # either DuelingDDQNAgent or PPOAgent (the class)
+        all_stages = [stage for stage, _ in CurriculumConfig.stages]
+        if start_stage not in all_stages:
+            raise ValueError(f"Invalid start_stage '{start_stage}'. Must be one of {all_stages}.")
+        self.stages = all_stages[all_stages.index(start_stage) :]
+        self.agent = agent  # PPOAgent, PPOv2Agent or DuelingDDQNAgent (the class)
+        is_ppo_v2 = issubclass(self.agent, PPOv2Agent)
+        default_patience = CurriculumConfig.ppo_v2_patience if is_ppo_v2 else CurriculumConfig.patience
+        self.patience = default_patience if patience is None else patience
         self.config = config if config is not None else self.CONFIGS[agent]()  # e.g. a DQN ablation variant
         self.self_play_rounds = self_play_rounds
         self.max_stage_episodes = max_stage_episodes
         self.model_name = model_name or self.config.hyperparameter_set
+        self.model_path = Path(model_path) if model_path is not None else None
+        self.start_stage = start_stage
+        self.stochastic_opponent = stochastic_opponent
         self.highest_reward = [float("-inf"), 0]  # [highest_reward, episode]
 
         self.run_path: Path | None = None
         self.weights_path: Path | None = None
+        self._opponent_pool: list[Path] = []
 
         # Per-stage state read by the env factory / episode callback
         self._stage_rewards: list[float] = []
         self._opponent_path: Path | None = None
+        self._stage_opponent_pool: list[Path] = []
         self._opponent_action_repeat = self.config.action_repeat
 
         gym.envs.registry.pop(CURRICULUM_ENV_ID, None)
+        entry_point = (
+            "src.curriculum_learning.curriculum_learning:CurriculumEnv" if is_ppo_v2 else self._make_env
+        )
         gym.register(
             id=CURRICULUM_ENV_ID,
-            entry_point=self._make_env,
+            entry_point=entry_point,
             max_episode_steps=GymConfig.episode_max_steps,
         )
 
@@ -146,7 +216,9 @@ class Curriculum:
         return CurriculumEnv(
             on_episode_end=self._on_episode_end,
             opponent_path=self._opponent_path,
+            opponent_pool=self._stage_opponent_pool,
             opponent_action_repeat=self._opponent_action_repeat,
+            stochastic_opponent=self.stochastic_opponent,
             **kwargs,
         )
 
@@ -171,17 +243,28 @@ class Curriculum:
         """
             1. self.run_path = runs/YYYYMMDD_hhmm_<model_name>_curriculum
             2. mkdir self.run_path
-            3. initialise weights in the structure using the same weight initialiser as the agents
+            3. copy `--model_path` if supplied, else initialise fresh weights
             4. save .pt file in directory
         """
         self.run_path = make_run_dir(f"{self.model_name}_curriculum")
+        self.weights_path = self.run_path / f"model_{self.model_name}_init.pt"
 
+        if self.model_path is not None:
+            if not self.model_path.is_file():
+                raise FileNotFoundError(f"Input model checkpoint not found: {self.model_path}")
+            shutil.copyfile(self.model_path, self.weights_path)
+            print(f"[Curriculum] Loaded starting weights from {self.model_path} -> {self.weights_path}")
+            return
+
+        is_ppo_v2 = issubclass(self.agent, PPOv2Agent)
         is_ppo = issubclass(self.agent, PPOAgent)
-        factored = is_ppo and self.config.factored_action
+        factored = is_ppo_v2 or (is_ppo and self.config.factored_action)
         env = make_env(bot_type="none", discrete_action=not factored, control_car="blue")
         try:
             obs_dim = env.observation_space.shape[0]
-            if is_ppo:
+            if is_ppo_v2:
+                net = SeparateActorCritic(obs_dim, list(self.config.action_dims), self.config.hidden_size)
+            elif is_ppo:
                 action_dim = [int(n) for n in env.action_space.nvec] if factored else env.action_space.n
                 net = ActorCritic(obs_dim, action_dim, self.config.hidden_size)
             else:
@@ -189,7 +272,6 @@ class Curriculum:
         finally:
             env.close()
 
-        self.weights_path = self.run_path / f"model_{self.model_name}_init.pt"
         torch.save(net.state_dict(), self.weights_path)
         print(f"[Curriculum] Saved initial weights to: {self.weights_path}")
 
@@ -205,11 +287,19 @@ class Curriculum:
             return False
         return episode - self.highest_reward[1] > self.patience
 
-    def _train_stage(self, stage: str, label: str, opponent_path: Path | None = None, first: bool = False):
+    def _train_stage(
+        self,
+        stage: str,
+        label: str,
+        opponent_path: Path | None = None,
+        opponent_pool: list[Path] | None = None,
+        first: bool = False,
+    ):
         """One training run of the agent for `stage`, starting from `self.weights_path`."""
         self.highest_reward = [float("-inf"), 0]
         self._stage_rewards = []
         self._opponent_path = opponent_path
+        self._stage_opponent_pool = list(opponent_pool) if opponent_pool is not None else []
 
         cfg = replace(
             self.config,
@@ -217,15 +307,37 @@ class Curriculum:
             bot_type=self.BOT_TYPES[stage],
             env_id=CURRICULUM_ENV_ID,
         )
-        if first and isinstance(cfg, DQNConfig):
+        if first and self.model_path is None and isinstance(cfg, DQNConfig):
             # DQN drops to epsilon_finetune when given a checkpoint; the init weights are untrained
             cfg = replace(cfg, epsilon_finetune=cfg.epsilon_init)
         self._opponent_action_repeat = cfg.action_repeat
         agent = self.agent(cfg)
 
-        opponent = f" vs {opponent_path}" if opponent_path is not None else ""
-        print(f"\n[Curriculum] ===== Stage '{label}'{opponent} | start weights: {self.weights_path} =====")
-        summary = agent.train(num_episodes=self.max_stage_episodes, model_path=self.weights_path)
+        pool_desc = ""
+        if self._stage_opponent_pool:
+            names = ", ".join(p.name for p in self._stage_opponent_pool)
+            pool_desc = f" vs pool=[{names}] + heuristic (stochastic={self.stochastic_opponent})"
+        elif opponent_path is not None:
+            pool_desc = f" vs {opponent_path}"
+        print(f"\n[Curriculum] ===== Stage '{label}'{pool_desc} | start weights: {self.weights_path} =====")
+        if isinstance(agent, PPOv2Agent):
+            env_kwargs = {}
+            if self._stage_opponent_pool or opponent_path is not None:
+                env_kwargs = {
+                    "opponent_path": str(opponent_path) if opponent_path is not None else None,
+                    "opponent_pool": [str(p) for p in self._stage_opponent_pool],
+                    "opponent_action_repeat": cfg.action_repeat,
+                    "stochastic_opponent": self.stochastic_opponent,
+                }
+            summary = agent.train(
+                num_episodes=self.max_stage_episodes,
+                model_path=self.weights_path,
+                stop_fn=self._on_episode_end,
+                env_kwargs=env_kwargs or None,
+                eval_env_id=GymConfig.gym_id,
+            )
+        else:
+            summary = agent.train(num_episodes=self.max_stage_episodes, model_path=self.weights_path)
 
         # Each stage has its own hyperparameter_set, so its latest run folder is the one just trained
         model_file = latest_model_path(cfg.hyperparameter_set)
@@ -245,13 +357,22 @@ class Curriculum:
 
     def learn(self) -> Path:
         self.init_weights()
-        for i, stage in enumerate(self.stages, start=1):
+        stage_numbers = {stage: idx for idx, (stage, _) in enumerate(CurriculumConfig.stages, start=1)}
+        for stage in self.stages:
+            i = stage_numbers[stage]
             if stage != "self":
-                self._train_stage(stage, f"s{i}_{stage}", first=(i == 1))
+                self._train_stage(stage, f"s{i}_{stage}", first=(stage == self.stages[0]))
             else:
                 for round_idx in range(1, self.self_play_rounds + 1):
-                    last_best_model = self.weights_path
-                    self._train_stage(stage, f"s{i}_self_r{round_idx}", opponent_path=last_best_model)
+                    if self.weights_path not in self._opponent_pool:
+                        self._opponent_pool.append(self.weights_path)
+                    self._train_stage(
+                        stage,
+                        f"s{i}_self_r{round_idx}",
+                        opponent_path=self.weights_path,
+                        opponent_pool=list(self._opponent_pool),
+                        first=(stage == self.stages[0] and round_idx == 1),
+                    )
 
         final_path = self.run_path / f"model_{self.model_name}.pt"
         shutil.copyfile(self.weights_path, final_path)
@@ -261,15 +382,18 @@ class Curriculum:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Curriculum learning: none -> heuristic bot -> self-play")
-    parser.add_argument("--agent", choices=("ppo", "dqn"), default="ppo", help="Learning agent to train")
+    parser.add_argument("--agent", choices=("ppo", "ppo_v2", "dqn"), default="ppo", help="Learning agent to train")
     parser.add_argument(
-        "--patience", type=int, default=CurriculumConfig.patience, help="Episodes without a new best before a stage ends"
+        "--patience",
+        type=int,
+        default=None,
+        help=f"Episodes without a new best before a stage ends (default: {CurriculumConfig.patience}, or {CurriculumConfig.ppo_v2_patience} for ppo_v2)",
     )
     parser.add_argument(
         "--self_play_rounds",
         type=int,
         default=CurriculumConfig.self_play_rounds,
-        help="Self-play rounds (opponent refreshes)",
+        help="Self-play rounds (opponent pool updates after each)",
     )
     parser.add_argument(
         "--max_stage_episodes",
@@ -277,13 +401,28 @@ if __name__ == "__main__":
         default=CurriculumConfig.max_stage_episodes,
         help="Optional hard cap on episodes per stage / round",
     )
+    parser.add_argument("--num_envs", type=int, default=None, help="Parallel envs (only for --agent ppo_v2)")
     parser.add_argument("--model_name", type=str, default=None, help="Run / model name (default: agent's)")
+    parser.add_argument(
+        "--model_path", type=str, default=None, help="Checkpoint to start from (defaults --start_stage to 'self')"
+    )
+    parser.add_argument(
+        "--start_stage",
+        choices=("none", "heuristic", "self"),
+        default=None,
+        help="Stage to start from (default: 'self' when --model_path is given, else 'none')",
+    )
     args = parser.parse_args()
 
+    agent_cls = {"ppo": PPOAgent, "ppo_v2": PPOv2Agent, "dqn": DuelingDDQNAgent}[args.agent]
+    cfg = replace(PPOv2Config(), num_envs=args.num_envs) if (args.agent == "ppo_v2" and args.num_envs is not None) else None
     Curriculum(
-        PPOAgent if args.agent == "ppo" else DuelingDDQNAgent,
+        agent_cls,
         patience=args.patience,
         self_play_rounds=args.self_play_rounds,
         max_stage_episodes=args.max_stage_episodes,
         model_name=args.model_name,
+        config=cfg,
+        model_path=args.model_path,
+        start_stage=args.start_stage or ("self" if args.model_path is not None else "none"),
     ).learn()

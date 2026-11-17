@@ -3,13 +3,14 @@
 Training and evaluation of the two agents compared in the report. Both use the same episode loop,
 the same 150,949-parameter `LayerNorm` trunk width, `Adam(3e-4)`, `gamma = 0.99` and 4x action repeat
 (15 Hz decisions, jump released after the first frame). Hyperparameters are in
-[`src/config/nn_config.py`](../config/nn_config.py) (`DQNConfig`, `PPOConfig`); build a variant with
+[`src/config/nn_config.py`](../config/nn_config.py) (`DQNConfig`, `PPOConfig`, `PPOv2Config`); build a variant with
 `dataclasses.replace(DQNConfig(), batch_size=128)` and pass it as `config=`.
 
 | File | Description |
 | :--- | :--- |
 | [`dueling_ddqn_agent.py`](dueling_ddqn_agent.py) | `DuelingDDQNAgent`: epsilon-greedy acting, replay, Double-DQN target, Huber loss, target sync; `train()` / `evaluate()`; `train_dueling_ddqn` / `evaluate_dueling_ddqn` (also plain and Double DQN). |
 | [`ppo_agent.py`](ppo_agent.py) | `PPOAgent`: rollouts with `reward_scale = 0.05`, truncation-aware GAE (`compute_gae`), clipped surrogate (`entropy_coef = 0.001`, `target_kl = 0.02`); `train()` / `evaluate()`; `train_ppo` / `evaluate_ppo`. |
+| [`ppo_v2_agent.py`](ppo_v2_agent.py) | `PPOv2Agent`: separate actor/critic MLPs, factored `[9, 2, 2]` heads, parallel envs (`subproc`/`sync`), periodic greedy eval CSV; `train_ppo_v2` / `evaluate_ppo_v2` (not parameter-matched to DDQN). |
 | [`trainer.py`](trainer.py) | `run_training`: the shared episode loop. Agents plug in through `act`, `observe`, `progress` and `end_episode`. |
 | [`experience_replay.py`](experience_replay.py) | `ReplayMemory`: circular buffer with its own seeded sampler (`AgentConfig.seed`). |
 | [`rollout_buffer.py`](rollout_buffer.py) | `RolloutBuffer`: on-policy storage with next-value backfilling. |
