@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from src.neural_nets.ppo_torch import ActorCritic
+from src.neural_nets.ppo_v2_torch import SeparateActorCritic
 
 
 def greedy_action(net: nn.Module, obs: torch.Tensor) -> int | list[int]:
@@ -11,11 +12,11 @@ def greedy_action(net: nn.Module, obs: torch.Tensor) -> int | list[int]:
 
     - ``DQN``: ``argmax_a Q(s, a)`` as a flat index.
     - ``ActorCritic`` with a flat head: ``argmax`` of the logits as a flat index.
-    - ``ActorCritic`` with factored heads: ``[direction, jump, boost]``, one argmax per head.
+    - ``ActorCritic`` / ``SeparateActorCritic`` with factored heads: ``[direction, jump, boost]``.
     """
     with torch.no_grad():
         out = net(obs.unsqueeze(0))
-    if isinstance(net, ActorCritic):
+    if isinstance(net, (ActorCritic, SeparateActorCritic)):
         logits, _ = out
         if net.is_factored:
             return [int(l.squeeze(0).argmax().item()) for l in logits]

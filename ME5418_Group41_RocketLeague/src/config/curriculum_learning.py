@@ -19,8 +19,21 @@ class CurriculumConfig:
     )
     self_play_rounds: int = 2  # Self-play rounds; the opponent is refreshed to the newest best model after each
 
-    # Plateau detection (ends a stage / self-play round)
+    # Mixed self-play opponent pool, used by PPO v2 and whenever `--league` is given. Without either,
+    # D3QN / PPO self-play is unchanged: always the frozen copy of the last best model.
+    heuristic_prob: float = 0.15  # Episodes against the scripted heuristic bot (prevents forgetting)
+    # Episodes against a frozen league checkpoint (`--league`, e.g. Dueling DDQN models; always greedy)
+    league_prob: float = 0.35
+    # The remaining episodes face the agent's own frozen checkpoints, split latest : earlier
+    latest_self_prob: float = 0.70
+    past_self_prob: float = 0.15
+
+    # Plateau detection (ends a stage / self-play round). PPO v2 stages end on evaluation instead
+    # (`PPOv2Config.eval_patience`), so `patience` only applies to D3QN / PPO.
     patience: int = 3000  # Episodes without a new best rolling mean return before the stage ends
+    # PPO v2 self-play rounds run a fixed number of env steps (an evaluation-plateau stop fired on noise
+    # against strong opponents); the round still keeps its best-evaluated checkpoint.
+    ppo_v2_self_play_steps: int = 20_000_000
     reward_window: int = 100  # Episodes in the rolling mean return (matches the agents' best-model metric)
     min_episodes: int = 20  # Warm-up before a stage can set a best / plateau (matches TrainingLogger)
     max_stage_episodes: int | None = None  # Hard cap on episodes per stage / round (None: until plateau)

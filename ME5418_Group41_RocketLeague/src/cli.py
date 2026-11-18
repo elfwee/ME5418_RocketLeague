@@ -20,9 +20,9 @@ USAGE = f"""Usage:
   {PROG} --demo --gym                          # Demo Gymnasium environment
   {PROG} --demo --dqn|--double_dqn|--ddqn      # Test DQN neural network variants
   {PROG} --demo --ppo                          # Test PPO Actor-Critic network
-  {PROG} --train --dueling_ddqn|--double_dqn|--dqn|--ppo [--episodes N] [--model_path PATH]  # Train an agent
-  {PROG} --curriculum --dueling_ddqn|--double_dqn|--dqn|--ppo [--patience N] [--self_play_rounds N] [--max_stage_episodes N]  # Curriculum: none -> heuristic bot -> self-play
-  {PROG} --eval --dueling_ddqn|--double_dqn|--dqn|--ppo [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] [--gif] [--gif_path PATH]  # Evaluate agent
+  {PROG} --train --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--episodes N] [--model_path PATH]  # Train an agent
+  {PROG} --curriculum --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--league DIR_OR_PT ...] [--patience N] [--self_play_rounds N] [--max_stage_episodes N]  # Curriculum: none -> heuristic bot -> self-play
+  {PROG} --eval --dueling_ddqn|--double_dqn|--dqn|--ppo|--ppo_v2 [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] [--gif] [--gif_path PATH]  # Evaluate agent
   {PROG} --eval --mix [--dueling_ddqn --ppo] [--blue_model ... --orange_model ...] [--no_random_spawn]  # Mixed policy match
   {PROG} --plot [--runs ... | --dashboard ...] # Plot multi-run comparison or training dashboard
 
@@ -58,6 +58,7 @@ ALGORITHMS = {
     "double_dqn": Algorithm("Double DQN", "dqn", dueling=False, double=True),
     "dqn": Algorithm("Vanilla DQN", "dqn", dueling=False, double=False),
     "ppo": Algorithm("PPO", "ppo"),
+    "ppo_v2": Algorithm("PPO v2 (separate actor/critic, parallel envs)", "ppo_v2"),
 }
 
 
@@ -86,10 +87,12 @@ def _sub_parser(mode: str, description: str) -> argparse.ArgumentParser:
     return argparse.ArgumentParser(prog=f"{PROG} --{mode}", description=description, allow_abbrev=False)
 
 
-def _add_algorithm_flags(parser: argparse.ArgumentParser, help_suffix: str = ""):
-    """--dueling_ddqn (--ddqn) / --double_dqn / --dqn / --ppo, collected in command-line order."""
+def _add_algorithm_flags(parser: argparse.ArgumentParser, help_suffix: str = "", exclude: Sequence[str] = ()):
+    """--dueling_ddqn (--ddqn) / --double_dqn / --dqn / --ppo / --ppo_v2, collected in command-line order."""
     group = parser.add_argument_group("algorithm")
     for name, algo in ALGORITHMS.items():
+        if name in exclude:
+            continue
         flags = [f"--{name}", "--ddqn"] if name == "dueling_ddqn" else [f"--{name}"]
         group.add_argument(
             *flags, dest="algorithms", action="append_const", const=name, help=f"{algo.label}{help_suffix}"
@@ -181,7 +184,7 @@ def best_checkpoint_parser() -> argparse.ArgumentParser:
 def demo_parser() -> argparse.ArgumentParser:
     parser = _sub_parser("demo", MODES["demo"])
     parser.add_argument("--gym", dest="algorithms", action="append_const", const="gym", help="Gymnasium environment")
-    _add_algorithm_flags(parser, " network forward/backward pass")
+    _add_algorithm_flags(parser, " network forward/backward pass", exclude=("ppo_v2",))
     return parser
 
 
@@ -215,6 +218,16 @@ def curriculum_parser() -> argparse.ArgumentParser:
         type=int,
         default=CurriculumConfig.max_stage_episodes,
         help="hard cap on episodes per stage / round (default: until plateau)",
+    )
+    parser.add_argument(
+        "--league",
+        nargs="+",
+        default=(),
+        metavar="DIR_OR_PT",
+        help=(
+            "frozen checkpoints (.pt files and/or folders of them, e.g. other algorithms' models) mixed into "
+            f"self-play with probability {CurriculumConfig.league_prob}; PPO v2 also evaluates against them"
+        ),
     )
     parser.add_argument("--model_name", default=None, help="run / model name (default: the algorithm name)")
     return parser
@@ -363,7 +376,8 @@ TRAIN_HELP = f"""Please specify a learning agent to train:
   {PROG} --train --dueling_ddqn [--episodes N] # Train Dueling Double DQN agent [alias: --ddqn]
   {PROG} --train --double_dqn   [--episodes N] # Train Double DQN agent
   {PROG} --train --dqn          [--episodes N] # Train Vanilla DQN agent
-  {PROG} --train --ppo          [--episodes N] # Train PPO agent"""
+  {PROG} --train --ppo          [--episodes N] # Train PPO agent
+  {PROG} --train --ppo_v2       [--episodes N] # Train PPO v2 (separate nets, parallel envs)"""
 
 
 def run_train(args: argparse.Namespace, parser: argparse.ArgumentParser):
@@ -372,7 +386,11 @@ def run_train(args: argparse.Namespace, parser: argparse.ArgumentParser):
         print(TRAIN_HELP)
         return
     algo = ALGORITHMS[name]
-    if algo.family == "ppo":
+    if algo.family == "ppo_v2":
+        from src.learning_agents.ppo_v2_agent import train_ppo_v2
+
+        train_ppo_v2(num_episodes=args.episodes, model_path=args.model_path, hyperparameter_set=name)
+    elif algo.family == "ppo":
         from src.learning_agents.ppo_agent import train_ppo
 
         train_ppo(num_episodes=args.episodes, model_path=args.model_path, hyperparameter_set=name)
@@ -392,7 +410,8 @@ CURRICULUM_HELP = f"""Please specify a learning agent for the curriculum:
   {PROG} --curriculum --dueling_ddqn # Dueling Double DQN [alias: --ddqn]
   {PROG} --curriculum --double_dqn   # Double DQN
   {PROG} --curriculum --dqn          # Vanilla DQN
-  {PROG} --curriculum --ppo          # PPO"""
+  {PROG} --curriculum --ppo          # PPO
+  {PROG} --curriculum --ppo_v2       [--league DIR_OR_PT ...] # PPO v2"""
 
 
 def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
@@ -402,13 +421,20 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
         return
     from dataclasses import replace
 
-    from src.config.nn_config import DQNConfig, PPOConfig
-    from src.curriculum_learning.curriculum_learning import Curriculum
+    from src.config.nn_config import DQNConfig, PPOConfig, PPOv2Config
+    from src.curriculum_learning.curriculum_learning import Curriculum, resolve_league
     from src.learning_agents.dueling_ddqn_agent import DuelingDDQNAgent
     from src.learning_agents.ppo_agent import PPOAgent
+    from src.learning_agents.ppo_v2_agent import PPOv2Agent
 
+    try:
+        league = resolve_league(args.league)
+    except FileNotFoundError as err:
+        parser.error(str(err))
     algo = ALGORITHMS[name]
-    if algo.family == "ppo":
+    if algo.family == "ppo_v2":
+        agent, config = PPOv2Agent, replace(PPOv2Config(), hyperparameter_set=name)
+    elif algo.family == "ppo":
         agent, config = PPOAgent, replace(PPOConfig(), hyperparameter_set=name)
     else:
         agent = DuelingDDQNAgent
@@ -422,6 +448,7 @@ def run_curriculum(args: argparse.Namespace, parser: argparse.ArgumentParser):
         max_stage_episodes=args.max_stage_episodes,
         model_name=args.model_name,
         config=config,
+        league=league,
     ).learn()
 
 
@@ -430,7 +457,8 @@ EVAL_HELP = f"""Please specify a learning agent to evaluate:
   {PROG} --eval --double_dqn   [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Double DQN
   {PROG} --eval --dqn          [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate Vanilla DQN
   {PROG} --eval --ppo          [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate PPO
-  {PROG} --eval --mix [--dueling_ddqn --ppo | --ppo --dueling_ddqn] [--render] [--no_random_spawn] # Mixed policy vs policy"""
+  {PROG} --eval --ppo_v2       [--blue|--orange|--bot-vs-bot] [--render] [--no_random_spawn] # Evaluate PPO v2
+  {PROG} --eval --mix [--dueling_ddqn --ppo | --ppo_v2 --dueling_ddqn] [--render] [--no_random_spawn] # Mixed policy vs policy"""
 
 
 def run_eval(args: argparse.Namespace, parser: argparse.ArgumentParser):
@@ -452,7 +480,11 @@ def run_eval(args: argparse.Namespace, parser: argparse.ArgumentParser):
         control_car=args.side,
         random_spawn=not args.no_random_spawn,
     )
-    if algo.family == "ppo":
+    if algo.family == "ppo_v2":
+        from src.learning_agents.ppo_v2_agent import evaluate_ppo_v2
+
+        metrics = evaluate_ppo_v2(**common)
+    elif algo.family == "ppo":
         from src.learning_agents.ppo_agent import evaluate_ppo
 
         metrics = evaluate_ppo(**common)
@@ -467,13 +499,13 @@ def mix_policies(algorithms: list[str], orange_side: bool) -> tuple[str, str]:
     """(Blue, Orange) policy types for --eval --mix from the algorithm flags, in command-line order.
 
     With one flag, that policy plays Blue (Orange with --orange) against PPO, or against Dueling DDQN
-    when the flag is PPO. With none, Dueling DDQN plays PPO.
+    when the flag is PPO / PPO v2. With none, Dueling DDQN plays PPO.
     """
     if len(algorithms) >= 2:
         return algorithms[0], algorithms[1]
     if len(algorithms) == 1:
         chosen = algorithms[0]
-        other = "ppo" if chosen != "ppo" else "dueling_ddqn"
+        other = "dueling_ddqn" if chosen in ("ppo", "ppo_v2") else "ppo"
         return (other, chosen) if orange_side else (chosen, other)
     return ("ppo", "dueling_ddqn") if orange_side else ("dueling_ddqn", "ppo")
 
@@ -489,15 +521,17 @@ def mix_model_paths(
     if len(model_paths) >= 2:
         return blue_model or model_paths[0], orange_model or model_paths[1]
     if len(model_paths) == 1 and blue_model is None and orange_model is None:
-        from src.neural_nets.checkpoint import is_ppo_state_dict, load_state_dict
+        from src.neural_nets.checkpoint import infer_spec, load_state_dict
 
         single_path = model_paths[0]
         state_dict = load_state_dict(single_path)
         if state_dict is not None:
-            is_ppo_ckpt = is_ppo_state_dict(state_dict)
-            if is_ppo_ckpt and orange_policy == "ppo" and blue_policy != "ppo":
+            kind = infer_spec(state_dict).kind
+            if kind == "ppo_v2" and orange_policy == "ppo_v2" and blue_policy != "ppo_v2":
                 return None, single_path
-            if not is_ppo_ckpt and orange_policy != "ppo" and blue_policy == "ppo":
+            if kind == "ppo" and orange_policy == "ppo" and blue_policy != "ppo":
+                return None, single_path
+            if kind == "dqn" and orange_policy not in ("ppo", "ppo_v2") and blue_policy in ("ppo", "ppo_v2"):
                 return None, single_path
         return single_path, None
     return blue_model, orange_model

@@ -13,12 +13,12 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from src.config.nn_config import DQNConfig, PPOConfig
+from src.config.nn_config import DQNConfig, PPOConfig, PPOv2Config
 from src.gym_env.action_codec import NUM_DISCRETE_ACTIONS
 from src.learning_agents.env_factory import device, make_env
 from src.learning_agents.eval_loop import resolve_eval_episodes, run_eval_episodes
 from src.learning_agents.run_dirs import latest_model_path
-from src.neural_nets.checkpoint import DQN_KIND, PPO, PolicySpec, build_network, infer_spec, load_state_dict
+from src.neural_nets.checkpoint import DQN_KIND, PPO, PPO_V2, PolicySpec, build_network, infer_spec, load_state_dict
 from src.neural_nets.policy import greedy_action
 from src.paths import RUNS_DIR
 
@@ -27,13 +27,15 @@ def _normalize_policy_name(name: str) -> str:
     n = name.strip().lstrip("-").lower()
     if n in ("ddqn", "dueling_ddqn"):
         return "dueling_ddqn"
-    if n in ("double_dqn", "dqn", "ppo"):
+    if n in ("double_dqn", "dqn", "ppo", "ppo_v2"):
         return n
-    raise ValueError(f"Unsupported policy type '{name}'. Choose from: dueling_ddqn, double_dqn, dqn, ppo.")
+    raise ValueError(f"Unsupported policy type '{name}'. Choose from: dueling_ddqn, double_dqn, dqn, ppo, ppo_v2.")
 
 
 def _default_spec(policy_type: str, num_states: int) -> PolicySpec:
     """The architecture `policy_type` trains with, used when its checkpoint does not exist."""
+    if policy_type == "ppo_v2":
+        return PolicySpec(PPO_V2, num_states, PPOv2Config.hidden_size, list(PPOv2Config().policy_action_dims))
     if policy_type == "ppo":
         action_dim = list(PPOConfig.action_dims) if PPOConfig.factored_action else NUM_DISCRETE_ACTIONS
         return PolicySpec(PPO, num_states, PPOConfig.hidden_size, action_dim)
@@ -69,7 +71,8 @@ def _build_policy_selector(
     net, loaded = _load_net(policy_type, num_states, ckpt_file)
     net.eval()
 
-    tag = f"[Mix Eval ({team_label}: {'PPO' if policy_type == 'ppo' else policy_type})]"
+    label = "PPO v2" if policy_type == "ppo_v2" else ("PPO" if policy_type == "ppo" else policy_type)
+    tag = f"[Mix Eval ({team_label}: {label})]"
     if loaded:
         print(f"{tag} Loaded trained weights from: {ckpt_file}")
     else:
@@ -95,7 +98,7 @@ def evaluate_mixed_policies(
 ) -> dict[str, float]:
     """Evaluate two potentially different policies head-to-head (Blue policy vs. mirrored Orange policy).
 
-    Supports any combination of ('dueling_ddqn', 'double_dqn', 'dqn', 'ppo') for Blue and Orange.
+    Supports any combination of ('dueling_ddqn', 'double_dqn', 'dqn', 'ppo', 'ppo_v2') for Blue and Orange.
     """
     blue_pol = _normalize_policy_name(blue_policy)
     orange_pol = _normalize_policy_name(orange_policy)

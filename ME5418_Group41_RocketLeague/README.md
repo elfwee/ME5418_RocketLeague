@@ -84,9 +84,12 @@ python -m src --train --ppo --episodes 2000
 
 Trains one agent through three stages, each starting from the previous stage's best model: no opponent, then the heuristic bot, then self-play rounds against a frozen copy of the last best model (refreshed every round). A stage ends when the 100-episode mean reward has not improved for `--patience` episodes. Each stage / round gets its own run folder (`runs/<ts>_<name>_s1_none/`, ...), and the final model is copied to `runs/<ts>_<name>_curriculum/model_<name>.pt`.
 
+`--ppo_v2` (a post-analysis PPO variant with separate actor and critic networks and parallel envs, not parameter-matched to Dueling DDQN) stages instead evaluate the greedy policy every 500k steps (50 fixed-seed games per opponent) against the stage's opponents (empty arena / heuristic bot / heuristic bot + league + earlier self-play models) and keep the best-scoring model. Stages 1-2 end after 4 evaluations without improvement (at least 1M steps); each self-play round runs a fixed 20M env steps (see `PPOv2Config` / `CurriculumConfig`). `--league` adds frozen checkpoints (files or folders, e.g. Dueling DDQN models) to the self-play opponents (35% of episodes) and, for PPO v2, to its evaluation opponents. With PPO v2 or `--league`, self-play episodes sample their opponent from the heuristic bot (15%), the league (35%) and the agent's own frozen self-play models; without either, D3QN / PPO self-play is unchanged.
+
 ```bash
 python -m src --curriculum --ppo [--patience 1000] [--self_play_rounds 5] [--max_stage_episodes N]
 python -m src --curriculum --dueling_ddqn   # also --double_dqn / --dqn
+python -m src --curriculum --ppo_v2 [--league eval_model]
 ```
 
 #### Evaluate a Trained Learning Agent
