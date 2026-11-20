@@ -308,11 +308,12 @@ class PPOAgent:
         save_gif: bool,
         random_spawn: bool,
         max_episode_steps: int | None,
+        bot_type: str | None = None,
     ):
         """The env (flat or factored actions to match the network) and an ActorCritic, loaded if `state_dict`."""
         factored, hidden_dim, action_dim = self._resolve_architecture(state_dict)
         env = make_env(
-            bot_type=self.cfg.bot_type,
+            bot_type=self.cfg.bot_type if bot_type is None else bot_type,
             discrete_action=not factored,
             control_car=control_car,
             render=render,
@@ -388,7 +389,9 @@ class PPOAgent:
         control_car = normalize_control_car(control_car)
         ckpt_file = str(model_path) if model_path is not None else str(latest_model_path(self.cfg.hyperparameter_set))
         state_dict = load_state_dict(ckpt_file, device)
-        env, policy_net, _ = self._build(state_dict, control_car, render, save_gif, random_spawn, max_episode_steps)
+        env, policy_net, _ = self._build(
+            state_dict, control_car, render, save_gif, random_spawn, max_episode_steps, bot_type=self.cfg.eval_bot_type
+        )
         try:
             if state_dict is not None:
                 print(f"[PPO Eval] Loaded trained model weights from: {ckpt_file}")

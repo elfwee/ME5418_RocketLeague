@@ -24,9 +24,36 @@ A high-fidelity 2D vertical-plane robotic simulation platform and deep reinforce
   - **Off-Policy Dueling DDQN Agent (`src/learning_agents/dueling_ddqn_agent.py`)**: Experience replay (`src/learning_agents/experience_replay.py`), Double-DQN target decoupling, Huber loss, and periodic target network synchronization.
   - **On-Policy PPO Agent (`src/learning_agents/ppo_agent.py`)**: Fixed-horizon rollout collection, Generalized Advantage Estimation ($\text{GAE}(\gamma, \lambda)$), and multi-epoch clipped surrogate minibatch updates.
 
-## 2. Architecture & Modular Documentation
+## 2. Repository Structure & Main Files
 
-Detailed technical specifications and mathematical formulations are organized modularly within each subsystem directory:
+```text
+ME5418_Group41_RocketLeague/
+├── environment.yml              # Exact Conda environment definition (me5418_projenv)
+├── requirements.txt             # Same pinned versions for a plain pip / venv install
+├── README.md                    # Setup, main files, verification commands, and disclosures
+├── assets/                      # Architecture diagrams and demo gameplay GIF
+├── trained_agent/               # Bundled pretrained checkpoints (6 Dueling DDQNs + 2 PPO v1s)
+├── runs_eval/                   # Archived curriculum metrics, checkpoints, and 62,500-match tournament CSVs
+└── src/
+    ├── __main__.py / main.py    # Package entrypoint: `python -m src --<mode> [options]`
+    ├── cli.py                   # CLI parser & mode router (--play, --eval, --train, --curriculum, --round_robin, ...)
+    ├── paths.py                 # Shared ROOT_DIR, runs/, trained_agent/, and runs_eval/ paths
+    ├── config/                  # Tuned simulator, reward, curriculum, NN, and agent hyperparameters
+    ├── sim/                     # Custom 240 Hz Pymunk physics engine, Pygame renderer, and HZISM HeuristicBot
+    ├── gym_env/                 # Gymnasium `rocketleague_v1` wrapper, reward shaping, and `Discrete(36)` action codec
+    ├── neural_nets/             # PyTorch networks (`DQN`, `ActorCritic`, `SeparateActorCritic`) & checkpoint loader
+    ├── learning_agents/         # Custom `DuelingDDQNAgent`, `PPOAgent`, `PPOv2Agent`, replay/rollout buffers & plotter
+    ├── curriculum_learning/     # Automated multi-stage `Curriculum` manager & `CurriculumEnv`
+    └── eval/                    # Side-swapped `--round_robin`, `--best_checkpoint`, `--head_to_head`, and `--eval --mix`
+```
+
+**Bundled Pretrained Models (`trained_agent/`):**
+- **Default Dueling DDQN (`--eval --dueling_ddqn`):** `trained_agent/b_model_dueling_ddqn_s3_self_r1_ep021500.pt` (Rank #1, `80.48%` non-mirror win rate in the 62,500-match round robin), plus teammate `s3_self_r1` / `s3_self_r2` checkpoints (`j_model_dueling_ddqn_s3_self_r2.pt` Rank #2, `e_model_dueling_ddqn_s3_self_r1_ep006000.pt` Rank #3, etc.).
+- **Default PPO v1 (`--eval --ppo`):** `trained_agent/j_model_ppo_s3_self_r2.pt` (Rank #7 overall, `#1` PPO v1 at `66.31%`), plus `j_model_ppo_s3_self_r1.pt` (Rank #9, `63.25%`).
+
+### Modular Documentation
+
+Detailed technical specifications and mathematical formulations are organized within each subsystem directory:
 
 - 🤖 **[Learning Agents (`src/learning_agents/README.md`)](./src/learning_agents/README.md)**: Training (`--train`) and evaluation (`--eval`) of `DuelingDDQNAgent` (`dueling_ddqn_agent.py`) and `PPOAgent` (`ppo_agent.py`) through one shared training loop (`trainer.py`), plus policy-vs-policy matches, round-robin tournaments and best-checkpoint selection in `src/eval/`.
 - 🧠 **[Neural Networks (`src/neural_nets/README.md`)](./src/neural_nets/README.md)**: PyTorch `nn.Module` definitions (`dueling_ddqn_torch.py` and `ppo_torch.py`), checkpoint loading, and standalone forward/backward pass verification (`--demo`).
@@ -54,11 +81,61 @@ conda env create -f environment.yml
 conda activate me5418_projenv
 ```
 
-_(Alternatively, install the core dependencies via pip: `pip install torch gymnasium pygame pymunk numpy matplotlib`)_
+`environment.yml` pins the exact versions we tested (table below) and uses only the `conda-forge` channel, so it does not need Anaconda's `defaults` channel Terms of Service to be accepted. The first install downloads PyTorch (about 2–3 GB on Linux, where PyPI ships the CUDA build; everything runs on CPU).
 
-### Step 3: Train & Evaluate Learning Agents
+_(Alternatively, in any Python 3.11 virtual environment: `pip install -r requirements.txt`, which pins the same versions.)_
 
-Every mode lists its options with `--help` (e.g. `python -m src --eval --help`). All learning agent training and evaluation commands are executed from the project root (`ME5418_Group41_RocketLeague/`). Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261113_1655_ppo/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Evaluation without `--model_path` loads the checkpoint of the most recent run of that model.
+#### Core Python Libraries & Simulation Engine Versions
+
+No external simulator binaries (e.g., MuJoCo, Gazebo, Unity, or Rocket League client) are required—all rigid-body physics and rendering execute self-contained in Python via **Pymunk (Chipmunk2D)** and **Pygame**.
+
+| Dependency / Software | Role | Pinned Version (`environment.yml` / `requirements.txt`) |
+| :--- | :--- | :--- |
+| **Python** | Runtime interpreter | `3.11` (tested on `3.11.18`) |
+| **PyTorch (`torch`)** | Neural nets, autograd, Adam optimization | `2.15.0` |
+| **Gymnasium (`gymnasium`)** | RL environment API & `TimeLimit` / `check_env` | `1.4.0` |
+| **Pymunk (`pymunk`)** | External 2D physics simulation engine (Chipmunk2D) | `7.3.1` |
+| **Pygame (`pygame`)** | Interactive visualization, HUD & keyboard controls | `2.6.1` |
+| **NumPy (`numpy`)** | Observation arrays, statistics & rolling smoothing | `1.26.4` |
+| **Matplotlib (`matplotlib`)** | Training dashboards & learning curve comparisons | `3.11.2` |
+| **Pillow (`pillow`)** | Evaluation GIF export (`--gif`) | `13.0.0` |
+
+### Step 3: Quick Marker Verification & Usage
+
+Every command below executes from `ME5418_Group41_RocketLeague/` (`python -m src --<mode> --help` lists all options). On a clean checkout (when `runs/` has no new local runs yet), evaluation defaults automatically to the bundled **`#1` Dueling DDQN** (`trained_agent/b_model_dueling_ddqn_s3_self_r1_ep021500.pt`) and **`#7` PPO v1** (`trained_agent/j_model_ppo_s3_self_r2.pt`) playing against **`HeuristicBot`**:
+
+```bash
+# 1. Watch bundled champion Dueling DDQN / PPO v1 play against HeuristicBot (add --render for GUI window)
+python -m src --eval --dueling_ddqn --episodes 5 [--render]
+python -m src --eval --ppo          --episodes 5 [--render]
+
+# 2. Mixed policy showcase: Dueling DDQN (Blue) vs PPO v1 (Orange, mirrored)
+python -m src --eval --mix --dueling_ddqn --ppo --episodes 5 [--render]
+
+# 3. Continuous head-to-head match (defaults to bundled #1 Dueling DDQN vs itself, or pass any .pt / 'none' for HeuristicBot)
+python -m src --head_to_head [--headless] --max_goals 5 --max_seconds 120 --blue trained_agent/b_model_dueling_ddqn_s3_self_r1_ep021500.pt --orange trained_agent/j_model_ppo_s3_self_r2.pt
+
+# 4. Short training smoke-test (creates a timestamped run in runs/YYYYMMDD_hhmm_<model>/)
+python -m src --train --dueling_ddqn --episodes 5
+python -m src --train --ppo          --episodes 5
+
+# 5. Fast headless round-robin tournament across all 8 bundled checkpoints in trained_agent/ + HeuristicBot
+python -m src --round_robin --matches 5 --max_seconds 30
+
+# 6. Plot multi-run comparative learning curves (auto-discovers runs/ or archived runs_eval/)
+python -m src --plot
+
+# 7. Short curriculum smoke-test (3 episodes per stage, one self-play round)
+python -m src --curriculum --dueling_ddqn --max_stage_episodes 3 --self_play_rounds 1
+```
+
+On a CPU, commands 1–7 each finish in about a minute or less (seconds on a desktop). Good to know before running the longer commands below:
+- **Full training is long.** `--train` without `--episodes N` runs until you stop it with `Ctrl+C` (the best model so far stays saved in its run folder), and a full `--curriculum` without `--max_stage_episodes N` runs for many hours until every stage plateaus.
+- **Default round robin:** `python -m src --round_robin` plays 100 matches for each of the 81 pairings (8,100 matches) and takes a few minutes on a many-core desktop and longer on a laptop (it uses all CPU cores; `--matches 5` gives a quick version).
+- **Display needed:** `--render`, `--play` and `--head_to_head` without `--headless` open a Pygame window; `--play` and `--eval ... --orange` wait for keyboard input until the window is closed.
+- **Where files go:** new runs, comparison plots and tournament reports are written to `runs/`; `--plot --dashboard` saves next to the CSV it plots; `--gif` saves the GIF next to the evaluated checkpoint unless `--gif_path` is given.
+
+Each training run creates its own folder `runs/YYYYMMDD_hhmm_<model_name>/` (e.g. `runs/20261115_1038_ppo_heuristic/`) and saves its checkpoint (`model_<model_name>.pt`), training log, metrics CSV, and reward/loss plots there. The current model is also snapshotted every `checkpoint_interval` episodes (set in `src/config/nn_config.py`, default 500, `0` disables) to `checkpoints/model_<model_name>_ep<NNNNNN>.pt` inside the run folder; these can be passed to `--model_path` like any other checkpoint. Once `runs/` contains a newly trained run of that model, default evaluation uses the most recent checkpoint in `runs/` unless `--model_path trained_agent/<file>.pt` is passed explicitly.
 
 #### Train a Learning Agent
 
@@ -87,9 +164,9 @@ Trains one agent through three stages, each starting from the previous stage's b
 `--ppo_v2` (a post-analysis PPO variant with separate actor and critic networks and parallel envs, not parameter-matched to Dueling DDQN) stages instead evaluate the greedy policy every 500k steps (50 fixed-seed games per opponent) against the stage's opponents (empty arena / heuristic bot / heuristic bot + league + earlier self-play models) and keep the best-scoring model. Stages 1-2 end after 4 evaluations without improvement (at least 1M steps); each self-play round runs a fixed 20M env steps (see `PPOv2Config` / `CurriculumConfig`). `--league` adds frozen checkpoints (files or folders, e.g. Dueling DDQN models) to the self-play opponents (35% of episodes) and, for PPO v2, to its evaluation opponents. With PPO v2 or `--league`, self-play episodes sample their opponent from the heuristic bot (15%), the league (35%) and the agent's own frozen self-play models; without either, D3QN / PPO self-play is unchanged.
 
 ```bash
-python -m src --curriculum --ppo [--patience 1000] [--self_play_rounds 5] [--max_stage_episodes N]
+python -m src --curriculum --ppo [--patience 3000] [--self_play_rounds 2] [--max_stage_episodes N]
 python -m src --curriculum --dueling_ddqn   # also --double_dqn / --dqn
-python -m src --curriculum --ppo_v2 [--league eval_model]
+python -m src --curriculum --ppo_v2 [--league trained_agent]
 ```
 
 #### Evaluate a Trained Learning Agent
@@ -97,8 +174,9 @@ python -m src --curriculum --ppo_v2 [--league eval_model]
 Optional flags for `--eval`: `[--episodes N]`, `[--no_random_spawn]` (use fixed kickoff spawns for reproducible comparisons), `[--gif]` (record the first episode as a GIF next to the checkpoint), `[--gif_path out.gif]`.
 
 ```bash
-# 1. Blue = Policy, Orange = Heuristic Bot (default --blue mode)
+# Default: Blue = bundled #1 Dueling DDQN, Orange = Heuristic Bot
 python -m src --eval --dueling_ddqn [--render] [--model_path path_to_model.pt]
+# Default: Blue = bundled #7 PPO v1, Orange = Heuristic Bot
 python -m src --eval --ppo          [--render] [--model_path path_to_model.pt]
 
 # 2. Orange = Mirrored Policy, Blue = Human User (WASD/Arrows + Space + Shift)
@@ -119,11 +197,11 @@ python -m src --eval --mix --ppo --dueling_ddqn [--render] [--blue_model path_b.
 Run a continuous scoreboard match (goal kickoffs reset automatically; supports PPO, Dueling DDQN/DQN checkpoints via `--blue`/`--orange`, or `none`/`bot` for `HeuristicBot`).
 
 ```bash
-# Default: checkpoint of the most recent training run in runs/ (or specify checkpoints / 'none' for HeuristicBot)
+# Default: bundled #1 Dueling DDQN vs itself (or pass checkpoints / 'none' for HeuristicBot)
 python -m src --head_to_head [--blue PATH|none] [--orange PATH|none] [--random_spawn] [--seed N]
 
 # Headless match with score/time limits
-python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue runs/YYYYMMDD_hhmm_dueling_ddqn/model_dueling_ddqn.pt --orange none
+python -m src --head_to_head --headless --max_goals 5 --max_seconds 120 --blue trained_agent/b_model_dueling_ddqn_s3_self_r1_ep021500.pt --orange none
 ```
 
 #### Pick the Best Checkpoint in a Run (`--best_checkpoint`)
@@ -132,10 +210,10 @@ Find the strongest model in a training run folder. Every model (`model_*.pt` plu
 
 ```bash
 # Default: 300 s games, fixed kickoffs, challenger must win by more than 3 goals
-python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo
+python -m src --best_checkpoint runs_eval/20261116_0727_ppo_s3_self_r2
 
 # Shorter games with repeatable random kickoffs and a lower threshold
-python -m src --best_checkpoint runs/YYYYMMDD_hhmm_ppo --max_seconds 120 --random_spawn --seed 0 --threshold 1
+python -m src --best_checkpoint runs_eval/20261116_0727_ppo_s3_self_r2 --max_seconds 120 --random_spawn --seed 0 --threshold 1
 ```
 
 | Flag | Default | Description |
@@ -152,11 +230,11 @@ The best model's path is printed at the end, along with a summary of every chall
 #### Plot Learning Curves & Dashboards
 
 ```bash
-# Auto-discover metrics in runs/ (including per-run folders) and generate multi-algorithm comparative curves
+# Auto-discover metrics in runs/ (or fall back to archived runs_eval/) and generate multi-algorithm curves
 python -m src --plot
 
 # Generate a 4-panel dashboard for a specific agent run
-python -m src --plot --dashboard runs/YYYYMMDD_hhmm_ppo/metrics_ppo.csv
+python -m src --plot --dashboard runs_eval/20261115_1038_ppo_heuristic/metrics_ppo.csv
 ```
 
 ### Step 4: Interactive Play & Component Demos
@@ -204,10 +282,10 @@ python -m src --demo --ppo
 
 ## 4. Evaluate across models
 
-Run a headless side-swapped round-robin tournament across all `.pt` checkpoints placed in a folder (default: `eval_model/`) together with `HeuristicBot`, using the continuous simulation engine (`Simulation` + `PolicyController` / `HeuristicController`):
+Run a headless side-swapped round-robin tournament across all `.pt` checkpoints placed in a folder (default: `trained_agent/`) together with `HeuristicBot`, using the continuous simulation engine (`Simulation` + `PolicyController` / `HeuristicController`):
 
 ```bash
-# Default: single-round evaluation of all checkpoints in eval_model/ + HeuristicBot
+# Default: single-round evaluation of all checkpoints in trained_agent/ + HeuristicBot
 # (100 matches per directed Blue-vs-Orange pairing, 1-goal / 60s cap, seed 50, random spawns)
 python -m src --round_robin
 
@@ -218,8 +296,8 @@ python -m src --round_robin --continuous
 # Custom finite multi-round run (or pass --rounds 0 for continuous)
 python -m src --round_robin \
   --rounds 5 \
-  --models_dir eval_model \
-  --out_dir eval_model/eval_report \
+  --models_dir trained_agent \
+  --out_dir runs/round_robin_report \
   --matches 100 \
   --max_goals 1 \
   --max_seconds 60 \
@@ -231,8 +309,8 @@ python -m src --round_robin \
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| `--models_dir DIR` | `eval_model` | Folder containing curated `.pt` checkpoints (architecture auto-inferred). |
-| `--out_dir DIR` | `eval_model/eval_report` | Output folder for CSVs, raw logs, and Markdown summary report. |
+| `--models_dir DIR` | `trained_agent` | Folder containing curated `.pt` checkpoints (architecture auto-inferred). |
+| `--out_dir DIR` | `runs/round_robin_report` | Output folder for CSVs, raw logs, and Markdown summary report. |
 | `--matches N` | `100` | Matches played per directed `(Blue, Orange)` pairing per round. |
 | `--rounds N` | `1` | Number of round-robin passes (`0` runs continuously until stopped). |
 | `--continuous` | `False` | Run unlimited rounds with advancing seeds until `Ctrl+C` (same as `--rounds 0`). |
@@ -257,6 +335,10 @@ python -m src --round_robin \
 
 ---
 
-## AI Tool Declaration
+## Existing Code Disclosure & AI Tool Declaration
 
-We used Google Gemini and Claude Code to write and debug code. We are responsible for the content and quality of the submitted work.
+Over **50% of this codebase was implemented from scratch** by Team 41 (custom 240 Hz Pymunk vehicle/arena physics, HZISM `HeuristicBot`, observation reflection, `RocketLeagueEnv`, reward shaping, 4-stage `CurriculumEnv`, `--best_checkpoint`, `--round_robin`, `--head_to_head`, and training dashboards). Core RL starter patterns were adapted from:
+- **`johnnycode8/dqn_pytorch`**: Base replay/training structure extended with Dueling Double DQN, Huber `SmoothL1Loss`, gradient clipping, truncation-aware bootstrapping, and curriculum checkpoint resumption (`src/learning_agents/dueling_ddqn_agent.py`).
+- **`CleanRL` (`vwxyzjn/cleanrl`, `ppo.py`)**: Core GAE and clipped surrogate structure adapted for our matched-capacity and decoupled PyTorch actor-critic models, internal reward scaling (`0.05`), KL early stopping, parallel rollouts, and league evaluation (`src/learning_agents/ppo_agent.py`, `ppo_v2_agent.py`).
+
+We used Google Gemini, Anthropic Claude to assist with physics debugging, code refactoring, and diagnostics. We are responsible for the content and quality of the submitted work.

@@ -36,7 +36,7 @@ from src.learning_agents.dashboard import (
     rolling_mean,
     save_training_dashboard,
 )
-from src.paths import RUNS_DIR
+from src.paths import RUNS_DIR, RUNS_EVAL_DIR
 
 
 def run_label(path: Path, prefix: str) -> str:
@@ -208,14 +208,18 @@ def main(args_list: list[str] | None = None):
     # Multi-run comparison
     run_files = args.runs
     if not run_files:
-        # Search for all metrics CSVs in runs/ and its per-run folders
-        run_files = sorted(RUNS_DIR.glob("metrics_*.csv")) + sorted(RUNS_DIR.glob("*/metrics_*.csv"))
-        if not run_files:
-            # Fallback to .log files
-            run_files = sorted(RUNS_DIR.glob("run_*.log")) + sorted(RUNS_DIR.glob("*/run_*.log"))
+        # Search for all metrics CSVs in runs/ and its per-run folders, else fall back to archived runs_eval/
+        for base_dir in (RUNS_DIR, RUNS_EVAL_DIR):
+            if not base_dir.is_dir():
+                continue
+            run_files = sorted(base_dir.glob("metrics_*.csv")) + sorted(base_dir.glob("*/metrics_*.csv"))
+            if not run_files:
+                run_files = sorted(base_dir.glob("run_*.log")) + sorted(base_dir.glob("*/run_*.log"))
+            if run_files:
+                break
 
     if not run_files:
-        print("[Plotting] No metrics or log files found in runs/ directory.")
+        print("[Plotting] No metrics or log files found in runs/ or runs_eval/ directory.")
         return
 
     runs_data = {}

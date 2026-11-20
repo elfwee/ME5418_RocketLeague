@@ -827,7 +827,7 @@ class PPOv2Agent:
             hidden_dim = spec.hidden_dim
 
         env = make_env(
-            bot_type=self.cfg.bot_type,
+            bot_type=self.cfg.eval_bot_type,
             discrete_action=len(action_dims) == 1,
             control_car=control_car,
             render=render,

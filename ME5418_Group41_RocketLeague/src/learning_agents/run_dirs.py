@@ -8,9 +8,15 @@ from pathlib import Path
 
 import torch
 
-from src.paths import RUNS_DIR
+from src.paths import RUNS_DIR, TRAINED_AGENT_DIR
 
 RUN_DIR_TIME_FORMAT = "%Y%m%d_%H%M"
+
+# Default bundled checkpoints used by `--eval` / `--head_to_head` before any new training run exists in `runs/`
+PRETRAINED_MODELS = {
+    "dueling_ddqn": TRAINED_AGENT_DIR / "b_model_dueling_ddqn_s3_self_r1_ep021500.pt",
+    "ppo": TRAINED_AGENT_DIR / "j_model_ppo_s3_self_r2.pt",
+}
 
 
 def make_run_dir(model_name: str) -> Path:
@@ -69,10 +75,10 @@ class RunPaths:
 
 
 def latest_model_path(model_name: str) -> Path:
-    """Default checkpoint for `model_name`: the one in its most recent run folder.
+    """Default checkpoint for `model_name`: latest run in `runs/`, else bundled checkpoint in `trained_agent/`.
 
-    Falls back to the legacy flat `runs/model_<model_name>.pt` when no run folder holds a
-    checkpoint (the returned path may not exist; callers handle a missing file).
+    Checks per-run folders first (`runs/YYYYMMDD_hhmm_<model_name>/model_<model_name>.pt`), then a
+    legacy flat `runs/model_<model_name>.pt`, then `PRETRAINED_MODELS` in `trained_agent/`.
     """
     model_file = f"model_{model_name}.pt"
     run_dir_pattern = re.compile(rf"(\d{{8}}_\d{{4}})_{re.escape(model_name)}(?:_(\d+))?")
@@ -84,7 +90,13 @@ def latest_model_path(model_name: str) -> Path:
                 candidates.append((match.group(1), int(match.group(2) or 1), run_dir / model_file))
     if candidates:
         return max(candidates)[2]
-    return RUNS_DIR / model_file
+    legacy_flat = RUNS_DIR / model_file
+    if legacy_flat.is_file():
+        return legacy_flat
+    bundled = PRETRAINED_MODELS.get(model_name)
+    if bundled is not None and bundled.is_file():
+        return bundled
+    return legacy_flat
 
 
 def save_periodic_checkpoint(

@@ -127,7 +127,7 @@ def head_to_head_parser() -> argparse.ArgumentParser:
         "--blue",
         metavar="PATH|none",
         default=None,
-        help="Blue checkpoint, or 'none' for the heuristic bot (default: latest PPO, else Dueling DDQN run)",
+        help="Blue checkpoint, or 'none' for the heuristic bot (default: latest Dueling DDQN, else PPO run)",
     )
     parser.add_argument("--orange", metavar="PATH|none", default=None, help="Orange checkpoint (same default)")
     parser.add_argument("--headless", action="store_true", help="no window; run as fast as possible")
@@ -283,10 +283,10 @@ def run_play(args: argparse.Namespace):
 
 
 def default_head_to_head_model() -> str | None:
-    """Latest PPO checkpoint, else the latest Dueling DDQN one, else None (heuristic bot)."""
+    """Latest Dueling DDQN checkpoint, else the latest PPO one, else None (heuristic bot)."""
     from src.learning_agents.run_dirs import latest_model_path
 
-    for model_name in ("ppo", "dueling_ddqn"):
+    for model_name in ("dueling_ddqn", "ppo"):
         path = latest_model_path(model_name)
         if path.is_file():
             return str(path)

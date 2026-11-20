@@ -20,10 +20,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.paths import ROOT_DIR
+from src.paths import RUNS_DIR, TRAINED_AGENT_DIR
 
-DEFAULT_MODELS_DIR = ROOT_DIR / "eval_model"
-DEFAULT_OUT_DIR = DEFAULT_MODELS_DIR / "eval_report"
+DEFAULT_MODELS_DIR = TRAINED_AGENT_DIR
+DEFAULT_OUT_DIR = RUNS_DIR / "round_robin_report"
 
 _Z_95 = 1.959963984540054
 

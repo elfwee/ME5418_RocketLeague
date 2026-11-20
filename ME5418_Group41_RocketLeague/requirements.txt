@@ -1,0 +1,9 @@
+# Same exact versions as environment.yml, for a plain Python 3.11 virtual environment:
+#   pip install -r requirements.txt
+numpy==1.26.4
+matplotlib==3.11.2
+pillow==13.0.0
+torch==2.15.0
+gymnasium==1.4.0
+pygame==2.6.1
+pymunk==7.3.1

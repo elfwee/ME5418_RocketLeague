@@ -25,7 +25,8 @@ class AgentConfig:
     action_repeat: int = 4  # Simulation steps per agent decision
 
     # Environment & Checkpointing
-    bot_type: str = "none"  # "none" or "heuristic_bot"
+    bot_type: str = "none"  # "none" or "heuristic_bot" (default training opponent; curriculum overrides per stage)
+    eval_bot_type: str = "heuristic_bot"  # default evaluation opponent against a single policy
     env_id: str = GymConfig.gym_id  # Registered gym id the agent trains / evaluates on
     eval_episodes: int = 5
     runs_dir: str = "runs"

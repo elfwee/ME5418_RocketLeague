@@ -199,9 +199,17 @@ class DuelingDDQNAgent:
     # Training / evaluation
     # ----------------------------------------------------------------------------------------
 
-    def _make_env(self, control_car: str, render: bool, save_gif: bool, random_spawn: bool, max_episode_steps):
+    def _make_env(
+        self,
+        control_car: str,
+        render: bool,
+        save_gif: bool,
+        random_spawn: bool,
+        max_episode_steps,
+        bot_type: str | None = None,
+    ):
         return make_env(
-            bot_type=self.cfg.bot_type,
+            bot_type=self.cfg.bot_type if bot_type is None else bot_type,
             discrete_action=True,
             control_car=control_car,
             render=render,
@@ -278,7 +286,9 @@ class DuelingDDQNAgent:
         Defaults to the checkpoint of the most recent training run.
         """
         control_car = normalize_control_car(control_car)
-        env = self._make_env(control_car, render, save_gif, random_spawn, max_episode_steps)
+        env = self._make_env(
+            control_car, render, save_gif, random_spawn, max_episode_steps, bot_type=self.cfg.eval_bot_type
+        )
         try:
             policy_dqn = self._build_network(env.observation_space.shape[0], env.action_space.n)
             if model_path is None:
